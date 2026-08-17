@@ -1,0 +1,47 @@
+@model IReadOnlyList<DCT_SD.Models.Dtos.Roles.RoleDto>
+
+<div class="card p-0">
+    <div class="d-flex justify-content-between align-items-center p-4 border-bottom">
+        <h2 class="font-display fs-5 fw-semibold mb-0">Roles</h2>
+        <button type="button" class="btn btn-navy" data-modal-url="@Url.Action("Create")">Add Role</button>
+    </div>
+
+    <div class="table-responsive table-frame">
+        <table class="table table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th style="width: 4rem;">ID</th>
+                    <th>Role Name</th>
+                    <th>Description</th>
+                    <th style="width: 6rem;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Count == 0)
+                {
+                    <tr><td colspan="4" class="text-center text-muted py-4">No Roles Found.</td></tr>
+                }
+                else
+                {
+                    @foreach (var role in Model)
+                    {
+                        <tr>
+                            <td>@role.Id</td>
+                            <td>
+                                @role.Name
+                                @if (role.IsSystemDefined)
+                                {
+                                    <span class="badge badge-neutral ms-2">System</span>
+                                }
+                            </td>
+                            <td class="text-muted">@(role.Description ?? "—")</td>
+                            <td>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-modal-url="@Url.Action("Edit", new { id = role.Id })">Edit</button>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

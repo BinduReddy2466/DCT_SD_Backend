@@ -1,0 +1,195 @@
+@using System.Text.Json
+@using DCT_SD.Helpers
+@using DCT_SD.Models.ViewModels
+@model DCT_SD.Models.Dtos.ManualValidation.ManualValidationDetailDto
+@{
+    var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    var documentsJson = JsonSerializer.Serialize(Model.Documents, jsonOptions);
+    var registryOfficesJson = JsonSerializer.Serialize((IReadOnlyList<DCT_SD.Models.Dtos.RdConfig.RegistryOfficeDto>)ViewData["RegistryOffices"]!, jsonOptions);
+    var missing = new HashSet<string>(Model.MissingFields);
+    var remarksVm = new RemarksHistoryViewModel { RecordId = Model.Id, Remarks = (DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.ManualValidation.ManualValidationRemarkDto>)ViewData["Remarks"]! };
+
+    string MissingClass(string key) => missing.Contains(key) ? "missing-field" : "";
+}
+
+<div class="mb-3 d-flex align-items-center justify-content-between">
+    <a href="@Url.Action("Index")" class="d-inline-flex align-items-center gap-2 text-decoration-none">&lsaquo; Back to Manual Validation</a>
+    <status-badge status="@StatusDisplay.ManualValidationStatusToDisplay(Model.Status)"></status-badge>
+</div>
+
+<form id="mvDetailsForm">
+    @Html.AntiForgeryToken()
+    <input type="hidden" id="mvRecordId" value="@Model.Id" />
+
+    <div class="row g-3">
+        <div class="col-12 col-xl-3">
+            <div class="card p-4 h-100">
+                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Extracted Information</h6>
+
+                <div class="mb-3">
+                    <div class="field-label">Request ID</div>
+                    <div class="chip-mono mt-1 d-inline-block">@Model.RequestNumber</div>
+                </div>
+
+                <div class="mb-3 @MissingClass("rdCode")">
+                    <label class="field-label" for="mvRdCode">RD Code</label>
+                    <input type="text" class="form-control mt-1" id="mvRdCode" name="RdCode" value="@Model.RdCode" />
+                </div>
+                <div class="mb-3 @MissingClass("rdName")">
+                    <label class="field-label" for="mvRdName">RD Name</label>
+                    <input type="text" class="form-control mt-1 bg-body-secondary" id="mvRdName" readonly value="@Model.RdName" />
+                </div>
+                <div class="mb-3 @MissingClass("entry")">
+                    <label class="field-label" for="mvEntry">Entry Number</label>
+                    <input type="text" class="form-control mt-1" id="mvEntry" name="EntryNumbersCsv" value="@Model.EntryNumbersCsv" />
+                </div>
+                <div class="mb-3 @MissingClass("title")">
+                    <label class="field-label" for="mvTitle">Title Number</label>
+                    <input type="text" class="form-control mt-1" id="mvTitle" name="Title" value="@Model.Title" />
+                </div>
+                <div class="mb-3 @MissingClass("titleType")">
+                    <label class="field-label" for="mvTitleType">Title Type</label>
+                    <select class="form-select mt-1" id="mvTitleType" name="TitleType">
+                        <option value="">Select</option>
+                        <option value="TCT" selected="@(Model.TitleType == "TCT")">TCT</option>
+                        <option value="OCT" selected="@(Model.TitleType == "OCT")">OCT</option>
+                    </select>
+                </div>
+                <div class="mb-3 @MissingClass("plan")">
+                    <label class="field-label" for="mvPlan">Plan Number</label>
+                    <input type="text" class="form-control mt-1" id="mvPlan" name="Plan" placeholder="Required" value="@Model.Plan" />
+                </div>
+                <div class="mb-3 @MissingClass("block")">
+                    <label class="field-label" for="mvBlock">Block Number</label>
+                    <input type="text" class="form-control mt-1" id="mvBlock" name="Block" placeholder="Required" value="@Model.Block" />
+                </div>
+                <div class="mb-3 @MissingClass("lot")">
+                    <label class="field-label" for="mvLot">Lot Number</label>
+                    <input type="text" class="form-control mt-1" id="mvLot" name="Lot" placeholder="Required" value="@Model.Lot" />
+                </div>
+                <div class="mb-3 @MissingClass("titleSequence")">
+                    <label class="field-label" for="mvTitleSeq">Title Sequence</label>
+                    <input type="text" class="form-control mt-1 bg-body-secondary font-monospace small" id="mvTitleSeq" name="TitleSequence" readonly
+                           placeholder="@(string.IsNullOrWhiteSpace(Model.TitleSequence) ? "Not yet retrieved" : "")" value="@Model.TitleSequence" />
+                </div>
+                <button type="button" id="mvRetrieveTitleSeqBtn" class="btn btn-outline-secondary w-100 mt-1">Retrieve Title Sequence</button>
+                <p class="text-muted small mt-2 mb-0">Fields outlined in gold were flagged missing during OCR extraction.</p>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-6 d-flex flex-column gap-3">
+            <div class="card p-4 d-flex flex-column" id="mvViewer" data-doc-viewer>
+                @if (Model.Documents.Count == 0)
+                {
+                    <div class="flex-1 d-flex align-items-center justify-content-center text-muted py-5">No Supporting Documents Found</div>
+                }
+                else
+                {
+                    <div class="mb-3 d-flex justify-content-end small text-muted" data-viewer-header-right></div>
+                    <div class="chip-mono mb-3 d-inline-block" data-viewer-filename></div>
+
+                    <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                        </div>
+                        <div class="ms-auto d-flex gap-1">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="prev">&lsaquo; Prev</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="next">Next &rsaquo;</button>
+                        </div>
+                    </div>
+
+                    <div class="doc-viewer-frame flex-fill d-flex align-items-center justify-content-center" data-viewer-frame style="min-height: 320px; overflow: hidden;">
+                        <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                    </div>
+                }
+            </div>
+
+            <div class="card p-4">
+                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Remarks History</h6>
+                <div id="mvRemarksHistory">
+                    @await Html.PartialAsync("_RemarksHistoryTable", remarksVm)
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-3">
+            <div class="card p-4 h-100">
+                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Supporting Documents</h6>
+                @if (Model.Documents.Count == 0)
+                {
+                    <div class="text-center text-muted py-4">No documents found.</div>
+                }
+                else
+                {
+                    <div id="mvDocumentList" style="max-height: 340px; overflow-y: auto;" class="d-flex flex-column gap-2">
+                        @for (var i = 0; i < Model.Documents.Count; i++)
+                        {
+                            var doc = Model.Documents[i];
+                            <div class="border rounded p-2" role="button" data-doc-index="@i" style="cursor: pointer;">
+                                <div class="fw-medium small">@doc.DocumentName</div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="mt-3 d-flex justify-content-end gap-2">
+    <button type="button" id="mvCloseBtn" class="btn btn-outline-secondary px-4">Close</button>
+    <button type="button" id="mvSaveBtn" class="btn btn-outline-secondary px-4">Save</button>
+    <button type="button" id="mvMigrateBtn" class="btn btn-gold px-4">Migrate</button>
+</div>
+
+<div class="modal fade" id="mvCloseModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title font-display">Close with remarks</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">Explain the current state of this record for the next reviewer.</p>
+                <textarea class="form-control" id="mvCloseRemarksText" rows="3" placeholder="e.g. Awaiting confirmation of Plan/Block/Lot from field office"></textarea>
+                <p class="text-danger small mt-1 d-none" id="mvCloseRemarksError">Remarks is required.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-navy" id="mvCloseConfirmBtn">Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="mvUnsavedModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title font-display">You have unsaved changes</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">Do you want to save your changes before closing?</p>
+                <div class="d-flex flex-column gap-2">
+                    <button type="button" class="btn btn-navy" id="mvSaveAndCloseBtn">Save and Close</button>
+                    <button type="button" class="btn btn-outline-secondary" id="mvDiscardAndCloseBtn">Close Without Saving</button>
+                    <button type="button" class="btn btn-link text-muted" data-bs-dismiss="modal">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script id="mvDocumentsData" type="application/json">@Html.Raw(documentsJson)</script>
+    <script id="mvRegistryOfficesData" type="application/json">@Html.Raw(registryOfficesJson)</script>
+    <script src="~/js/placeholder-image.js"></script>
+    <script src="~/js/doc-viewer.js"></script>
+    <script src="~/js/manual-validation-details.js"></script>
+}

@@ -1,0 +1,54 @@
+@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.Users.UserListItemDto>
+
+<div class="table-responsive table-frame">
+    <table class="table table-hover align-middle mb-0">
+        <thead>
+            <tr>
+                <th style="width: 3.5rem;">ID</th>
+                <th>Date Created</th>
+                <th>First Name</th>
+                <th>Last Name</th>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th style="width: 6rem;" class="text-center">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr><td colspan="8" class="text-center text-muted py-4">No user accounts found.</td></tr>
+            }
+            else
+            {
+                @foreach (var u in Model.Items)
+                {
+                    <tr>
+                        <td>@u.Id</td>
+                        <td class="font-monospace small">@u.DateCreated.ToString("MM/dd/yyyy")</td>
+                        <td>@u.FirstName</td>
+                        <td>@u.LastName</td>
+                        <td>@u.Username</td>
+                        <td>@u.Role</td>
+                        <td><status-badge status="@u.Status"></status-badge></td>
+                        <td>
+                            <div class="d-flex justify-content-center gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" data-modal-url="@Url.Action("Edit", new { id = u.Id })">Edit</button>
+                                <form asp-controller="Users" asp-action="Delete" asp-route-id="@u.Id" method="post"
+                                      data-confirm-message="Are you sure you want to delete this account?" data-confirm-danger data-confirm-label="Delete">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+<div class="px-4 py-3 border-top text-muted small">
+    Showing @Model.Items.Count of @Model.TotalCount Users
+</div>
+
+@await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })

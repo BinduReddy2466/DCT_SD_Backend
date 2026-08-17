@@ -1,0 +1,43 @@
+@using System.Text.Json
+@model PaginationViewModel
+@{
+    var currentQuery = new Dictionary<string, object>();
+    foreach (var kv in Context.Request.Query)
+    {
+        if (string.Equals(kv.Key, "pageNumber", StringComparison.OrdinalIgnoreCase) || string.Equals(kv.Key, "pageSize", StringComparison.OrdinalIgnoreCase))
+        {
+            continue;
+        }
+        currentQuery[kv.Key] = kv.Value.ToString();
+    }
+    var currentQueryJson = JsonSerializer.Serialize(currentQuery);
+
+    string PageLink(int pageNumber)
+    {
+        var query = new Dictionary<string, object>(currentQuery) { ["pageNumber"] = pageNumber, ["pageSize"] = Model.PageSize };
+        return Url.Action(Model.ActionName, query) ?? "#";
+    }
+
+    var totalPages = Math.Max(Model.TotalPages, 1);
+    var isFirstPage = Model.PageNumber <= 1;
+    var isLastPage = Model.PageNumber >= totalPages;
+}
+<div class="d-flex justify-content-between align-items-center mt-3 pagination-bar">
+    <div class="d-flex align-items-center gap-2">
+        <span>Rows per page</span>
+        <select class="form-select form-select-sm" style="width: auto;" data-list-page-pagesize
+                data-action="@Url.Action(Model.ActionName)" data-query="@currentQueryJson">
+            @foreach (var size in new[] { 10, 25, 50, 100 })
+            {
+                <option value="@size" selected="@(size == Model.PageSize)">@size</option>
+            }
+        </select>
+    </div>
+    <div class="d-flex align-items-center gap-1">
+        <a class="btn btn-outline-secondary btn-sm @(isFirstPage ? "disabled" : "")" data-list-page-link href="@PageLink(1)" aria-label="First page">&laquo;</a>
+        <a class="btn btn-outline-secondary btn-sm @(isFirstPage ? "disabled" : "")" data-list-page-link href="@PageLink(Model.PageNumber - 1)" aria-label="Previous page">&lsaquo;</a>
+        <span class="px-2">Page @Model.PageNumber of @totalPages</span>
+        <a class="btn btn-outline-secondary btn-sm @(isLastPage ? "disabled" : "")" data-list-page-link href="@PageLink(Model.PageNumber + 1)" aria-label="Next page">&rsaquo;</a>
+        <a class="btn btn-outline-secondary btn-sm @(isLastPage ? "disabled" : "")" data-list-page-link href="@PageLink(totalPages)" aria-label="Last page">&raquo;</a>
+    </div>
+</div>

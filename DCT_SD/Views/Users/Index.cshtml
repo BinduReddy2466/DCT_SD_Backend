@@ -1,0 +1,61 @@
+@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.Users.UserListItemDto>
+@{
+    var q = Context.Request.Query;
+    var roleOptions = new[] { "Administrator", "Sub-Admin", "Encoder", "LARES QA", "LRA QA" };
+    var statusOptions = new[] { "Active", "Deactivated", "Locked" };
+}
+
+<div class="card p-4 mb-4">
+    <form data-list-page-form="users-results" action="@Url.Action("Results")" method="get" class="filter-grid">
+        <div>
+            <label class="form-label field-label" for="SearchTerm">Search</label>
+            <input type="text" class="form-control" id="SearchTerm" name="SearchTerm" value="@q["SearchTerm"]" placeholder="Search by ID, Name, Username, Role or Status" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="RoleName">Role</label>
+            <select class="form-select" id="RoleName" name="RoleName">
+                <option value="">All Roles</option>
+                @foreach (var r in roleOptions)
+                {
+                    <option value="@r" selected="@(q["RoleName"] == r)">@r</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label class="form-label field-label" for="Status">Status</label>
+            <select class="form-select" id="Status" name="Status">
+                <option value="">All Status</option>
+                @foreach (var s in statusOptions)
+                {
+                    <option value="@s" selected="@(q["Status"] == s)">@s</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label class="form-label field-label" for="DateFrom">Created From</label>
+            <input type="date" class="form-control" id="DateFrom" name="DateFrom" value="@q["DateFrom"]" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="DateTo">Created To</label>
+            <input type="date" class="form-control" id="DateTo" name="DateTo" value="@q["DateTo"]" />
+        </div>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-navy flex-fill">Search</button>
+            <button type="button" class="btn btn-outline-secondary flex-fill" data-list-page-clear>Clear</button>
+        </div>
+    </form>
+</div>
+
+<div class="card p-0">
+    <div class="d-flex justify-content-between align-items-center p-4 border-bottom">
+        <div>
+            <h2 class="font-display fs-5 fw-semibold mb-0">User Accounts</h2>
+            <p class="text-muted small mb-0 mt-1">View, search and manage user accounts.</p>
+        </div>
+        <button type="button" class="btn btn-navy" data-modal-url="@Url.Action("Create")">Add User</button>
+    </div>
+
+    <div id="users-results" class="p-0">
+        @await Html.PartialAsync("_Results", Model)
+    </div>
+</div>

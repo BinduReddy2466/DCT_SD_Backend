@@ -1,0 +1,29 @@
+using DCT_SD.Models.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+
+namespace DCT_SD.Configuration;
+
+public class MigrationDocumentConfiguration : IEntityTypeConfiguration<MigrationDocument>
+{
+    public void Configure(EntityTypeBuilder<MigrationDocument> builder)
+    {
+        builder.ToTable("MigrationDocuments");
+
+        builder.HasKey(d => d.Id);
+
+        builder.Property(d => d.DocumentName).HasMaxLength(200).IsRequired();
+        builder.Property(d => d.FileName).HasMaxLength(260).IsRequired();
+        builder.Property(d => d.Status).HasConversion<int>().IsRequired();
+        builder.Property(d => d.ExistingFileName).HasMaxLength(260);
+        builder.Property(d => d.PerformedByUsername).HasMaxLength(256);
+
+        builder.HasIndex(d => d.MigrationRecordId);
+        builder.HasIndex(d => d.DocumentTypeId);
+
+        builder.HasOne(d => d.DocumentType)
+            .WithMany(t => t.MigrationDocuments)
+            .HasForeignKey(d => d.DocumentTypeId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}

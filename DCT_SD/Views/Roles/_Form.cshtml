@@ -1,0 +1,36 @@
+@model RoleFormViewModel
+@{
+    var isEdit = Model.Id.HasValue;
+    var action = isEdit ? "Edit" : "Create";
+}
+<div class="modal-header">
+    <h5 class="modal-title font-display">@(isEdit ? "Edit Role" : "Add Role")</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<form asp-controller="Roles" asp-action="@action" asp-route-id="@Model.Id" method="post">
+    <div class="modal-body">
+        <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
+
+        <input type="hidden" asp-for="Id" />
+        <input type="hidden" asp-for="IsSystemDefined" />
+
+        <div class="mb-3">
+            <label asp-for="Name" class="form-label field-label"></label>
+            <input asp-for="Name" class="form-control" maxlength="50" placeholder="Enter Role Name" readonly="@Model.IsSystemDefined" />
+            @if (Model.IsSystemDefined)
+            {
+                <p class="text-muted small mt-1 mb-0">System-defined roles cannot be renamed.</p>
+            }
+            <span asp-validation-for="Name" class="text-danger small"></span>
+        </div>
+
+        <div class="mb-0">
+            <label asp-for="Description" class="form-label field-label"></label>
+            <textarea asp-for="Description" class="form-control" rows="3" maxlength="200" placeholder="Optional description of this role"></textarea>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-navy">@(isEdit ? "Update" : "Save")</button>
+    </div>
+</form>

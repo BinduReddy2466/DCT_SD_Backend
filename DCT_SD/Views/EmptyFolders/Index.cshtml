@@ -1,0 +1,35 @@
+@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.EmptyFolders.EmptyFolderListItemDto>
+@{
+    var q = Context.Request.Query;
+}
+
+<div class="card p-4 mb-4">
+    <form data-list-page-form="empty-folders-results" action="@Url.Action("Results")" method="get" class="filter-grid">
+        <div>
+            <label class="form-label field-label" for="RdCode">Registry of Deeds Code</label>
+            <input type="text" class="form-control" id="RdCode" name="RdCode" value="@q["RdCode"]" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="FolderName">Folder Name</label>
+            <input type="text" class="form-control" id="FolderName" name="FolderName" value="@q["FolderName"]" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="DateFrom">Date From</label>
+            <input type="date" class="form-control" id="DateFrom" name="DateFrom" value="@q["DateFrom"]" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="DateTo">Date To</label>
+            <input type="date" class="form-control" id="DateTo" name="DateTo" value="@q["DateTo"]" />
+        </div>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-navy flex-fill">Search</button>
+            <button type="button" class="btn btn-outline-secondary flex-fill" data-list-page-clear>Clear</button>
+        </div>
+    </form>
+</div>
+
+<div class="card p-4">
+    <div id="empty-folders-results">
+        @await Html.PartialAsync("_Results", Model)
+    </div>
+</div>

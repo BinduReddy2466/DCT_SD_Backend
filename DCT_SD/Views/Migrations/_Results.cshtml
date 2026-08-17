@@ -1,0 +1,49 @@
+@using DCT_SD.Helpers
+@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.Migrations.MigrationListItemDto>
+
+<div class="table-responsive table-frame">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>Request ID</th>
+                <th>Migration Date</th>
+                <th>RD</th>
+                <th>Entry No.</th>
+                <th>Title No.</th>
+                <th>Title Type</th>
+                <th>Migration Status</th>
+                <th>SD Status</th>
+                <th>Migrated To</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr><td colspan="10" class="text-center text-muted py-4">No records found.</td></tr>
+            }
+            else
+            {
+                @foreach (var item in Model.Items)
+                {
+                    <tr>
+                        <td><span class="chip-mono">@item.RequestNumber</span></td>
+                        <td>@item.MigrationDate.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td>@item.RdName</td>
+                        <td>@(item.EntryNumbersCsv ?? "—")</td>
+                        <td class="font-monospace small">@(item.Title ?? "—")</td>
+                        <td>@(item.TitleType ?? "—")</td>
+                        <td><status-badge status="@StatusDisplay.MigrationStatusToDisplay(item.MigrationStatus)"></status-badge></td>
+                        <td><status-badge status="@StatusDisplay.SdStatusToDisplay(item.SdStatus)"></status-badge></td>
+                        <td>@item.MigratedTo</td>
+                        <td>
+                            <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "Migrations", new { id = item.Id })">View</a>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })

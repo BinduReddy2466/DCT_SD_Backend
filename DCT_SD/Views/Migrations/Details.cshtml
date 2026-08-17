@@ -1,0 +1,212 @@
+@using System.Text.Json
+@using DCT_SD.Helpers
+@model DCT_SD.Models.Dtos.Migrations.MigrationDetailDto
+@{
+    var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    var documentsJson = JsonSerializer.Serialize(Model.Documents, jsonOptions);
+
+    var fields = new (string Label, string? Value, bool IsChip)[]
+    {
+        ("Request ID", Model.RequestNumber, true),
+        ("RD Code", Model.RdCode, false),
+        ("RD Name", Model.RdName, false),
+        ("Entry Number", Model.EntryNumbersCsv, false),
+        ("Title Number", Model.Title, false),
+        ("Title Type", Model.TitleType, false),
+        ("Title Sequence", Model.TitleSequence, false),
+        ("Plan Number", Model.Plan, false),
+        ("Block Number", Model.Block, false),
+        ("Lot Number", Model.Lot, false),
+        ("Migration Date and Time", Model.MigrationDate.ToString("MM/dd/yyyy h:mm tt"), false),
+        ("Migration Status", StatusDisplay.MigrationStatusToDisplay(Model.MigrationStatus), false),
+    };
+}
+
+<a href="@Url.Action("Index")" class="d-inline-flex align-items-center gap-2 mb-3 text-decoration-none">&lsaquo; Back to Migration Monitoring</a>
+
+<div class="row g-3">
+    <div class="col-12 col-xl-3">
+        <div class="card p-4 h-100">
+            <h6 class="text-muted text-uppercase small fw-semibold mb-3">Extracted Data</h6>
+            @foreach (var f in fields)
+            {
+                <div class="mb-3">
+                    <div class="field-label">@f.Label</div>
+                    @if (f.IsChip)
+                    {
+                        <div class="chip-mono mt-1 d-inline-block">@f.Value</div>
+                    }
+                    else
+                    {
+                        <div class="mt-1 fw-medium">@(string.IsNullOrWhiteSpace(f.Value) ? "—" : f.Value)</div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="col-12 col-xl-6">
+        <div class="card p-4 d-flex flex-column" data-compare-url-base="@Url.Action("Compare", new { id = Model.Id })">
+            @if (Model.Documents.Count == 0)
+            {
+                <div class="flex-1 d-flex align-items-center justify-content-center text-muted py-5">No Supporting Documents Found</div>
+            }
+            else
+            {
+                <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
+                    <div class="d-flex flex-wrap gap-2" id="migrationViewerHeaderLeft"></div>
+                    <div class="ms-auto small text-muted" id="migrationViewerHeaderRight"></div>
+                </div>
+
+                <div class="mb-3 d-flex gap-1">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="migrationPrevBtn">&lsaquo; Prev</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="migrationNextBtn">Next &rsaquo;</button>
+                </div>
+
+                <div id="migrationSingleViewerWrap">
+                    <div id="migrationViewerSingle" data-doc-viewer data-enable-wheel-zoom="true">
+                        <div class="chip-mono mb-3 d-inline-block" data-viewer-filename></div>
+                        <div class="mb-3 d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="fit">Fit</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                        </div>
+                        <div class="doc-viewer-frame d-flex align-items-center justify-content-center" data-viewer-frame style="min-height: 320px; height: 55vh; overflow: hidden;">
+                            <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                        </div>
+                    </div>
+                </div>
+
+                <div id="migrationDualViewerWrap" class="d-none row g-3">
+                    <div class="col-12 col-md-6 d-flex flex-column">
+                        <div class="fw-semibold small mb-2">DCT-SD Image</div>
+                        <div id="migrationViewerLeft" data-doc-viewer data-enable-wheel-zoom="true">
+                            <div class="chip-mono mb-2 d-inline-block" data-viewer-filename></div>
+                            <div class="mb-2 d-flex flex-wrap gap-2">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="fit">Fit</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                            </div>
+                            <div class="doc-viewer-frame d-flex align-items-center justify-content-center" data-viewer-frame style="height: 45vh; overflow: hidden;">
+                                <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 d-flex flex-column">
+                        <div class="fw-semibold small mb-2">PHILARIS-RD Image</div>
+                        <div id="migrationViewerRight" data-doc-viewer data-enable-wheel-zoom="true">
+                            <div class="chip-mono mb-2 d-inline-block" data-viewer-filename></div>
+                            <div class="mb-2 d-flex flex-wrap gap-2">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="fit">Fit</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                            </div>
+                            <div class="doc-viewer-frame d-flex align-items-center justify-content-center" data-viewer-frame style="height: 45vh; overflow: hidden;">
+                                <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="migrationViewerFooter" class="mt-3"></div>
+            }
+        </div>
+    </div>
+
+    <div class="col-12 col-xl-3">
+        <div class="card p-4 h-100">
+            <h6 class="text-muted text-uppercase small fw-semibold mb-3">Supporting Documents</h6>
+            @if (Model.Documents.Count == 0)
+            {
+                <div class="text-center text-muted py-4">No Supporting Documents Found</div>
+            }
+            else
+            {
+                <div class="table-responsive table-frame" style="max-height: 420px; overflow-y: auto;">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 2.5rem;">#</th>
+                                <th>Document Name</th>
+                                <th>Filename</th>
+                                <th>Supporting Document Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="migrationDocumentList">
+                            @for (var i = 0; i < Model.Documents.Count; i++)
+                            {
+                                var doc = Model.Documents[i];
+                                var showActionTooltip = doc.Status == "Overwritten" || doc.Status == "InsertedAsNew";
+                                string? actionTooltip = null;
+                                if (showActionTooltip)
+                                {
+                                    var tooltipLines = new List<string>
+                                    {
+                                        "Performed By: " + (doc.PerformedBy ?? "—"),
+                                        "Action Date and Time: " + (doc.ActionDate.HasValue ? doc.ActionDate.Value.ToString("MM/dd/yyyy h:mm tt") : "—"),
+                                    };
+                                    if (doc.Status == "Overwritten")
+                                    {
+                                        tooltipLines.Add("Existing PHILARIS-RD Image File Name: " + (doc.ExistingFileName ?? "—"));
+                                    }
+                                    actionTooltip = string.Join("<br />", tooltipLines);
+                                }
+                                <tr role="button" data-doc-index="@i" style="cursor: pointer;">
+                                    <td>@(i + 1)</td>
+                                    <td class="small">@doc.DocumentName</td>
+                                    <td class="small text-muted">@doc.FileName</td>
+                                    <td>
+                                        @if (showActionTooltip)
+                                        {
+                                            <status-badge status="@StatusDisplay.MigrationDocStatusToDisplay(doc.Status)" data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="top" title="@actionTooltip"></status-badge>
+                                        }
+                                        else
+                                        {
+                                            <status-badge status="@StatusDisplay.MigrationDocStatusToDisplay(doc.Status)"></status-badge>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="mt-3 d-flex justify-content-end">
+    <a href="@Url.Action("Index")" class="btn btn-navy">Close</a>
+</div>
+
+<form method="post" action="@Url.Action("Overwrite")" id="overwriteForm" class="d-inline"
+      data-confirm-message="Are you sure you want to overwrite the existing supporting document image in PHILARIS-RD?" data-confirm-label="Yes" data-confirm-cancel-label="No">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="id" value="@Model.Id" />
+    <input type="hidden" name="documentId" id="overwriteDocumentId" />
+</form>
+<form method="post" action="@Url.Action("InsertAsNew")" id="insertAsNewForm" class="d-inline"
+      data-confirm-message="Are you sure you want to migrate this supporting document image as a new image in PHILARIS-RD?" data-confirm-label="Yes" data-confirm-cancel-label="No">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="id" value="@Model.Id" />
+    <input type="hidden" name="documentId" id="insertAsNewDocumentId" />
+</form>
+
+@section Scripts {
+    <script id="migrationDocumentsData" type="application/json">@Html.Raw(documentsJson)</script>
+    <script src="~/js/placeholder-image.js"></script>
+    <script src="~/js/doc-viewer.js"></script>
+    <script src="~/js/migration-details.js"></script>
+}

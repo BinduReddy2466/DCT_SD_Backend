@@ -1,0 +1,74 @@
+@model DCT_SD.Models.Dtos.Migrations.MigrationDocumentDto
+@{
+    var migrationId = (int)ViewData["MigrationId"]!;
+    var rightLabel = string.IsNullOrWhiteSpace(Model.ExistingFileName) ? "Existing Image" : Model.ExistingFileName;
+}
+
+<a href="@Url.Action("Details", new { id = migrationId })" class="d-inline-flex align-items-center gap-2 mb-3 text-decoration-none">&lsaquo; Back to Migration Details</a>
+
+<div class="card p-4">
+    <h5 class="font-display fw-semibold mb-1">Supporting Document Comparison</h5>
+    <div class="text-muted small mb-4">Compare DCT Supporting Document with PHILARIS Record</div>
+
+    <div class="row g-3">
+        <div class="col-12 col-md-6 d-flex flex-column">
+            <div class="mb-2">
+                <div class="fw-semibold">DCT-SD Image</div>
+                <div class="text-muted small">@Model.FileName</div>
+            </div>
+            <div class="d-flex flex-column" id="compareViewerLeft" data-doc-viewer data-enable-wheel-zoom="true"
+                 data-placeholder-label="@Model.FileName" data-placeholder-size="1200x1800">
+                <div class="chip-mono mb-2 d-inline-block" data-viewer-filename></div>
+                <div class="mb-2 d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="fit">Fit</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                </div>
+                <div class="doc-viewer-frame flex-fill d-flex align-items-center justify-content-center" data-viewer-frame style="height: 65vh; overflow: hidden;">
+                    <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 d-flex flex-column">
+            <div class="mb-2">
+                <div class="fw-semibold">PHILARIS-RD Image</div>
+                <div class="text-muted small">@rightLabel</div>
+            </div>
+            <div class="d-flex flex-column" id="compareViewerRight" data-doc-viewer data-enable-wheel-zoom="true"
+                 data-placeholder-label="@rightLabel" data-placeholder-size="1200x1800">
+                <div class="chip-mono mb-2 d-inline-block" data-viewer-filename></div>
+                <div class="mb-2 d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="fit">Fit</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                </div>
+                <div class="doc-viewer-frame flex-fill d-flex align-items-center justify-content-center" data-viewer-frame style="height: 65vh; overflow: hidden;">
+                    <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/placeholder-image.js"></script>
+    <script src="~/js/doc-viewer.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('[data-doc-viewer]').forEach(function (container) {
+                var viewer = window.DctDocViewer.create(container);
+                var label = container.getAttribute('data-placeholder-label');
+                var size = container.getAttribute('data-placeholder-size');
+                viewer.load(window.dctPlaceholderImage(label, size), label, { fitOnLoad: true });
+            });
+        });
+    </script>
+}

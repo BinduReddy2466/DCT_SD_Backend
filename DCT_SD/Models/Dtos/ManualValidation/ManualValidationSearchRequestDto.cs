@@ -1,0 +1,14 @@
+namespace DCT_SD.Models.Dtos.ManualValidation;
+
+public class ManualValidationSearchRequestDto
+{
+    public string? RdCode { get; set; }
+    public string? RequestNumber { get; set; }
+    public string? EntryNumbersCsv { get; set; }
+    public string? Title { get; set; }
+    public string? Status { get; set; }
+    public DateTime? DateFrom { get; set; }
+    public DateTime? DateTo { get; set; }
+    public int PageNumber { get; set; } = 1;
+    public int PageSize { get; set; } = 25;
+}

@@ -1,0 +1,49 @@
+@model DCT_SD.Models.ViewModels.RemarksHistoryViewModel
+
+<div class="table-responsive table-frame">
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th style="width: 2rem;">#</th>
+                <th>Updated</th>
+                <th>By</th>
+                <th>Remarks</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Remarks.Items.Count == 0)
+            {
+                <tr><td colspan="5" class="text-center text-muted py-4">No remarks history found.</td></tr>
+            }
+            else
+            {
+                var start = (Model.Remarks.PageNumber - 1) * Model.Remarks.PageSize;
+                for (var i = 0; i < Model.Remarks.Items.Count; i++)
+                {
+                    var r = Model.Remarks.Items[i];
+                    <tr>
+                        <td>@(start + i + 1)</td>
+                        <td class="font-monospace small">@r.UpdatedAt.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td><span class="chip-mono">@r.By</span></td>
+                        <td>@r.Remarks</td>
+                        <td><status-badge status="@r.Action"></status-badge></td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (Model.Remarks.Items.Count > 0)
+{
+    <div class="d-flex justify-content-between align-items-center small text-muted">
+        <span>Page @Model.Remarks.PageNumber of @Model.Remarks.TotalPages</span>
+        <div class="d-flex gap-1">
+            <button type="button" class="btn btn-outline-secondary btn-sm" @(Model.Remarks.PageNumber <= 1 ? "disabled" : "")
+                    data-remarks-page="@(Model.Remarks.PageNumber - 1)" data-remarks-record-id="@Model.RecordId">&lsaquo; Prev</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" @(Model.Remarks.PageNumber >= Model.Remarks.TotalPages ? "disabled" : "")
+                    data-remarks-page="@(Model.Remarks.PageNumber + 1)" data-remarks-record-id="@Model.RecordId">Next &rsaquo;</button>
+        </div>
+    </div>
+}

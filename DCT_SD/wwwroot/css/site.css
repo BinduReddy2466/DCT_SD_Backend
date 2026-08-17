@@ -1,0 +1,340 @@
+/* Design tokens ported from the React app's index.css (@theme block) - same navy/gold
+   identity, same status-badge colors. Self-hosted IBM Plex/Inter font files are a follow-up
+   polish item; for now the stack lists them first and falls back to system fonts. */
+:root {
+  --color-bg: #F3F5F8;
+  --color-surface: #FFFFFF;
+  --color-navy: #132038;
+  --color-navy-2: #1D2E4E;
+  --color-navy-3: #28406B;
+  --color-gold: #AE8A2A;
+  --color-gold-dark: #8E6F1C;
+  --color-ink: #161A22;
+  --color-muted: #5C6472;
+  --color-border: #E1E5EB;
+
+  --color-ok-bg: #E7F4EC; --color-ok-text: #1C7A46;
+  --color-warn-bg: #FCF2D8; --color-warn-text: #8A6300;
+  --color-err-bg: #FBEAEA; --color-err-text: #AD2A22;
+  --color-info-bg: #E8EEF9; --color-info-text: #2A4478;
+
+  --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
+
+  /* Re-skin Bootstrap's own variables to the navy/gold identity. */
+  --bs-primary: var(--color-navy);
+  --bs-primary-rgb: 19, 32, 56;
+  --bs-body-font-family: var(--font-sans);
+  --bs-body-color: var(--color-ink);
+  --bs-body-bg: var(--color-bg);
+  --bs-border-color: var(--color-border);
+  --bs-link-color: var(--color-navy-2);
+  --bs-link-hover-color: var(--color-navy);
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-bg);
+}
+
+.font-display { font-family: var(--font-display); }
+.chip-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  display: inline-block;
+}
+
+/* Layout shell - fills exactly one viewport and never scrolls itself; only <main> (and the
+   sidebar nav list, if it ever grows taller than the viewport) scroll internally, so the
+   sidebar/topbar stay fixed in place while page content scrolls underneath them. */
+#appShell {
+  height: 100vh;
+  overflow: hidden;
+}
+.app-sidebar {
+  background: linear-gradient(180deg, var(--color-navy) 0%, var(--color-navy-2) 100%);
+  color: #fff;
+  height: 100%;
+  width: 240px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.app-sidebar .nav {
+  overflow-y: auto;
+  min-height: 0;
+}
+.app-shell-main-column {
+  height: 100%;
+  overflow: hidden;
+}
+.app-shell-main-column > main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+.app-sidebar .nav-link {
+  color: rgba(255, 255, 255, 0.78);
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  padding: 0.6rem 1rem;
+}
+.app-sidebar .nav-link.active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  border-left-color: var(--color-gold);
+}
+.app-sidebar .nav-link:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+.app-sidebar .nav-icon {
+  flex-shrink: 0;
+}
+.app-topbar {
+  background: #fff;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* Sidebar brand + profile block */
+.sidebar-brand {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.sidebar-brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+.sidebar-profile {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.sidebar-profile button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.sidebar-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  flex-shrink: 0;
+}
+.sidebar-profile-menu {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: calc(100% + 4px);
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(15, 22, 40, 0.22);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  z-index: 40;
+}
+.sidebar-profile-menu a,
+.sidebar-profile-menu button {
+  display: flex;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: #fff;
+  border: 0;
+  text-decoration: none;
+}
+.sidebar-profile-menu a:hover,
+.sidebar-profile-menu button:hover {
+  background: #F7F8FA;
+}
+.sidebar-profile-menu form button {
+  border-top: 1px solid var(--color-border);
+}
+
+/* Sidebar collapse */
+#appShell.sidebar-collapsed .app-sidebar {
+  width: 68px;
+}
+#appShell.sidebar-collapsed .nav-label,
+#appShell.sidebar-collapsed .sidebar-brand-text {
+  display: none;
+}
+#appShell.sidebar-collapsed .app-sidebar .nav-link {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+#appShell.sidebar-collapsed .sidebar-brand {
+  justify-content: center;
+}
+#appShell.sidebar-collapsed .sidebar-profile button {
+  justify-content: center;
+}
+#appShell.sidebar-collapsed .sidebar-profile-menu {
+  left: 0.5rem;
+  right: -8rem;
+  width: 9rem;
+}
+
+/* Cards / buttons */
+.card {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+.btn-navy {
+  background: var(--color-navy);
+  border-color: var(--color-navy);
+  color: #fff;
+}
+.btn-navy:hover {
+  background: var(--color-navy-2);
+  border-color: var(--color-navy-2);
+  color: #fff;
+}
+.btn-gold {
+  background: var(--color-gold);
+  border-color: var(--color-gold);
+  color: #fff;
+}
+.btn-gold:hover {
+  background: var(--color-gold-dark);
+  border-color: var(--color-gold-dark);
+  color: #fff;
+}
+
+/* Tables - bordered/rounded frame + shaded header row, matching the reference prototype */
+.table-frame {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+}
+.table-frame table {
+  margin-bottom: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.table-frame thead th {
+  background: #F7F8FA;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--color-muted);
+  letter-spacing: 0.4px;
+  padding: 10px 12px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--color-border);
+}
+.table-frame thead tr:first-child th:first-child {
+  border-top-left-radius: 10px;
+}
+.table-frame thead tr:first-child th:last-child {
+  border-top-right-radius: 10px;
+}
+.table-frame tbody td {
+  padding: 11px 12px;
+  font-size: 13px;
+  vertical-align: middle;
+  border-bottom: 1px solid #EEF0F3;
+}
+.table-frame tbody tr:last-child td {
+  border-bottom: 0;
+}
+.table-frame tbody tr:hover {
+  background: #FAFBFD;
+}
+
+/* Status badges */
+.badge-ok { background: var(--color-ok-bg); color: var(--color-ok-text); }
+.badge-warn { background: var(--color-warn-bg); color: var(--color-warn-text); }
+.badge-err { background: var(--color-err-bg); color: var(--color-err-text); }
+.badge-info { background: var(--color-info-bg); color: var(--color-info-text); }
+.badge-neutral { background: var(--color-bg); color: var(--color-muted); }
+
+/* Filter bar - responsive auto-fit grid, same idiom as the React FilterBar */
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+/* Login page */
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  padding: 2.5rem 1.75rem;
+  box-shadow: 0 8px 32px rgba(15, 22, 40, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* Field-level "missing/flagged" treatment */
+.missing-field .form-control,
+.missing-field .form-select {
+  border-color: var(--color-gold);
+  background: #FFFBF0;
+}
+
+/* Document viewer checkerboard background */
+.doc-viewer-frame {
+  background: repeating-conic-gradient(#EDEFF3 0% 25%, #F7F8FA 0% 50%) 50%/16px 16px;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* Field info tooltip ("i" icon, hover/focus reveals a requirements popover) */
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-border);
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+  position: relative;
+}
+.info-icon .info-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 1060;
+  top: 20px;
+  left: 0;
+  width: 260px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+.info-icon:hover .info-tooltip,
+.info-icon:focus .info-tooltip {
+  display: block;
+}
+
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

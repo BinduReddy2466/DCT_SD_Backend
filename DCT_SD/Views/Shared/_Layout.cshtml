@@ -1,0 +1,208 @@
+@using DCT_SD.Helpers
+@inject DCT_SD.Services.IAuthService AuthService
+@inject DCT_SD.Services.ICurrentUserService CurrentUser
+@{
+    // Any allowed menu key NOT in MenuRoutes.Routes renders as a disabled "coming soon" item
+    // instead of a dead link, mirroring the React app's ComingSoonPage fallback while later
+    // phases are still landing.
+    var builtMenuRoutes = MenuRoutes.Routes;
+
+    var menuLabels = new Dictionary<string, string>
+    {
+        [MenuKeys.RdConfig] = "RD Configuration",
+        [MenuKeys.MigrationMonitoring] = "Migration Monitoring",
+        [MenuKeys.ManualValidation] = "Manual Validation",
+        [MenuKeys.EmptyFolders] = "Empty Entry Folders",
+        [MenuKeys.UserManagement] = "User Management",
+        [MenuKeys.Roles] = "Roles",
+        [MenuKeys.Settings] = "Settings",
+    };
+
+    bool IsAllowed(string menuKey) =>
+        User.IsInRole(RoleNames.Administrator) || User.HasClaim(AppClaimTypes.Menu, menuKey);
+
+    var isAuthenticated = User.Identity?.IsAuthenticated == true;
+
+    var displayName = User.Identity?.Name ?? string.Empty;
+    var initials = "?";
+    if (isAuthenticated && CurrentUser.UserId.HasValue)
+    {
+        var identity = await AuthService.GetDisplayNameAsync(CurrentUser.UserId.Value);
+        if (identity.HasValue)
+        {
+            displayName = $"{identity.Value.FirstName} {identity.Value.LastName}";
+            var firstInitial = identity.Value.FirstName.Length > 0 ? identity.Value.FirstName[0] : '?';
+            var lastInitial = identity.Value.LastName.Length > 0 ? identity.Value.LastName[0] : '?';
+            initials = $"{firstInitial}{lastInitial}".ToUpperInvariant();
+        }
+    }
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@(ViewData["Title"] != null ? ViewData["Title"] + " - DCT" : "DCT")</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+    @if (isAuthenticated)
+    {
+        <div class="d-flex" id="appShell">
+            <nav class="app-sidebar d-flex flex-column" id="appSidebar">
+                <div class="sidebar-brand px-3 py-4 d-flex align-items-center gap-2">
+                    <div class="sidebar-brand-mark">DCT</div>
+                    <div class="sidebar-brand-text">
+                        <div class="font-display fw-semibold text-white" style="font-size: 15px; line-height: 1.15;">DCT &ndash; SD</div>
+                        <div class="text-white-50" style="font-size: 10.5px;">Supporting Documents</div>
+                    </div>
+                </div>
+                <ul class="nav flex-column mb-auto flex-grow-1 py-1">
+                    @foreach (var key in MenuKeys.All)
+                    {
+                        if (!IsAllowed(key)) { continue; }
+
+                        <li class="nav-item">
+                            @if (builtMenuRoutes.TryGetValue(key, out var route))
+                            {
+                                <a class="nav-link d-flex align-items-center gap-3 @(ViewData["ActiveMenu"] as string == key ? "active" : "")" href="@route">
+                                    @Html.Raw(MenuIcons.Svg(key))
+                                    <span class="nav-label">@menuLabels[key]</span>
+                                </a>
+                            }
+                            else
+                            {
+                                <span class="nav-link d-flex align-items-center gap-3 disabled opacity-50">
+                                    @Html.Raw(MenuIcons.Svg(key))
+                                    <span class="nav-label">@menuLabels[key] <small>(coming soon)</small></span>
+                                </span>
+                            }
+                        </li>
+                    }
+                </ul>
+
+                <div class="sidebar-profile position-relative">
+                    <button type="button" id="sidebarProfileTrigger" class="w-100 px-3 py-3 d-flex align-items-center gap-2 border-0 bg-transparent text-white">
+                        <div class="sidebar-avatar">@initials</div>
+                        <div class="text-start flex-grow-1 sidebar-brand-text" style="line-height: 1.25; min-width: 0;">
+                            <div class="text-white text-truncate" style="font-size: 12.5px; font-weight: 500;">@displayName</div>
+                            <div class="text-white-50 text-truncate" style="font-size: 11px;">@(User.IsInRole(RoleNames.Administrator) ? RoleNames.Administrator : (User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? ""))</div>
+                        </div>
+                        <svg class="sidebar-brand-text" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>
+                    </button>
+                    <div id="sidebarProfileMenu" class="sidebar-profile-menu d-none">
+                        <a href="/Settings" class="d-flex align-items-center gap-2">
+                            @Html.Raw(MenuIcons.Svg(MenuKeys.Settings))
+                            Settings
+                        </a>
+                        <form asp-controller="Account" asp-action="Logout" method="post" class="m-0">
+                            <button type="submit" class="d-flex align-items-center gap-2 text-danger">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                                Logout
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </nav>
+
+            <div class="app-shell-main-column flex-grow-1 d-flex flex-column" style="min-width: 0;">
+                <header class="app-topbar d-flex align-items-center justify-content-between px-4 py-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <button type="button" id="sidebarCollapseToggle" class="btn btn-outline-secondary btn-sm d-flex align-items-center justify-content-center" style="width: 32px; height: 32px;" title="Collapse sidebar">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" /></svg>
+                        </button>
+                        <h1 class="font-display fs-5 fw-semibold mb-0">@ViewData["Title"]</h1>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 text-muted small">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span id="clock"></span>
+                    </div>
+                </header>
+                <main class="p-4">
+                    @RenderBody()
+                </main>
+            </div>
+        </div>
+    }
+    else
+    {
+        @RenderBody()
+    }
+
+    @if (isAuthenticated)
+    {
+        <!-- Generic AJAX-loaded modal: modal-loader.js fetches a PartialView into #ajaxModalContent -->
+        <div class="modal fade" id="ajaxModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content" id="ajaxModalContent"></div>
+            </div>
+        </div>
+
+        <!-- Generic confirm dialog: any <form data-confirm-message="..."> is intercepted by confirm-dialog.js -->
+        <div class="modal fade" id="confirmDialog" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-sm">
+                <div class="modal-content">
+                    <div class="modal-body pt-4" id="confirmDialogMessage"></div>
+                    <div class="modal-footer border-0 pt-0">
+                        <button type="button" class="btn btn-outline-secondary" id="confirmDialogCancelBtn" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-navy" id="confirmDialogConfirmBtn">Confirm</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;"></div>
+
+        <!-- "Assign Tab" menu picker, launched from inside the AJAX-loaded User form -->
+        <div class="modal fade" id="assignTabModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-sm">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title font-display">Assign Tab</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div style="max-height: 320px; overflow-y: auto;">
+                            <table class="table table-sm mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Menu</th>
+                                        <th class="text-center" style="width: 5rem;">
+                                            <div class="d-flex align-items-center justify-content-center gap-1">
+                                                All <input type="checkbox" id="assignTabSelectAll" />
+                                            </div>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody id="assignTabMenuList"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-navy" id="assignTabSaveBtn" disabled>Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <script src="~/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/list-page.js"></script>
+    <script src="~/js/modal-loader.js"></script>
+    <script src="~/js/confirm-dialog.js"></script>
+    <script src="~/js/assign-tab.js"></script>
+    <script src="~/js/toast.js"></script>
+    <script src="~/js/app-shell.js"></script>
+    @if (TempData["ToastMessage"] is string toastMessage)
+    {
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                window.showToast(@Html.Raw(System.Text.Json.JsonSerializer.Serialize(toastMessage)), @Html.Raw(System.Text.Json.JsonSerializer.Serialize(TempData["ToastVariant"] as string ?? "success")));
+            });
+        </script>
+    }
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

@@ -1,0 +1,13 @@
+@model FieldInfoTooltipViewModel
+<span class="info-icon" tabindex="0">
+    <span aria-hidden="true">i</span>
+    <span class="info-tooltip">
+        <strong>@Model.Title</strong>
+        <ul class="mb-0 ps-3 mt-1">
+            @foreach (var item in Model.Items)
+            {
+                <li>@item</li>
+            }
+        </ul>
+    </span>
+</span>

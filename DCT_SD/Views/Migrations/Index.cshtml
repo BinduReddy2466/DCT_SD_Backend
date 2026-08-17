@@ -1,0 +1,62 @@
+@using DCT_SD.Helpers
+@using DCT_SD.Models.Dtos.RdConfig
+@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.Migrations.MigrationListItemDto>
+@{
+    var q = Context.Request.Query;
+    var registryOffices = (IReadOnlyList<RegistryOfficeDto>)ViewData["RegistryOffices"]!;
+}
+
+<div class="card p-4 mb-4">
+    <form data-list-page-form="migrations-results" action="@Url.Action("Results")" method="get" class="filter-grid">
+        <div>
+            <label class="form-label field-label" for="RdCode">Registry of Deeds</label>
+            <select class="form-select" id="RdCode" name="RdCode">
+                <option value="">Select</option>
+                @foreach (var o in registryOffices)
+                {
+                    <option value="@o.Code" selected="@(q["RdCode"] == o.Code)">@o.Name</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label class="form-label field-label" for="RequestNumber">Request ID</label>
+            <input type="text" class="form-control" id="RequestNumber" name="RequestNumber" value="@q["RequestNumber"]" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="EntryNumbersCsv">Entry Number</label>
+            <input type="text" class="form-control" id="EntryNumbersCsv" name="EntryNumbersCsv" value="@q["EntryNumbersCsv"]" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="Title">Title Number</label>
+            <input type="text" class="form-control" id="Title" name="Title" value="@q["Title"]" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="MigrationStatus">Migration Status</label>
+            <select class="form-select" id="MigrationStatus" name="MigrationStatus">
+                <option value="">Select</option>
+                @foreach (var status in new[] { "MigratedToExisting", "MigratedAsNew" })
+                {
+                    <option value="@status" selected="@(q["MigrationStatus"] == status)">@StatusDisplay.MigrationStatusToDisplay(status)</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label class="form-label field-label" for="DateFrom">Migration Date From</label>
+            <input type="date" class="form-control" id="DateFrom" name="DateFrom" value="@q["DateFrom"]" />
+        </div>
+        <div>
+            <label class="form-label field-label" for="DateTo">Migration Date To</label>
+            <input type="date" class="form-control" id="DateTo" name="DateTo" value="@q["DateTo"]" />
+        </div>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-navy flex-fill">Search</button>
+            <button type="button" class="btn btn-outline-secondary flex-fill" data-list-page-clear>Clear</button>
+        </div>
+    </form>
+</div>
+
+<div class="card p-4">
+    <div id="migrations-results">
+        @await Html.PartialAsync("_Results", Model)
+    </div>
+</div>

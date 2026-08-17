@@ -1,0 +1,115 @@
+@model RdConfigIndexViewModel
+
+<div class="card p-4 mb-4">
+    <h2 class="font-display fs-6 fw-semibold mb-4">Root Source Path Configuration</h2>
+
+    <div class="mb-3">
+        <label class="form-label field-label" for="rootPathField">Root Source Path *</label>
+        <div class="d-flex gap-2">
+            <input type="text" id="rootPathField" class="form-control font-monospace" readonly value="@Model.RootPathForm.RootPath" />
+            <button type="button" class="btn btn-navy text-nowrap" data-modal-url="@Url.Action("BrowseFolders")">Browse Folder</button>
+        </div>
+        <span asp-validation-for="RootPathForm.RootPath" class="text-danger small d-block mt-1"></span>
+    </div>
+
+    <form id="updateRootPathForm" asp-controller="RdConfig" asp-action="UpdateRootPath" method="post"
+          data-confirm-message="Are you sure you want to update the Root Source Path?" data-confirm-label="Yes" data-confirm-cancel-label="No">
+        <input type="hidden" asp-for="RootPathForm.RootPath" id="rootPathHiddenInput" />
+
+        <div class="mb-3">
+            <label class="form-label field-label" for="remarksField">Remarks *</label>
+            <textarea asp-for="RootPathForm.Remarks" id="remarksField" rows="4" maxlength="500" class="form-control" placeholder="Enter the reason for changing the Root Source Path..."></textarea>
+            <div class="d-flex justify-content-between text-muted small mt-1">
+                <span>Provide enough details for audit purposes.</span>
+                <span>Maximum 500 characters</span>
+            </div>
+            <span asp-validation-for="RootPathForm.Remarks" class="text-danger small d-block mt-1"></span>
+        </div>
+    </form>
+
+    <form id="startFetchForm" asp-controller="RdConfig" asp-action="StartFetch" method="post"
+          data-confirm-message="Are you sure you want to start the fetching process?" data-confirm-label="Start Fetching"></form>
+
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 border-top pt-3">
+        <div>
+            <div class="text-uppercase text-muted small">Last Updated</div>
+            @if (Model.LatestUpdate != null)
+            {
+                <div class="small mt-1">
+                    @Model.LatestUpdate.ModifiedAt.ToString("MM/dd/yyyy h:mm tt")
+                    <span class="text-muted mx-2">|</span>
+                    Modified by <strong>@Model.LatestUpdate.ModifiedBy</strong>
+                </div>
+            }
+            else
+            {
+                <div class="small text-muted mt-1">No updates recorded yet.</div>
+            }
+        </div>
+        <div class="d-flex gap-2">
+            <button type="submit" form="updateRootPathForm" class="btn btn-navy">Update</button>
+            <button type="submit" form="startFetchForm" class="btn btn-gold">Start Fetching</button>
+        </div>
+    </div>
+</div>
+
+<div class="card p-4">
+    <ul class="nav nav-tabs mb-4" role="tablist">
+        <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#fetchHistoryTab" type="button">Fetch History</button></li>
+        <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#rootHistoryTab" type="button">Root Source Path Update History</button></li>
+    </ul>
+
+    <div class="tab-content">
+        <div class="tab-pane fade show active" id="fetchHistoryTab">
+            <form data-list-page-form="fetch-history-results" action="@Url.Action("FetchHistoryResults")" method="get" class="filter-grid mb-4">
+                <div>
+                    <label class="form-label field-label" for="fetchDateFrom">Fetch Date From</label>
+                    <input type="date" class="form-control" id="fetchDateFrom" name="DateFrom" />
+                </div>
+                <div>
+                    <label class="form-label field-label" for="fetchDateTo">Fetch Date To</label>
+                    <input type="date" class="form-control" id="fetchDateTo" name="DateTo" />
+                </div>
+                <div>
+                    <label class="form-label field-label" for="fetchExecutedBy">Executed By</label>
+                    <input type="text" class="form-control" id="fetchExecutedBy" name="ExecutedBy" placeholder="User ID" />
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-navy flex-fill">Search</button>
+                    <button type="button" class="btn btn-outline-secondary flex-fill" data-list-page-clear>Clear</button>
+                </div>
+            </form>
+            <div id="fetch-history-results">
+                @await Html.PartialAsync("_FetchHistoryResults", Model.FetchHistory)
+            </div>
+        </div>
+
+        <div class="tab-pane fade" id="rootHistoryTab">
+            <form data-list-page-form="root-history-results" action="@Url.Action("RootHistoryResults")" method="get" class="filter-grid mb-4">
+                <div>
+                    <label class="form-label field-label" for="rootDateFrom">Modified Date From</label>
+                    <input type="date" class="form-control" id="rootDateFrom" name="DateFrom" />
+                </div>
+                <div>
+                    <label class="form-label field-label" for="rootDateTo">Modified Date To</label>
+                    <input type="date" class="form-control" id="rootDateTo" name="DateTo" />
+                </div>
+                <div>
+                    <label class="form-label field-label" for="rootModifiedBy">Modified By</label>
+                    <input type="text" class="form-control" id="rootModifiedBy" name="ModifiedBy" placeholder="User ID" />
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-navy flex-fill">Search</button>
+                    <button type="button" class="btn btn-outline-secondary flex-fill" data-list-page-clear>Clear</button>
+                </div>
+            </form>
+            <div id="root-history-results">
+                @await Html.PartialAsync("_RootHistoryResults", new RootHistoryResultsViewModel { Result = Model.RootHistory, HasAppliedFilters = false })
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/rd-config.js"></script>
+}

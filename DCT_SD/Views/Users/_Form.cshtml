@@ -1,0 +1,109 @@
+@model UserFormViewModel
+@{
+    var action = Model.IsEditing ? "Edit" : "Create";
+    var selectedIds = string.Join(",", Model.AssignedMenuIds);
+    var menusJson = System.Text.Json.JsonSerializer.Serialize(Model.Menus.Select(m => new { id = m.Id, label = m.Label }));
+    var isSubAdminSelected = Model.RoleOptions.FirstOrDefault(r => r.Id == Model.RoleId)?.Name == "Sub-Admin";
+}
+<div class="modal-header">
+    <h5 class="modal-title font-display">@(Model.IsEditing ? "Edit User" : "Add User")</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<form asp-controller="Users" asp-action="@action" asp-route-id="@Model.Id" method="post" id="userForm">
+    <div class="modal-body">
+        <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
+
+        <input type="hidden" asp-for="Id" />
+        <input type="hidden" asp-for="IsEditing" />
+
+        <div class="row g-3">
+            <div class="col-sm-6">
+                <label asp-for="FirstName" class="form-label field-label"></label>
+                <input asp-for="FirstName" class="form-control" placeholder="Enter First Name" />
+                <span asp-validation-for="FirstName" class="text-danger small"></span>
+            </div>
+            <div class="col-sm-6">
+                <label asp-for="LastName" class="form-label field-label"></label>
+                <input asp-for="LastName" class="form-control" placeholder="Enter Last Name" />
+                <span asp-validation-for="LastName" class="text-danger small"></span>
+            </div>
+
+            <div class="col-sm-6">
+                <div class="field-label-row">
+                    <label asp-for="Username" class="form-label field-label mb-0"></label>
+                    @await Html.PartialAsync("_FieldInfoTooltip", new FieldInfoTooltipViewModel { Title = "Username Requirements", Items = DCT_SD.Helpers.UserValidation.UsernameRequirements })
+                </div>
+                <input asp-for="Username" class="form-control mt-2" placeholder="user@example.com" readonly="@Model.IsEditing" />
+                <span asp-validation-for="Username" class="text-danger small"></span>
+                @if (Model.IsEditing)
+                {
+                    <p class="text-muted small mt-1 mb-0">Username cannot be changed once created.</p>
+                }
+            </div>
+
+            <div class="col-sm-6">
+                <div class="field-label-row">
+                    <label asp-for="Password" class="form-label field-label mb-0">Password @(!Model.IsEditing ? "*" : "")</label>
+                    @await Html.PartialAsync("_FieldInfoTooltip", new FieldInfoTooltipViewModel { Title = "Password Requirements", Items = DCT_SD.Helpers.UserValidation.PasswordRequirements })
+                </div>
+                <div class="position-relative mt-2">
+                    <input type="password" asp-for="Password" class="form-control" id="userPasswordInput"
+                           placeholder="@(Model.IsEditing ? "Leave blank to keep current password" : "Enter Password")" />
+                    <button type="button" class="btn btn-link btn-sm position-absolute top-50 end-0 translate-middle-y me-2 p-0"
+                            onclick="var i=document.getElementById('userPasswordInput'); i.type = i.type === 'password' ? 'text' : 'password'; this.textContent = i.type === 'password' ? 'SHOW' : 'HIDE';">SHOW</button>
+                </div>
+                <span asp-validation-for="Password" class="text-danger small"></span>
+            </div>
+
+            <div class="col-sm-6">
+                <label asp-for="RoleId" class="form-label field-label"></label>
+                <select asp-for="RoleId" class="form-select" id="userRoleSelect" disabled="@Model.RoleDisabled"
+                        onchange="document.getElementById('assignTabSection').classList.toggle('d-none', this.options[this.selectedIndex].dataset.name !== 'Sub-Admin')">
+                    <option value="">Select</option>
+                    @foreach (var role in Model.RoleOptions)
+                    {
+                        <option value="@role.Id" data-name="@role.Name" selected="@(Model.RoleId == role.Id)">@role.Name</option>
+                    }
+                </select>
+                <span asp-validation-for="RoleId" class="text-danger small"></span>
+                @if (Model.RoleDisabled)
+                {
+                    <input type="hidden" name="RoleId" value="@Model.RoleId" />
+                }
+            </div>
+
+            @if (Model.IsEditing)
+            {
+                <div class="col-sm-6">
+                    <label asp-for="Status" class="form-label field-label"></label>
+                    <select asp-for="Status" class="form-select">
+                        <option value="Active" selected="@(Model.Status == "Active")">Active</option>
+                        <option value="Deactivated" selected="@(Model.Status == "Deactivated")">Deactivated</option>
+                        <option value="Locked" selected="@(Model.Status == "Locked")">Locked</option>
+                    </select>
+                </div>
+            }
+
+            <div class="col-12 @(isSubAdminSelected ? "" : "d-none")" id="assignTabSection">
+                <button type="button" class="btn btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-2"
+                        data-assign-tab-trigger
+                        data-menus="@menusJson"
+                        data-selected="@selectedIds"
+                        data-target="assignTabHiddenInputs">
+                    Assign Tab
+                    <span class="badge badge-info @(Model.AssignedMenuIds.Count > 0 ? "" : "d-none")" data-assign-tab-count>@Model.AssignedMenuIds.Count selected</span>
+                </button>
+                <div id="assignTabHiddenInputs">
+                    @foreach (var menuId in Model.AssignedMenuIds)
+                    {
+                        <input type="hidden" name="AssignedMenuIds" value="@menuId" />
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-navy">@(Model.IsEditing ? "Update" : "Save")</button>
+    </div>
+</form>

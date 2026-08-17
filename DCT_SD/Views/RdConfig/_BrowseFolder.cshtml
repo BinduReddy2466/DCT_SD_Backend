@@ -1,0 +1,55 @@
+@model DCT_SD.Models.Dtos.RdConfig.DirectoryBrowseDto
+<div class="modal-header">
+    <h5 class="modal-title font-display">Select Root Source Path</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+</div>
+<div class="modal-body">
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <div class="alert alert-danger py-2 small">@Model.Error</div>
+    }
+
+    <div class="chip-mono mb-3 d-inline-block" id="browseFolderCurrentPath" data-current-path="@Model.CurrentPath">
+        @(Model.CurrentPath ?? "This PC")
+    </div>
+
+    <div style="max-height: 360px; overflow-y: auto;">
+        <table class="table table-sm table-hover mb-0">
+            <tbody>
+                @if (Model.CurrentPath != null)
+                {
+                    <tr>
+                        <td>
+                            <a data-modal-url="@Url.Action("BrowseFolders", new { path = Model.ParentPath })" class="d-flex align-items-center gap-2 text-decoration-none text-muted">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
+                                .. (Up)
+                            </a>
+                        </td>
+                    </tr>
+                }
+                @if (Model.Directories.Count == 0)
+                {
+                    <tr><td class="text-center text-muted py-3">No subfolders found.</td></tr>
+                }
+                else
+                {
+                    @foreach (var dir in Model.Directories)
+                    {
+                        <tr>
+                            <td>
+                                <a data-modal-url="@Url.Action("BrowseFolders", new { path = dir.FullPath })" class="d-flex align-items-center gap-2 text-decoration-none">
+                                    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 9.776c.112-.017.227-.026.344-.026h18.812c.117 0 .232.009.344.026m-19.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.06a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-19.5 0V6.108c0-1.135.845-2.098 1.976-2.192a48.424 48.424 0 011.876-.113m14.36 2.33V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.876-.113" /></svg>
+                                    @dir.Name
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+<div class="modal-footer">
+    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+    <button type="button" class="btn btn-navy" id="browseFolderSelectBtn" disabled="@(Model.CurrentPath == null)">Select This Folder</button>
+</div>

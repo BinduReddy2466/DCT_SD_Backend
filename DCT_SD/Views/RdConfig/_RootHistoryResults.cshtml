@@ -1,0 +1,43 @@
+@model RootHistoryResultsViewModel
+@{
+    var result = Model.Result;
+    var emptyMessage = Model.HasAppliedFilters ? "No records found." : "No Root Source Path update history found.";
+}
+
+<div class="table-responsive table-frame">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>Modified Date &amp; Time</th>
+                <th>From Source Path</th>
+                <th>To Source Path</th>
+                <th>Modified By</th>
+                <th>Remarks</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (result.Items.Count == 0)
+            {
+                <tr><td colspan="5" class="text-center text-muted py-4">@emptyMessage</td></tr>
+            }
+            else
+            {
+                @foreach (var item in result.Items)
+                {
+                    <tr>
+                        <td class="font-monospace small">@item.ModifiedAt.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small text-muted">@(item.FromPath ?? "—")</td>
+                        <td class="font-monospace small">@item.ToPath</td>
+                        <td><span class="chip-mono">@item.ModifiedBy</span></td>
+                        <td>@item.Remarks</td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (result.TotalCount > 0)
+{
+    @await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = result.PageNumber, PageSize = result.PageSize, TotalCount = result.TotalCount, TotalPages = result.TotalPages, ActionName = "RootHistoryResults" })
+}

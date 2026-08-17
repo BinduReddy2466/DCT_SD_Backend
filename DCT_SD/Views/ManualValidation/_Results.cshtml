@@ -1,0 +1,66 @@
+@using DCT_SD.Helpers
+@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.ManualValidation.ManualValidationListItemDto>
+
+<div class="table-responsive table-frame">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>Request ID</th>
+                <th>RD Code</th>
+                <th>RD Name</th>
+                <th>Entry No.</th>
+                <th>Title No.</th>
+                <th>Title Type</th>
+                <th>Status</th>
+                <th>Missing Fields</th>
+                <th>Extraction Date</th>
+                <th>Updated By</th>
+                <th>Updated Date</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr><td colspan="12" class="text-center text-muted py-4">No manual validation records found.</td></tr>
+            }
+            else
+            {
+                @foreach (var item in Model.Items)
+                {
+                    <tr>
+                        <td><span class="chip-mono">@item.RequestNumber</span></td>
+                        <td class="font-monospace small">@(item.RdCode ?? "—")</td>
+                        <td>@(item.RdName ?? "—")</td>
+                        <td>@(item.EntryNumbersCsv ?? "—")</td>
+                        <td class="font-monospace small">@(item.Title ?? "—")</td>
+                        <td>@(item.TitleType ?? "—")</td>
+                        <td><status-badge status="@StatusDisplay.ManualValidationStatusToDisplay(item.Status)"></status-badge></td>
+                        <td class="text-muted small">@StatusDisplay.DescribeMissingFields(item.MissingFields)</td>
+                        <td class="font-monospace small">@item.ExtractionDate.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td>
+                            @if (item.UpdatedBy != null)
+                            {
+                                <span class="chip-mono">@item.UpdatedBy</span>
+                            }
+                            else
+                            {
+                                @:—
+                            }
+                        </td>
+                        <td class="font-monospace small">@(item.UpdatedDate?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
+                        <td>
+                            <div class="d-flex gap-1">
+                                <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "ManualValidation", new { id = item.Id })">View</a>
+                                <button type="button" class="btn btn-outline-secondary btn-sm"
+                                        data-modal-url="@Url.Action("RemarksHistory", "ManualValidation", new { id = item.Id, requestNumber = item.RequestNumber })">History</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })

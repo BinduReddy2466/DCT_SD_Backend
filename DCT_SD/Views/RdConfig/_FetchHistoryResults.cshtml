@@ -1,0 +1,40 @@
+@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.RdConfig.FetchRunItemDto>
+
+<div class="table-responsive table-frame">
+    <table class="table table-hover align-middle">
+        <thead>
+            <tr>
+                <th>Fetch Date &amp; Time</th>
+                <th>Completion Date &amp; Time</th>
+                <th>Run Time</th>
+                <th>Progress</th>
+                <th>Status</th>
+                <th>Executed By</th>
+                <th>Source Path</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr><td colspan="7" class="text-center text-muted py-4">No fetch history found.</td></tr>
+            }
+            else
+            {
+                @foreach (var item in Model.Items)
+                {
+                    <tr>
+                        <td class="font-monospace small">@item.StartedAt.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@(item.CompletedAt?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
+                        <td>@(item.RunTime ?? "—")</td>
+                        <td>@item.ProcessedCount/@(item.TotalCount?.ToString() ?? "—")</td>
+                        <td><status-badge status="@(item.Status == "Ongoing" ? "Ongoing Fetching" : item.Status)"></status-badge></td>
+                        <td><span class="chip-mono">@item.ExecutedBy</span></td>
+                        <td class="font-monospace small">@item.SourcePath</td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "FetchHistoryResults" })
