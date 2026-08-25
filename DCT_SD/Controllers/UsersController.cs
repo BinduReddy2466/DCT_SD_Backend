@@ -116,12 +116,21 @@ public class UsersController : Controller
     public async Task<IActionResult> Edit(int id, CancellationToken cancellationToken)
     {
         var user = await _userService.GetByIdAsync(id, cancellationToken);
+
+        // The Edit button is hidden entirely for Administrator rows - this guards the direct
+        // URL too (e.g. someone navigating straight to /Users/Edit/{id}).
+        if (user.Role == RoleNames.Administrator)
+        {
+            return StatusCode(403, "Administrator accounts cannot be edited through User Management.");
+        }
+
         var model = new UserFormViewModel
         {
             Id = user.Id,
             FirstName = user.FirstName,
             LastName = user.LastName,
             Username = user.Username,
+            Password = user.PasswordHash,
             RoleId = user.RoleId,
             Status = user.Status,
             AssignedMenuIds = user.AssignedMenuIds.ToList(),
@@ -144,8 +153,7 @@ public class UsersController : Controller
 
         if (!ModelState.IsValid)
         {
-            model.RoleOptions = await GetRoleOptionsAsync(CurrentRole, null, cancellationToken);
-            model.Menus = await _menuService.GetAllAsync(cancellationToken);
+            await RepopulateEditFormAsync(model, id, cancellationToken);
             return PartialView("_Form", model);
         }
 
@@ -157,15 +165,13 @@ public class UsersController : Controller
                 LastName = model.LastName.Trim(),
                 RoleId = model.RoleId ?? 0,
                 Status = model.Status,
-                Password = string.IsNullOrWhiteSpace(model.Password) ? null : model.Password,
                 AssignedMenuIds = model.AssignedMenuIds,
             }, cancellationToken);
         }
         catch (Exception ex) when (ex is ConflictException or ForbiddenAppException or BusinessValidationException or NotFoundException)
         {
             ModelState.AddModelError(string.Empty, ex.Message);
-            model.RoleOptions = await GetRoleOptionsAsync(CurrentRole, null, cancellationToken);
-            model.Menus = await _menuService.GetAllAsync(cancellationToken);
+            await RepopulateEditFormAsync(model, id, cancellationToken);
             return PartialView("_Form", model);
         }
 
@@ -221,12 +227,8 @@ public class UsersController : Controller
 
     private void ValidateEditFields(UserFormViewModel model)
     {
-        if (!string.IsNullOrEmpty(model.Password) && !UserValidation.IsValidPassword(model.Password))
-        {
-            ModelState.AddModelError(nameof(model.Password),
-                "The password does not meet the minimum requirements: 8-32 characters with at least one uppercase, one lowercase, one number, and one special character (!,@#$%^&*_-+=).");
-        }
-
+        // Password is a disabled, display-only field on Edit (it shows the stored hash, not
+        // an editable value) - there is nothing to validate here.
         if (model.RoleId is null or 0)
         {
             ModelState.AddModelError(nameof(model.RoleId), "Please select a role.");
@@ -235,16 +237,12 @@ public class UsersController : Controller
 
     private string? CurrentRole => User.FindFirst(ClaimTypes.Role)?.Value;
 
-    private bool IsRoleDisabled(string editingUserRole, string editingUsername)
-    {
-        var currentUsername = User.Identity?.Name;
-        if (CurrentRole != RoleNames.Administrator)
-        {
-            return false;
-        }
-
-        return editingUserRole == RoleNames.SubAdmin || editingUsername == currentUsername;
-    }
+    // Role ID 1 always means Administrator and that can never change - the dropdown is locked
+    // for every Administrator account, not just when the viewer is editing themselves, so one
+    // Administrator can't demote another through this form either. A Sub-Admin account's level
+    // is likewise locked for anyone editing it.
+    private bool IsRoleDisabled(string editingUserRole, string editingUsername) =>
+        editingUserRole == RoleNames.SubAdmin || editingUserRole == RoleNames.Administrator;
 
     private async Task<IReadOnlyList<RoleDto>> GetRoleOptionsAsync(string? currentRole, string? editingUserRole, CancellationToken cancellationToken)
     {
@@ -261,7 +259,31 @@ public class UsersController : Controller
             options = options.Where(r => r.Name != RoleNames.SubAdmin);
         }
 
-        return options.ToArray();
+        var result = options.ToList();
+
+        // The dropdown is disabled (see IsRoleDisabled) whenever editingUserRole is
+        // Administrator or Sub-Admin, but those two roles are excluded from the assignable
+        // list built above. Without this, a disabled dropdown for such an account would show
+        // no selected option at all instead of the account's actual current role.
+        if (editingUserRole != null && result.All(r => r.Name != editingUserRole))
+        {
+            var currentRoleDto = roles.FirstOrDefault(r => r.Name == editingUserRole);
+            if (currentRoleDto != null)
+            {
+                result.Insert(0, currentRoleDto);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task RepopulateEditFormAsync(UserFormViewModel model, int id, CancellationToken cancellationToken)
+    {
+        var user = await _userService.GetByIdAsync(id, cancellationToken);
+        model.Password = user.PasswordHash;
+        model.RoleDisabled = IsRoleDisabled(user.Role, user.Username);
+        model.RoleOptions = await GetRoleOptionsAsync(CurrentRole, user.Role, cancellationToken);
+        model.Menus = await _menuService.GetAllAsync(cancellationToken);
     }
 }
 

@@ -6,7 +6,7 @@ public class MigrationDocument
 {
     public int Id { get; set; }
     public int MigrationRecordId { get; set; }
-    public int? DocumentTypeId { get; set; }
+    public int? CodeLookupId { get; set; }
     public string DocumentName { get; set; } = string.Empty;
     public string FileName { get; set; } = string.Empty;
     public MigrationDocumentStatus Status { get; set; } = MigrationDocumentStatus.Migrated;
@@ -16,5 +16,5 @@ public class MigrationDocument
     public DateTime? ActionDate { get; set; }
 
     public MigrationRecord MigrationRecord { get; set; } = null!;
-    public DocumentType? DocumentType { get; set; }
+    public CodeLookup? CodeLookup { get; set; }
 }

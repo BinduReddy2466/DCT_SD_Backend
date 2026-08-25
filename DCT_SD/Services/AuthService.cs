@@ -1,6 +1,7 @@
 using DCT_SD.Configuration;
 using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
+using DCT_SD.Models;
 using DCT_SD.Models.Dtos.Auth;
 using DCT_SD.Models.Entities;
 using DCT_SD.Models.Enums;
@@ -31,10 +32,7 @@ public class AuthService : IAuthService
     public async Task<User> LoginAsync(string username, string password, CancellationToken cancellationToken = default)
     {
         var trimmed = username.Trim();
-        var user = await _context.Users
-            .Include(u => u.Role)
-            .Include(u => u.MenuPermissions).ThenInclude(p => p.Menu)
-            .FirstOrDefaultAsync(u => u.Username.ToLower() == trimmed.ToLower(), cancellationToken);
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == trimmed.ToLower(), cancellationToken);
 
         if (user is null)
         {
@@ -67,19 +65,18 @@ public class AuthService : IAuthService
         return user;
     }
 
-    public async Task<IReadOnlyList<string>> ResolveAllowedMenusAsync(User user, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<string>> ResolveAllowedMenusAsync(User user, CancellationToken cancellationToken = default)
     {
-        var baseMenus = await _context.Menus.Where(m => m.IsBaseMenu).Select(m => m.Key).ToListAsync(cancellationToken);
-        var explicitGrants = user.MenuPermissions.Select(p => p.Menu.Key);
-        return AllowedMenuResolver.Resolve(user.Role.Name, baseMenus, explicitGrants);
+        var explicitGrants = string.IsNullOrWhiteSpace(user.MenuPermissionsCsv)
+            ? []
+            : user.MenuPermissionsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return Task.FromResult(AllowedMenuResolver.Resolve(user.RoleName, MenuKeys.BaseMenus, explicitGrants));
     }
 
     public async Task<AuthenticatedUserDto> GetCurrentUserAsync(int userId, CancellationToken cancellationToken = default)
     {
-        var user = await _context.Users
-            .Include(u => u.Role)
-            .Include(u => u.MenuPermissions).ThenInclude(p => p.Menu)
-            .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken)
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken)
             ?? throw new NotFoundException(nameof(User), userId);
 
         var allowedMenus = await ResolveAllowedMenusAsync(user, cancellationToken);
@@ -89,7 +86,7 @@ public class AuthService : IAuthService
             FirstName = user.FirstName,
             LastName = user.LastName,
             Username = user.Username,
-            Role = user.Role.Name,
+            Role = user.RoleName,
             AllowedMenus = allowedMenus,
         };
     }
@@ -126,8 +123,7 @@ public class AuthService : IAuthService
     {
         var hash = _tokenService.HashRefreshToken(rawToken);
         var existing = await _context.RefreshTokens
-            .Include(t => t.User).ThenInclude(u => u.Role)
-            .Include(t => t.User).ThenInclude(u => u.MenuPermissions).ThenInclude(p => p.Menu)
+            .Include(t => t.User)
             .FirstOrDefaultAsync(t => t.TokenHash == hash, cancellationToken);
 
         if (existing is null)

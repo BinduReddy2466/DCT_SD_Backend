@@ -8,7 +8,7 @@ public class OcrExtractionRecordConfiguration : IEntityTypeConfiguration<OcrExtr
 {
     public void Configure(EntityTypeBuilder<OcrExtractionRecord> builder)
     {
-        builder.ToTable("OcrExtractionRecords");
+        builder.ToTable("OcrExtractionRecords", tb => tb.UseSqlOutputClause(false)); // trg_OcrExtractionRecords_AuditLog blocks the default OUTPUT clause
 
         builder.HasKey(r => r.Id);
 
@@ -16,6 +16,7 @@ public class OcrExtractionRecordConfiguration : IEntityTypeConfiguration<OcrExtr
         builder.Property(r => r.RdCode).HasMaxLength(20);
         builder.Property(r => r.RdName).HasMaxLength(150);
         builder.Property(r => r.FolderPath).HasMaxLength(1000).IsRequired();
+        builder.Property(r => r.EntryNumbersCsv).HasMaxLength(200);
         builder.Property(r => r.TitleNumber).HasMaxLength(50);
         builder.Property(r => r.TitleType).HasConversion<int?>();
         builder.Property(r => r.ExtractionStatus).HasConversion<int>().IsRequired();

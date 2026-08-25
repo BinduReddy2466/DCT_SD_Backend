@@ -1,6 +1,8 @@
+using System.Text.Json;
 using DCT_SD.Configuration;
 using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
+using DCT_SD.Models;
 using DCT_SD.Models.Dtos.Settings;
 using DCT_SD.Models.Entities;
 using DCT_SD.Models.Enums;
@@ -9,11 +11,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DCT_SD.Services;
 
+// AppSettings replaces the old SessionSettings/BrandingSettings/EmailTemplates tables: one row
+// per Category (Session/Branding, single row each) or per Category+Key (EmailTemplate, one row
+// per template), with the actual fields carried in DataJson. Shapes below are confirmed from
+// live data, not invented.
 public class SettingsService : ISettingsService
 {
     private static readonly string[] AllowedImageContentTypes = { "image/jpeg", "image/png", "image/webp", "image/gif" };
     private const long MaxImageBytes = 5 * 1024 * 1024;
     private const string BrandingUploadsRelativePath = "uploads/branding";
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ApplicationDbContext _context;
     private readonly IWebHostEnvironment _webHostEnvironment;
@@ -26,8 +33,10 @@ public class SettingsService : ISettingsService
 
     public async Task<SessionSettingsDto> GetSessionSettingsAsync(CancellationToken cancellationToken = default)
     {
-        var setting = await _context.SessionSettings.AsNoTracking().FirstAsync(cancellationToken);
-        return new SessionSettingsDto { TimeoutMinutes = setting.TimeoutMinutes, Action = setting.Action.ToString() };
+        var setting = await _context.AppSettings.AsNoTracking()
+            .FirstAsync(s => s.Category == AppSettingCategories.Session, cancellationToken);
+        var data = JsonSerializer.Deserialize<SessionSettingsJson>(setting.DataJson, JsonOptions)!;
+        return new SessionSettingsDto { TimeoutMinutes = data.TimeoutMinutes, Action = ((SessionTimeoutAction)data.Action).ToString() };
     }
 
     public async Task<SessionSettingsDto> UpdateSessionSettingsAsync(UpdateSessionSettingsRequestDto request, CancellationToken cancellationToken = default)
@@ -42,18 +51,19 @@ public class SettingsService : ISettingsService
             throw new BusinessValidationException("Timeout action must be one of: Lock, Logout.");
         }
 
-        var setting = await _context.SessionSettings.FirstAsync(cancellationToken);
-        setting.TimeoutMinutes = request.TimeoutMinutes;
-        setting.Action = action;
+        var setting = await _context.AppSettings.FirstAsync(s => s.Category == AppSettingCategories.Session, cancellationToken);
+        setting.DataJson = JsonSerializer.Serialize(new SessionSettingsJson(request.TimeoutMinutes, (int)action), JsonOptions);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return new SessionSettingsDto { TimeoutMinutes = setting.TimeoutMinutes, Action = setting.Action.ToString() };
+        return new SessionSettingsDto { TimeoutMinutes = request.TimeoutMinutes, Action = action.ToString() };
     }
 
     public async Task<BrandingDto> GetBrandingAsync(CancellationToken cancellationToken = default)
     {
-        var setting = await _context.BrandingSettings.AsNoTracking().FirstAsync(cancellationToken);
-        return new BrandingDto { ImageUrl = setting.ImagePath };
+        var setting = await _context.AppSettings.AsNoTracking()
+            .FirstAsync(s => s.Category == AppSettingCategories.Branding, cancellationToken);
+        var data = JsonSerializer.Deserialize<BrandingJson>(setting.DataJson, JsonOptions)!;
+        return new BrandingDto { ImageUrl = data.ImagePath };
     }
 
     public async Task<BrandingDto> UpdateBrandingImageAsync(IFormFile file, CancellationToken cancellationToken = default)
@@ -73,7 +83,8 @@ public class SettingsService : ISettingsService
             throw new BusinessValidationException("Please upload a JPEG, PNG, WEBP, or GIF image.");
         }
 
-        var setting = await _context.BrandingSettings.FirstAsync(cancellationToken);
+        var setting = await _context.AppSettings.FirstAsync(s => s.Category == AppSettingCategories.Branding, cancellationToken);
+        var data = JsonSerializer.Deserialize<BrandingJson>(setting.DataJson, JsonOptions)!;
 
         var uploadsDirectory = Path.Combine(_webHostEnvironment.WebRootPath, BrandingUploadsRelativePath);
         Directory.CreateDirectory(uploadsDirectory);
@@ -86,19 +97,21 @@ public class SettingsService : ISettingsService
             await file.CopyToAsync(stream, cancellationToken);
         }
 
-        DeletePhysicalFileIfExists(setting.ImagePath);
+        DeletePhysicalFileIfExists(data.ImagePath);
 
-        setting.ImagePath = $"/{BrandingUploadsRelativePath}/{fileName}";
+        var newImagePath = $"/{BrandingUploadsRelativePath}/{fileName}";
+        setting.DataJson = JsonSerializer.Serialize(new BrandingJson(newImagePath), JsonOptions);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return new BrandingDto { ImageUrl = setting.ImagePath };
+        return new BrandingDto { ImageUrl = newImagePath };
     }
 
     public async Task<BrandingDto> RemoveBrandingImageAsync(CancellationToken cancellationToken = default)
     {
-        var setting = await _context.BrandingSettings.FirstAsync(cancellationToken);
-        DeletePhysicalFileIfExists(setting.ImagePath);
-        setting.ImagePath = null;
+        var setting = await _context.AppSettings.FirstAsync(s => s.Category == AppSettingCategories.Branding, cancellationToken);
+        var data = JsonSerializer.Deserialize<BrandingJson>(setting.DataJson, JsonOptions)!;
+        DeletePhysicalFileIfExists(data.ImagePath);
+        setting.DataJson = JsonSerializer.Serialize(new BrandingJson(null), JsonOptions);
         await _context.SaveChangesAsync(cancellationToken);
 
         return new BrandingDto { ImageUrl = null };
@@ -120,45 +133,60 @@ public class SettingsService : ISettingsService
 
     public async Task<IReadOnlyList<EmailTemplateDto>> GetEmailTemplatesAsync(CancellationToken cancellationToken = default)
     {
-        var templates = await _context.EmailTemplates.AsNoTracking().OrderBy(t => t.Id).ToListAsync(cancellationToken);
+        var templates = await _context.AppSettings.AsNoTracking()
+            .Where(s => s.Category == AppSettingCategories.EmailTemplate)
+            .OrderBy(s => s.Id)
+            .ToListAsync(cancellationToken);
         return templates.Select(MapToDto).ToArray();
     }
 
     public async Task<EmailTemplateDto> UpdateEmailTemplateAsync(string key, UpdateEmailTemplateRequestDto request, CancellationToken cancellationToken = default)
     {
-        var template = await _context.EmailTemplates.FirstOrDefaultAsync(t => t.Key == key, cancellationToken)
+        var setting = await _context.AppSettings
+            .FirstOrDefaultAsync(s => s.Category == AppSettingCategories.EmailTemplate && s.Key == key, cancellationToken)
             ?? throw new NotFoundException("Email template", key);
 
-        template.Recipients = request.Recipients.Trim();
-        template.Subject = request.Subject.Trim();
-        template.Body = request.Body;
+        var data = JsonSerializer.Deserialize<EmailTemplateJson>(setting.DataJson, JsonOptions)!;
+        setting.DataJson = JsonSerializer.Serialize(data with
+        {
+            Recipients = request.Recipients.Trim(),
+            Subject = request.Subject.Trim(),
+            Body = request.Body,
+        }, JsonOptions);
 
         await _context.SaveChangesAsync(cancellationToken);
-        return MapToDto(template);
+        return MapToDto(setting);
     }
 
     public async Task<EmailTemplateDto> RestoreEmailTemplateDefaultAsync(string key, CancellationToken cancellationToken = default)
     {
-        var template = await _context.EmailTemplates.FirstOrDefaultAsync(t => t.Key == key, cancellationToken)
+        var setting = await _context.AppSettings
+            .FirstOrDefaultAsync(s => s.Category == AppSettingCategories.EmailTemplate && s.Key == key, cancellationToken)
             ?? throw new NotFoundException("Email template", key);
 
         var defaults = DefaultEmailTemplates.Find(key)
             ?? throw new NotFoundException("Default email template", key);
 
-        template.Recipients = defaults.Recipients;
-        template.Subject = defaults.Subject;
-        template.Body = defaults.Body;
+        setting.DataJson = JsonSerializer.Serialize(new EmailTemplateJson(defaults.Recipients, defaults.Subject, defaults.Body), JsonOptions);
 
         await _context.SaveChangesAsync(cancellationToken);
-        return MapToDto(template);
+        return MapToDto(setting);
     }
 
-    private static EmailTemplateDto MapToDto(EmailTemplate t) => new()
+    private static EmailTemplateDto MapToDto(AppSetting s)
     {
-        Key = t.Key,
-        Label = t.Label,
-        Recipients = t.Recipients,
-        Subject = t.Subject,
-        Body = t.Body,
-    };
+        var data = JsonSerializer.Deserialize<EmailTemplateJson>(s.DataJson, JsonOptions)!;
+        return new EmailTemplateDto
+        {
+            Key = s.Key ?? string.Empty,
+            Label = s.Label ?? string.Empty,
+            Recipients = data.Recipients,
+            Subject = data.Subject,
+            Body = data.Body,
+        };
+    }
+
+    private record SessionSettingsJson(int TimeoutMinutes, int Action);
+    private record BrandingJson(string? ImagePath);
+    private record EmailTemplateJson(string Recipients, string Subject, string Body);
 }

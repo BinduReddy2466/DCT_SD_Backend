@@ -8,7 +8,7 @@ public class EmptyFolderRecordConfiguration : IEntityTypeConfiguration<EmptyFold
 {
     public void Configure(EntityTypeBuilder<EmptyFolderRecord> builder)
     {
-        builder.ToTable("EmptyFolderRecords");
+        builder.ToTable("EmptyFolderRecords", tb => tb.UseSqlOutputClause(false)); // trg_EmptyFolderRecords_AuditLog blocks the default OUTPUT clause
 
         builder.HasKey(r => r.Id);
 

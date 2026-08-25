@@ -10,6 +10,13 @@ public static class MenuKeys
     public const string Roles = "roles";
     public const string Settings = "settings";
 
+    // Not a real page/route - a parent-level Assign Tab permission that, for a Sub-Admin only,
+    // gates access to every key in BaseMenus as a single all-or-nothing bundle (see
+    // AllowedMenuResolver). Deliberately excluded from BaseMenus/RestrictedMenus/All: those
+    // arrays drive sidebar navigation and per-page [Authorize(Policy="Menu:...")] registration,
+    // neither of which this key should ever be treated as.
+    public const string DctSd = "dct-sd";
+
     public static readonly string[] BaseMenus =
     {
         RdConfig, MigrationMonitoring, ManualValidation, EmptyFolders

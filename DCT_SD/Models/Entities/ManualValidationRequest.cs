@@ -20,6 +20,7 @@ public class ManualValidationRequest
 
     public ManualValidationStatus Status { get; set; }
     public string MissingFieldsCsv { get; set; } = string.Empty;
+    public string? DocumentsJson { get; set; }
     public DateTime ExtractionDate { get; set; }
 
     public int? UpdatedByUserId { get; set; }
@@ -33,6 +34,4 @@ public class ManualValidationRequest
     public DateTime? MigratedAt { get; set; }
 
     public OcrExtractionRecord? OcrExtractionRecord { get; set; }
-    public ICollection<ManualValidationDocument> Documents { get; set; } = new List<ManualValidationDocument>();
-    public ICollection<ManualValidationRemark> RemarksHistory { get; set; } = new List<ManualValidationRemark>();
 }

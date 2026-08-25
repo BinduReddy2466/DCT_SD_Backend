@@ -51,6 +51,8 @@ public static class StatusDisplay
     public static IReadOnlyList<string> MigrationStatusOptions => MigrationStatusMap.Values.ToArray();
 
     public static string SdStatusToDisplay(string status) => SdStatusMap.GetValueOrDefault(status, status);
+    public static string? SdStatusToApi(string? display) => SdStatusMap.FirstOrDefault(kv => kv.Value == display).Key;
+    public static IReadOnlyList<string> SdStatusOptions => SdStatusMap.Values.ToArray();
 
     public static string ManualValidationStatusToDisplay(string status) => ManualValidationStatusMap.GetValueOrDefault(status, status);
     public static string? ManualValidationStatusToApi(string? display) => ManualValidationStatusMap.FirstOrDefault(kv => kv.Value == display).Key;

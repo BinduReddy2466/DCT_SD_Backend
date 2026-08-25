@@ -17,26 +17,17 @@ public class ApplicationDbContext : DbContext
     }
 
     public DbSet<User> Users => Set<User>();
-    public DbSet<Role> Roles => Set<Role>();
-    public DbSet<Menu> Menus => Set<Menu>();
-    public DbSet<UserMenuPermission> UserMenuPermissions => Set<UserMenuPermission>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-    public DbSet<RegistryOffice> RegistryOffices => Set<RegistryOffice>();
-    public DbSet<RootPathHistory> RootPathHistories => Set<RootPathHistory>();
     public DbSet<FetchRun> FetchRuns => Set<FetchRun>();
-    public DbSet<DocumentType> DocumentTypes => Set<DocumentType>();
     public DbSet<OcrExtractionRecord> OcrExtractionRecords => Set<OcrExtractionRecord>();
-    public DbSet<OcrExtractionEntry> OcrExtractionEntries => Set<OcrExtractionEntry>();
     public DbSet<ManualValidationRequest> ManualValidationRequests => Set<ManualValidationRequest>();
-    public DbSet<ManualValidationDocument> ManualValidationDocuments => Set<ManualValidationDocument>();
-    public DbSet<ManualValidationRemark> ManualValidationRemarks => Set<ManualValidationRemark>();
-    public DbSet<TitleSequenceLookup> TitleSequenceLookups => Set<TitleSequenceLookup>();
     public DbSet<MigrationRecord> MigrationRecords => Set<MigrationRecord>();
     public DbSet<MigrationDocument> MigrationDocuments => Set<MigrationDocument>();
     public DbSet<EmptyFolderRecord> EmptyFolderRecords => Set<EmptyFolderRecord>();
-    public DbSet<SessionSetting> SessionSettings => Set<SessionSetting>();
-    public DbSet<BrandingSetting> BrandingSettings => Set<BrandingSetting>();
-    public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
+    public DbSet<CodeLookup> CodeLookups => Set<CodeLookup>();
+    public DbSet<AppSetting> AppSettings => Set<AppSetting>();
+    public DbSet<RecordHistory> RecordHistory => Set<RecordHistory>();
+    public DbSet<AuditLog> AuditLog => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

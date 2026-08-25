@@ -46,8 +46,14 @@
         if (contentType.indexOf('application/json') !== -1) {
           return response.json().then(function (data) {
             bsModal.hide();
-            if (data.message && window.showToast) {
-              window.showToast(data.message, data.toastVariant || 'success');
+            // location.reload() below navigates away immediately - calling showToast() here
+            // would create the toast only for it to be destroyed before it ever paints. Stash
+            // it in sessionStorage instead; toast.js shows it once the new page loads.
+            if (data.message) {
+              sessionStorage.setItem('pendingToast', JSON.stringify({
+                message: data.message,
+                variant: data.toastVariant || 'success',
+              }));
             }
             window.location.reload();
           });

@@ -6,6 +6,5 @@ public class UpdateUserRequestDto
     public string LastName { get; set; } = string.Empty;
     public int RoleId { get; set; }
     public string Status { get; set; } = string.Empty;
-    public string? Password { get; set; }
     public List<int> AssignedMenuIds { get; set; } = new();
 }

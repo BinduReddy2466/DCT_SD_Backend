@@ -53,7 +53,7 @@ public class AccountController : Controller
             var user = await _authService.LoginAsync(model.Username, model.Password, cancellationToken);
             var allowedMenus = await _authService.ResolveAllowedMenusAsync(user, cancellationToken);
 
-            var (accessToken, accessExpiresAt) = _tokenService.CreateAccessToken(user.Id, user.Username, user.Role.Name, allowedMenus);
+            var (accessToken, accessExpiresAt) = _tokenService.CreateAccessToken(user.Id, user.Username, user.RoleName, allowedMenus);
             var (refreshToken, refreshExpiresAt) = await _authService.IssueRefreshTokenAsync(user.Id, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
 
             AuthCookieHelper.SetAccessTokenCookie(Response, accessToken, accessExpiresAt);

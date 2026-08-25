@@ -19,3 +19,15 @@ window.showToast = function (message, variant) {
     toastEl.remove();
   });
 };
+
+// Counterpart to modal-loader.js stashing a toast in sessionStorage before a client-side
+// location.reload() - the reload lands here, so this is what actually shows it.
+document.addEventListener('DOMContentLoaded', function () {
+  var pending = sessionStorage.getItem('pendingToast');
+  if (!pending) return;
+  sessionStorage.removeItem('pendingToast');
+  try {
+    var toast = JSON.parse(pending);
+    window.showToast(toast.message, toast.variant);
+  } catch (e) { /* malformed value, nothing to show */ }
+});

@@ -8,7 +8,7 @@ public class MigrationDocumentConfiguration : IEntityTypeConfiguration<Migration
 {
     public void Configure(EntityTypeBuilder<MigrationDocument> builder)
     {
-        builder.ToTable("MigrationDocuments");
+        builder.ToTable("MigrationDocuments", tb => tb.UseSqlOutputClause(false)); // trg_MigrationDocuments_AuditLog blocks the default OUTPUT clause
 
         builder.HasKey(d => d.Id);
 
@@ -19,11 +19,12 @@ public class MigrationDocumentConfiguration : IEntityTypeConfiguration<Migration
         builder.Property(d => d.PerformedByUsername).HasMaxLength(256);
 
         builder.HasIndex(d => d.MigrationRecordId);
-        builder.HasIndex(d => d.DocumentTypeId);
+        builder.HasIndex(d => new { d.MigrationRecordId, d.FileName }).IsUnique();
+        builder.HasIndex(d => d.CodeLookupId);
 
-        builder.HasOne(d => d.DocumentType)
-            .WithMany(t => t.MigrationDocuments)
-            .HasForeignKey(d => d.DocumentTypeId)
+        builder.HasOne(d => d.CodeLookup)
+            .WithMany()
+            .HasForeignKey(d => d.CodeLookupId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

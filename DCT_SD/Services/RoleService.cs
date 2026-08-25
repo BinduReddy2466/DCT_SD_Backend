@@ -1,75 +1,39 @@
-using DCT_SD.Configuration;
 using DCT_SD.Helpers.Exceptions;
+using DCT_SD.Models;
 using DCT_SD.Models.Dtos.Roles;
-using DCT_SD.Models.Entities;
-using Microsoft.EntityFrameworkCore;
 
 namespace DCT_SD.Services;
 
+// PROVISIONAL: the new DCT_SD schema has no Roles table - Users.RoleName is a free-text
+// column, so custom role CRUD has no backing store anymore. This exposes the fixed set of
+// role names already found in the live Users data (RoleNames) as a read-only list so the
+// User form's role dropdown keeps working; Create/Update are disabled rather than faking
+// persistence. Screens 17-22 (User Management) are flagged out of scope pending explicit
+// direction - this stub only keeps the solution compiling and the read path functional.
 public class RoleService : IRoleService
 {
-    private readonly ApplicationDbContext _context;
+    private static readonly RoleDto[] FixedRoles =
+    [
+        new() { Id = 1, Name = RoleNames.Administrator, Description = "Full system access.", IsSystemDefined = true },
+        new() { Id = 2, Name = RoleNames.SubAdmin, Description = "Administrator-delegated access to explicitly assigned modules.", IsSystemDefined = true },
+        new() { Id = 3, Name = RoleNames.Encoder, Description = "Operational data-entry access to the core pipeline modules.", IsSystemDefined = false },
+        new() { Id = 4, Name = RoleNames.LaresQa, Description = "LARES quality-assurance review access.", IsSystemDefined = false },
+        new() { Id = 5, Name = RoleNames.LraQa, Description = "LRA quality-assurance review access.", IsSystemDefined = false },
+    ];
 
-    public RoleService(ApplicationDbContext context)
+    public Task<IReadOnlyList<RoleDto>> GetAllAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<RoleDto>>(FixedRoles);
+
+    public Task<RoleDto> GetByIdAsync(int id, CancellationToken cancellationToken = default)
     {
-        _context = context;
+        var role = FixedRoles.FirstOrDefault(r => r.Id == id)
+            ?? throw new NotFoundException("Role", id);
+        return Task.FromResult(role);
     }
 
-    public async Task<IReadOnlyList<RoleDto>> GetAllAsync(CancellationToken cancellationToken = default) =>
-        (await _context.Roles.AsNoTracking().OrderBy(r => r.Id).ToListAsync(cancellationToken))
-            .Select(MapToDto).ToArray();
+    public Task<RoleDto> CreateAsync(CreateRoleRequestDto request, CancellationToken cancellationToken = default) =>
+        throw new BusinessValidationException("Custom roles are not supported: the current database has no Roles table (Users.RoleName is a fixed value).");
 
-    public async Task<RoleDto> GetByIdAsync(int id, CancellationToken cancellationToken = default)
-    {
-        var role = await _context.Roles.FindAsync([id], cancellationToken)
-            ?? throw new NotFoundException(nameof(Role), id);
-        return MapToDto(role);
-    }
-
-    public async Task<RoleDto> CreateAsync(CreateRoleRequestDto request, CancellationToken cancellationToken = default)
-    {
-        var name = request.Name.Trim();
-        if (await _context.Roles.AnyAsync(r => r.Name.ToLower() == name.ToLower(), cancellationToken))
-        {
-            throw new ConflictException($"Role '{name}' already exists.");
-        }
-
-        var role = new Role { Name = name, Description = request.Description?.Trim(), IsSystemDefined = false };
-        _context.Roles.Add(role);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return MapToDto(role);
-    }
-
-    public async Task<RoleDto> UpdateAsync(int id, UpdateRoleRequestDto request, CancellationToken cancellationToken = default)
-    {
-        var role = await _context.Roles.FindAsync([id], cancellationToken)
-            ?? throw new NotFoundException(nameof(Role), id);
-
-        var newName = request.Name.Trim();
-
-        if (role.IsSystemDefined && !string.Equals(role.Name, newName, StringComparison.Ordinal))
-        {
-            throw new ForbiddenAppException("System-defined roles cannot be renamed.");
-        }
-
-        if (await _context.Roles.AnyAsync(r => r.Id != id && r.Name.ToLower() == newName.ToLower(), cancellationToken))
-        {
-            throw new ConflictException($"Role '{newName}' already exists.");
-        }
-
-        role.Name = newName;
-        role.Description = request.Description?.Trim();
-        await _context.SaveChangesAsync(cancellationToken);
-
-        return MapToDto(role);
-    }
-
-    private static RoleDto MapToDto(Role role) => new()
-    {
-        Id = role.Id,
-        Name = role.Name,
-        Description = role.Description,
-        IsSystemDefined = role.IsSystemDefined,
-    };
+    public Task<RoleDto> UpdateAsync(int id, UpdateRoleRequestDto request, CancellationToken cancellationToken = default) =>
+        throw new BusinessValidationException("Roles cannot be edited: the current database has no Roles table (Users.RoleName is a fixed value).");
 }

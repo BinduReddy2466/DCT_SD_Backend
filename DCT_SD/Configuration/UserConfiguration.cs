@@ -8,7 +8,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
 {
     public void Configure(EntityTypeBuilder<User> builder)
     {
-        builder.ToTable("Users");
+        builder.ToTable("Users", tb => tb.UseSqlOutputClause(false)); // trg_Users_AuditLog blocks the default OUTPUT clause
 
         builder.HasKey(u => u.Id);
 
@@ -16,15 +16,12 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         builder.Property(u => u.LastName).HasMaxLength(100).IsRequired();
         builder.Property(u => u.Username).HasMaxLength(256).IsRequired();
         builder.Property(u => u.PasswordHash).HasMaxLength(512).IsRequired();
+        builder.Property(u => u.RoleName).HasMaxLength(50).IsRequired();
+        builder.Property(u => u.MenuPermissionsCsv).HasMaxLength(400);
         builder.Property(u => u.Status).HasConversion<int>().IsRequired();
         builder.Property(u => u.RowVersion).IsRowVersion();
 
         builder.HasIndex(u => u.Username).IsUnique();
-
-        builder.HasOne(u => u.Role)
-            .WithMany(r => r.Users)
-            .HasForeignKey(u => u.RoleId)
-            .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasQueryFilter(u => !u.IsDeleted);
     }

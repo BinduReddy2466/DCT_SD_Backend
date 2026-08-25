@@ -22,7 +22,7 @@ public class RdConfigService : IRdConfigService
     public async Task<RootPathDto> GetCurrentRootPathAsync(CancellationToken cancellationToken = default)
     {
         var latest = await GetLatestHistoryAsync(cancellationToken);
-        return new RootPathDto { CurrentPath = latest?.ToPath };
+        return new RootPathDto { CurrentPath = latest?.SourcePath };
     }
 
     public async Task<RootPathDto> UpdateRootPathAsync(UpdateRootPathRequestDto request, CancellationToken cancellationToken = default)
@@ -30,45 +30,46 @@ public class RdConfigService : IRdConfigService
         var latest = await GetLatestHistoryAsync(cancellationToken);
         var newPath = request.NewPath.Trim();
 
-        if (latest is not null && string.Equals(latest.ToPath, newPath, StringComparison.OrdinalIgnoreCase))
+        if (latest is not null && string.Equals(latest.SourcePath, newPath, StringComparison.OrdinalIgnoreCase))
         {
             throw new BusinessValidationException("The selected Root Source Path is the same as the current configuration. No changes have been made.");
         }
 
-        var history = new RootPathHistory
+        var history = new FetchRun
         {
-            FromPath = latest?.ToPath,
-            ToPath = newPath,
+            RecordKind = FetchRunRecordKinds.PathChange,
+            FromPath = latest?.SourcePath,
+            SourcePath = newPath,
             Remarks = request.Remarks.Trim(),
-            ModifiedByUserId = _currentUser.UserId ?? 0,
-            ModifiedByUsername = _currentUser.Username ?? "unknown",
-            ModifiedAt = DateTime.UtcNow,
+            ExecutedByUserId = _currentUser.UserId ?? 0,
+            ExecutedByUsername = _currentUser.Username ?? "unknown",
+            StartedAt = DateTime.UtcNow,
         };
 
-        _context.RootPathHistories.Add(history);
+        _context.FetchRuns.Add(history);
         await _context.SaveChangesAsync(cancellationToken);
 
-        return new RootPathDto { CurrentPath = history.ToPath };
+        return new RootPathDto { CurrentPath = history.SourcePath };
     }
 
     public async Task<PagedResult<RootPathHistoryItemDto>> SearchRootPathHistoryAsync(RootPathHistorySearchRequestDto request, CancellationToken cancellationToken = default)
     {
-        var query = _context.RootPathHistories.AsNoTracking().AsQueryable();
+        var query = _context.FetchRuns.AsNoTracking().Where(h => h.RecordKind == FetchRunRecordKinds.PathChange);
 
         if (request.DateFrom.HasValue)
         {
-            query = query.Where(h => h.ModifiedAt >= request.DateFrom.Value);
+            query = query.Where(h => h.StartedAt >= request.DateFrom.Value);
         }
 
         if (request.DateTo.HasValue)
         {
-            query = query.Where(h => h.ModifiedAt <= request.DateTo.Value);
+            query = query.Where(h => h.StartedAt <= request.DateTo.Value);
         }
 
         if (!string.IsNullOrWhiteSpace(request.ModifiedBy))
         {
             var term = request.ModifiedBy.Trim().ToLower();
-            query = query.Where(h => h.ModifiedByUsername.ToLower().Contains(term));
+            query = query.Where(h => h.ExecutedByUsername.ToLower().Contains(term));
         }
 
         var pageNumber = request.PageNumber < 1 ? 1 : request.PageNumber;
@@ -76,7 +77,7 @@ public class RdConfigService : IRdConfigService
 
         var totalCount = await query.CountAsync(cancellationToken);
         var items = await query
-            .OrderByDescending(h => h.ModifiedAt)
+            .OrderByDescending(h => h.StartedAt)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
@@ -106,7 +107,8 @@ public class RdConfigService : IRdConfigService
 
         var run = new FetchRun
         {
-            SourcePath = latest.ToPath,
+            RecordKind = FetchRunRecordKinds.FetchRun,
+            SourcePath = latest.SourcePath,
             Status = FetchRunStatus.Ongoing,
             ProcessedCount = 0,
             TotalCount = null,
@@ -123,7 +125,7 @@ public class RdConfigService : IRdConfigService
 
     public async Task<PagedResult<FetchRunItemDto>> SearchFetchHistoryAsync(FetchHistorySearchRequestDto request, CancellationToken cancellationToken = default)
     {
-        var query = _context.FetchRuns.AsNoTracking().AsQueryable();
+        var query = _context.FetchRuns.AsNoTracking().Where(r => r.RecordKind == FetchRunRecordKinds.FetchRun);
 
         if (request.DateFrom.HasValue)
         {
@@ -240,16 +242,19 @@ public class RdConfigService : IRdConfigService
         return full;
     }
 
-    private Task<RootPathHistory?> GetLatestHistoryAsync(CancellationToken cancellationToken) =>
-        _context.RootPathHistories.OrderByDescending(h => h.ModifiedAt).FirstOrDefaultAsync(cancellationToken);
+    private Task<FetchRun?> GetLatestHistoryAsync(CancellationToken cancellationToken) =>
+        _context.FetchRuns
+            .Where(h => h.RecordKind == FetchRunRecordKinds.PathChange)
+            .OrderByDescending(h => h.StartedAt)
+            .FirstOrDefaultAsync(cancellationToken);
 
-    private static RootPathHistoryItemDto MapToHistoryItem(RootPathHistory h) => new()
+    private static RootPathHistoryItemDto MapToHistoryItem(FetchRun h) => new()
     {
         Id = h.Id,
-        ModifiedAt = h.ModifiedAt,
+        ModifiedAt = h.StartedAt,
         FromPath = h.FromPath,
-        ToPath = h.ToPath,
-        ModifiedBy = h.ModifiedByUsername,
+        ToPath = h.SourcePath,
+        ModifiedBy = h.ExecutedByUsername,
         Remarks = h.Remarks,
     };
 
@@ -259,9 +264,9 @@ public class RdConfigService : IRdConfigService
         StartedAt = r.StartedAt,
         CompletedAt = r.CompletedAt,
         RunTime = FormatRunTime(r.StartedAt, r.CompletedAt),
-        ProcessedCount = r.ProcessedCount,
+        ProcessedCount = r.ProcessedCount ?? 0,
         TotalCount = r.TotalCount,
-        Status = r.Status.ToString(),
+        Status = r.Status?.ToString() ?? string.Empty,
         ExecutedBy = r.ExecutedByUsername,
         SourcePath = r.SourcePath,
     };

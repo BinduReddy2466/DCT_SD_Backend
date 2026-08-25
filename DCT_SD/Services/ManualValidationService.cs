@@ -1,4 +1,6 @@
+using System.Text.Json;
 using DCT_SD.Configuration;
+using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
 using DCT_SD.Models;
 using DCT_SD.Models.Dtos.ManualValidation;
@@ -10,6 +12,8 @@ namespace DCT_SD.Services;
 
 public class ManualValidationService : IManualValidationService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
 
@@ -82,7 +86,8 @@ public class ManualValidationService : IManualValidationService
 
     public async Task<PagedResult<ManualValidationRemarkDto>> GetRemarksHistoryAsync(int id, int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var query = _context.ManualValidationRemarks.AsNoTracking().Where(r => r.ManualValidationRequestId == id);
+        var query = _context.RecordHistory.AsNoTracking()
+            .Where(r => r.TableName == RecordHistoryTables.ManualValidationRequests && r.RecordId == id);
 
         pageNumber = pageNumber < 1 ? 1 : pageNumber;
         pageSize = pageSize is < 1 or > 100 ? 25 : pageSize;
@@ -119,18 +124,18 @@ public class ManualValidationService : IManualValidationService
         UpdatedDate = r.UpdatedAt,
     };
 
-    private static ManualValidationRemarkDto MapToRemarkDto(ManualValidationRemark r) => new()
+    private static ManualValidationRemarkDto MapToRemarkDto(RecordHistory r) => new()
     {
         Id = r.Id,
         UpdatedAt = r.CreatedAt,
-        By = r.ByUsername,
-        Remarks = r.Remarks,
-        Action = r.Action.ToString(),
+        By = r.ByUsername ?? string.Empty,
+        Remarks = r.Remarks ?? string.Empty,
+        Action = r.Action,
     };
 
     public async Task<ManualValidationDetailDto> OpenForEditAsync(int id, CancellationToken cancellationToken = default)
     {
-        var record = await GetActiveRecordAsync(id, includeDocuments: true, cancellationToken);
+        var record = await GetActiveRecordAsync(id, cancellationToken);
 
         record.LockedByUserId = _currentUserService.UserId;
         record.LockedByUsername = _currentUserService.Username;
@@ -142,7 +147,7 @@ public class ManualValidationService : IManualValidationService
 
     public async Task<ManualValidationDetailDto> SaveAsync(int id, SaveManualValidationRequestDto request, CancellationToken cancellationToken = default)
     {
-        var record = await GetActiveRecordAsync(id, includeDocuments: true, cancellationToken);
+        var record = await GetActiveRecordAsync(id, cancellationToken);
 
         record.RdCode = request.RdCode?.Trim();
         record.EntryNumbersCsv = request.EntryNumbersCsv?.Trim();
@@ -155,9 +160,9 @@ public class ManualValidationService : IManualValidationService
 
         record.RdName = string.IsNullOrWhiteSpace(record.RdCode)
             ? null
-            : await _context.RegistryOffices.AsNoTracking()
-                .Where(o => o.Code == record.RdCode)
-                .Select(o => o.Name)
+            : await _context.CodeLookups.AsNoTracking()
+                .Where(c => c.LookupType == CodeLookupTypes.RegistryOffice && c.Code == record.RdCode)
+                .Select(c => c.Name)
                 .FirstOrDefaultAsync(cancellationToken);
 
         record.MissingFieldsCsv = string.Join(',', ComputeMissingFields(record));
@@ -165,12 +170,14 @@ public class ManualValidationService : IManualValidationService
         record.UpdatedByUsername = _currentUserService.Username;
         record.UpdatedAt = DateTime.UtcNow;
 
-        _context.ManualValidationRemarks.Add(new ManualValidationRemark
+        _context.RecordHistory.Add(new RecordHistory
         {
-            ManualValidationRequestId = record.Id,
-            Action = RemarkAction.Saved,
+            TableName = RecordHistoryTables.ManualValidationRequests,
+            RecordId = record.Id,
+            RefNo = record.RequestNumber,
+            Action = RemarkAction.Saved.ToString(),
             Remarks = "Record details updated during manual validation.",
-            ByUserId = _currentUserService.UserId ?? 0,
+            ByUserId = _currentUserService.UserId,
             ByUsername = _currentUserService.Username ?? "system",
             CreatedAt = DateTime.UtcNow,
         });
@@ -187,14 +194,16 @@ public class ManualValidationService : IManualValidationService
             throw new BusinessValidationException("Remarks is required.");
         }
 
-        var record = await GetActiveRecordAsync(id, includeDocuments: false, cancellationToken);
+        var record = await GetActiveRecordAsync(id, cancellationToken);
 
-        _context.ManualValidationRemarks.Add(new ManualValidationRemark
+        _context.RecordHistory.Add(new RecordHistory
         {
-            ManualValidationRequestId = record.Id,
-            Action = RemarkAction.Closed,
+            TableName = RecordHistoryTables.ManualValidationRequests,
+            RecordId = record.Id,
+            RefNo = record.RequestNumber,
+            Action = RemarkAction.Closed.ToString(),
             Remarks = remarks.Trim(),
-            ByUserId = _currentUserService.UserId ?? 0,
+            ByUserId = _currentUserService.UserId,
             ByUsername = _currentUserService.Username ?? "system",
             CreatedAt = DateTime.UtcNow,
         });
@@ -204,7 +213,7 @@ public class ManualValidationService : IManualValidationService
 
     public async Task MigrateAsync(int id, CancellationToken cancellationToken = default)
     {
-        var record = await GetActiveRecordAsync(id, includeDocuments: false, cancellationToken);
+        var record = await GetActiveRecordAsync(id, cancellationToken);
 
         if (ComputeMissingFields(record).Length > 0)
         {
@@ -222,30 +231,21 @@ public class ManualValidationService : IManualValidationService
             throw new NotFoundException("No matching title sequence found for the title record.");
         }
 
-        var lookup = await _context.TitleSequenceLookups.AsNoTracking()
-            .FirstOrDefaultAsync(t =>
-                t.Title == request.Title.Trim() &&
-                t.TitleType == titleType &&
-                t.Plan == request.Plan.Trim() &&
-                t.Block == request.Block.Trim() &&
-                t.Lot == request.Lot.Trim(),
-                cancellationToken)
+        var key = TitleSequenceKey.Build(request.Title.Trim(), titleType, request.Plan.Trim(), request.Block.Trim(), request.Lot.Trim());
+
+        var sequence = await _context.CodeLookups.AsNoTracking()
+            .Where(c => c.LookupType == CodeLookupTypes.TitleSequence && c.Code == key)
+            .Select(c => c.Name)
+            .FirstOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException("No matching title sequence found for the title record.");
 
-        return new TitleSequenceDto { Sequence = lookup.Sequence };
+        return new TitleSequenceDto { Sequence = sequence };
     }
 
-    private async Task<ManualValidationRequest> GetActiveRecordAsync(int id, bool includeDocuments, CancellationToken cancellationToken)
-    {
-        var query = _context.ManualValidationRequests.Where(r => r.Id == id && r.MigratedAt == null);
-        if (includeDocuments)
-        {
-            query = query.Include(r => r.Documents);
-        }
-
-        return await query.FirstOrDefaultAsync(cancellationToken)
+    private async Task<ManualValidationRequest> GetActiveRecordAsync(int id, CancellationToken cancellationToken) =>
+        await _context.ManualValidationRequests
+            .FirstOrDefaultAsync(r => r.Id == id && r.MigratedAt == null, cancellationToken)
             ?? throw new NotFoundException("Manual validation record", id);
-    }
 
     private static string[] ComputeMissingFields(ManualValidationRequest r)
     {
@@ -277,11 +277,32 @@ public class ManualValidationService : IManualValidationService
         TitleSequence = r.TitleSequence,
         Status = r.Status.ToString(),
         MissingFields = r.MissingFieldsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-        Documents = r.Documents.Select(d => new ManualValidationDocumentDto
+        Documents = ParseDocuments(r.DocumentsJson),
+    };
+
+    // ManualValidationRequests.DocumentsJson holds a JSON array of
+    // {documentTypeCode, documentName, fileName} - no per-item id in storage, so one is
+    // synthesized from position for the API/UI (document list ordering is stable).
+    private static ManualValidationDocumentDto[] ParseDocuments(string? documentsJson)
+    {
+        if (string.IsNullOrWhiteSpace(documentsJson))
         {
-            Id = d.Id,
+            return Array.Empty<ManualValidationDocumentDto>();
+        }
+
+        var items = JsonSerializer.Deserialize<List<DocumentJsonItem>>(documentsJson, JsonOptions) ?? [];
+        return items.Select((d, index) => new ManualValidationDocumentDto
+        {
+            Id = index + 1,
             DocumentName = d.DocumentName,
             FileName = d.FileName,
-        }).ToArray(),
-    };
+        }).ToArray();
+    }
+
+    private class DocumentJsonItem
+    {
+        public string? DocumentTypeCode { get; set; }
+        public string DocumentName { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+    }
 }

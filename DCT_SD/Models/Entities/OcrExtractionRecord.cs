@@ -11,6 +11,7 @@ public class OcrExtractionRecord
     public string? RdCode { get; set; }
     public string? RdName { get; set; }
     public string FolderPath { get; set; } = string.Empty;
+    public string? EntryNumbersCsv { get; set; }
     public string? TitleNumber { get; set; }
     public TitleType? TitleType { get; set; }
     public int DocumentCount { get; set; }
@@ -18,7 +19,6 @@ public class OcrExtractionRecord
     public DateTime ExtractionDateTime { get; set; }
 
     public FetchRun? FetchRun { get; set; }
-    public ICollection<OcrExtractionEntry> Entries { get; set; } = new List<OcrExtractionEntry>();
     public ICollection<ManualValidationRequest> ManualValidationRequests { get; set; } = new List<ManualValidationRequest>();
     public ICollection<MigrationRecord> MigrationRecords { get; set; } = new List<MigrationRecord>();
 }

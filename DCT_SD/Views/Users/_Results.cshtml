@@ -31,14 +31,21 @@
                         <td>@u.Username</td>
                         <td>@u.Role</td>
                         <td><status-badge status="@u.Status"></status-badge></td>
-                        <td>
-                            <div class="d-flex justify-content-center gap-2">
-                                <button type="button" class="btn btn-sm btn-outline-secondary" data-modal-url="@Url.Action("Edit", new { id = u.Id })">Edit</button>
-                                <form asp-controller="Users" asp-action="Delete" asp-route-id="@u.Id" method="post"
-                                      data-confirm-message="Are you sure you want to delete this account?" data-confirm-danger data-confirm-label="Delete">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                </form>
-                            </div>
+                        <td class="text-center">
+                            @if (u.Role == "Administrator")
+                            {
+                                <span class="text-muted small">—</span>
+                            }
+                            else
+                            {
+                                <div class="d-flex justify-content-center gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-modal-url="@Url.Action("Edit", new { id = u.Id })">Edit</button>
+                                    <form asp-controller="Users" asp-action="Delete" asp-route-id="@u.Id" method="post"
+                                          data-confirm-message="Are you sure you want to delete this account?" data-confirm-danger data-confirm-label="Delete">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                </div>
+                            }
                         </td>
                     </tr>
                 }

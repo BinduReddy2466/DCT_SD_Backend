@@ -1,4 +1,5 @@
 using DCT_SD.Configuration;
+using DCT_SD.Models;
 using DCT_SD.Models.Dtos.RdConfig;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,9 +15,9 @@ public class RegistryOfficeService : IRegistryOfficeService
     }
 
     public async Task<IReadOnlyList<RegistryOfficeDto>> GetAllActiveAsync(CancellationToken cancellationToken = default) =>
-        await _context.RegistryOffices.AsNoTracking()
-            .Where(o => o.IsActive)
-            .OrderBy(o => o.Name)
-            .Select(o => new RegistryOfficeDto { Id = o.Id, Code = o.Code, Name = o.Name })
+        await _context.CodeLookups.AsNoTracking()
+            .Where(c => c.LookupType == CodeLookupTypes.RegistryOffice && c.IsActive)
+            .OrderBy(c => c.Name)
+            .Select(c => new RegistryOfficeDto { Id = c.Id, Code = c.Code, Name = c.Name })
             .ToListAsync(cancellationToken);
 }

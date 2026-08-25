@@ -13,11 +13,17 @@
     var listEl = document.getElementById('assignTabMenuList');
     var selectAllEl = document.getElementById('assignTabSelectAll');
     var saveBtn = document.getElementById('assignTabSaveBtn');
+    var messageEl = document.getElementById('assignTabMessage');
     var currentTrigger = null;
 
+    // Save disabled and the warning message are two views of the same state (zero tabs
+    // checked) - keep them driven from one place so they can never drift out of sync.
     function updateSaveState() {
       var anyChecked = listEl.querySelectorAll('input[type=checkbox]:checked').length > 0;
       saveBtn.disabled = !anyChecked;
+      if (messageEl) {
+        messageEl.classList.toggle('d-none', anyChecked);
+      }
     }
 
     document.addEventListener('click', function (e) {
@@ -91,6 +97,18 @@
           badge.classList.remove('d-none');
         } else {
           badge.classList.add('d-none');
+        }
+      }
+
+      // A prior failed Save attempt (Sub-Admin, zero tabs) leaves "Please assign a tab..."
+      // sitting in the user form's validation summary. It was a server round-trip error, so
+      // nothing clears it automatically - once the user has actually picked a tab here, that
+      // message is stale and would otherwise linger on screen until the next submit.
+      if (selectedIds.length > 0) {
+        var form = currentTrigger.closest('form');
+        var summary = form && form.querySelector('#formValidationSummary');
+        if (summary && /assign a tab/i.test(summary.textContent)) {
+          summary.innerHTML = '';
         }
       }
 

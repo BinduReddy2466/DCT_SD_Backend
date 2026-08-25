@@ -130,7 +130,7 @@ app.Use(async (context, next) =>
         {
             var rotated = await authService.RotateRefreshTokenAsync(refreshToken, context.Connection.RemoteIpAddress?.ToString());
             var (newAccessToken, newAccessExpiresAt) = tokenService.CreateAccessToken(
-                rotated.User.Id, rotated.User.Username, rotated.User.Role.Name, rotated.AllowedMenus);
+                rotated.User.Id, rotated.User.Username, rotated.User.RoleName, rotated.AllowedMenus);
 
             AuthCookieHelper.SetAccessTokenCookie(context.Response, newAccessToken, newAccessExpiresAt);
             AuthCookieHelper.SetRefreshTokenCookie(context.Response, rotated.NewRawToken, rotated.NewExpiresAtUtc);

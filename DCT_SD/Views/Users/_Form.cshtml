@@ -9,9 +9,9 @@
     <h5 class="modal-title font-display">@(Model.IsEditing ? "Edit User" : "Add User")</h5>
     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
 </div>
-<form asp-controller="Users" asp-action="@action" asp-route-id="@Model.Id" method="post" id="userForm">
+<form asp-controller="Users" asp-action="@action" asp-route-id="@Model.Id" method="post" id="userForm" autocomplete="off">
     <div class="modal-body">
-        <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
+        <div asp-validation-summary="ModelOnly" id="formValidationSummary" class="alert alert-danger py-2 small"></div>
 
         <input type="hidden" asp-for="Id" />
         <input type="hidden" asp-for="IsEditing" />
@@ -33,22 +33,29 @@
                     <label asp-for="Username" class="form-label field-label mb-0"></label>
                     @await Html.PartialAsync("_FieldInfoTooltip", new FieldInfoTooltipViewModel { Title = "Username Requirements", Items = DCT_SD.Helpers.UserValidation.UsernameRequirements })
                 </div>
-                <input asp-for="Username" class="form-control mt-2" placeholder="user@example.com" readonly="@Model.IsEditing" />
+                <input asp-for="Username" class="form-control mt-2" placeholder="user@example.com" readonly="@Model.IsEditing" autocomplete="off" />
                 <span asp-validation-for="Username" class="text-danger small"></span>
-                @if (Model.IsEditing)
-                {
-                    <p class="text-muted small mt-1 mb-0">Username cannot be changed once created.</p>
-                }
             </div>
 
             <div class="col-sm-6">
                 <div class="field-label-row">
                     <label asp-for="Password" class="form-label field-label mb-0">Password @(!Model.IsEditing ? "*" : "")</label>
-                    @await Html.PartialAsync("_FieldInfoTooltip", new FieldInfoTooltipViewModel { Title = "Password Requirements", Items = DCT_SD.Helpers.UserValidation.PasswordRequirements })
+                    @if (!Model.IsEditing)
+                    {
+                        @await Html.PartialAsync("_FieldInfoTooltip", new FieldInfoTooltipViewModel { Title = "Password Requirements", Items = DCT_SD.Helpers.UserValidation.PasswordRequirements })
+                    }
                 </div>
                 <div class="position-relative mt-2">
-                    <input type="password" asp-for="Password" class="form-control" id="userPasswordInput"
-                           placeholder="@(Model.IsEditing ? "Leave blank to keep current password" : "Enter Password")" />
+                    @* asp-for deliberately never renders a value= for type="password" inputs (it
+                       won't reflect a bound model value into the markup, as a safety default).
+                       That's fine for Create (Model.Password is empty anyway) but on Edit we
+                       need the stored hash to actually show, so this is built by hand instead. *@
+                    <input type="password" name="Password" class="form-control" id="userPasswordInput"
+                           style="padding-right: 4.5rem;"
+                           disabled="@Model.IsEditing"
+                           value="@Model.Password"
+                           autocomplete="new-password"
+                           placeholder="Enter Password" />
                     <button type="button" class="btn btn-link btn-sm position-absolute top-50 end-0 translate-middle-y me-2 p-0"
                             onclick="var i=document.getElementById('userPasswordInput'); i.type = i.type === 'password' ? 'text' : 'password'; this.textContent = i.type === 'password' ? 'SHOW' : 'HIDE';">SHOW</button>
                 </div>

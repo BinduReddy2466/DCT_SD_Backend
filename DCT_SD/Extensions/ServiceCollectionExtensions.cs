@@ -1,5 +1,6 @@
 using DCT_SD.Configuration;
 using DCT_SD.Filters;
+using DCT_SD.Helpers;
 using DCT_SD.Models;
 using DCT_SD.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -13,7 +14,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddDbContext<ApplicationDbContext>(options =>
             options.UseSqlServer(
-                configuration.GetConnectionString("DefaultConnection"),
+                ResolveConnectionString(configuration),
                 sql => sql.MigrationsAssembly(typeof(ApplicationDbContext).Assembly.FullName)));
 
         services.AddHttpContextAccessor();
@@ -48,5 +49,20 @@ public static class ServiceCollectionExtensions
         });
 
         return services;
+    }
+
+    // ConnectionStrings:DefaultConnection in appsettings.json keeps its normal "Key=Value;..."
+    // shape and is safe to commit: the Server/Database/User Id/Password values are individually
+    // AES-GCM ciphertext, decrypted here using a key that lives only in an environment variable
+    // or user secrets (ConfigProtection:Key / ConfigProtection__Key), never in source control.
+    private static string ResolveConnectionString(IConfiguration configuration)
+    {
+        var connectionString = configuration.GetConnectionString("DefaultConnection")
+            ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured.");
+
+        var key = configuration["ConfigProtection:Key"]
+            ?? throw new InvalidOperationException("ConfigProtection:Key is missing. Set it via the ConfigProtection__Key environment variable or user secrets.");
+
+        return ConfigProtector.DecryptConnectionString(connectionString, key);
     }
 }

@@ -2,6 +2,7 @@ using DCT_SD.Configuration;
 using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
 using DCT_SD.Models;
+using DCT_SD.Models.Dtos.Roles;
 using DCT_SD.Models.Dtos.Users;
 using DCT_SD.Models.Entities;
 using DCT_SD.Models.Enums;
@@ -14,17 +15,21 @@ public class UserService : IUserService
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly IAuthService _authService;
+    private readonly IRoleService _roleService;
+    private readonly IMenuService _menuService;
 
-    public UserService(ApplicationDbContext context, ICurrentUserService currentUser, IAuthService authService)
+    public UserService(ApplicationDbContext context, ICurrentUserService currentUser, IAuthService authService, IRoleService roleService, IMenuService menuService)
     {
         _context = context;
         _currentUser = currentUser;
         _authService = authService;
+        _roleService = roleService;
+        _menuService = menuService;
     }
 
     public async Task<PagedResult<UserListItemDto>> SearchAsync(UserSearchRequestDto request, CancellationToken cancellationToken = default)
     {
-        var query = _context.Users.AsNoTracking().Include(u => u.Role).AsQueryable();
+        var query = _context.Users.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.SearchTerm))
         {
@@ -33,12 +38,13 @@ public class UserService : IUserService
                 u.FirstName.ToLower().Contains(term) ||
                 u.LastName.ToLower().Contains(term) ||
                 u.Username.ToLower().Contains(term) ||
-                u.Role.Name.ToLower().Contains(term));
+                u.RoleName.ToLower().Contains(term));
         }
 
         if (request.RoleId.HasValue)
         {
-            query = query.Where(u => u.RoleId == request.RoleId.Value);
+            var role = await _roleService.GetByIdAsync(request.RoleId.Value, cancellationToken);
+            query = query.Where(u => u.RoleName == role.Name);
         }
 
         if (!string.IsNullOrWhiteSpace(request.Status) && Enum.TryParse<UserStatus>(request.Status, true, out var status))
@@ -79,13 +85,12 @@ public class UserService : IUserService
     {
         var user = await LoadUserAsync(id, cancellationToken)
             ?? throw new NotFoundException(nameof(User), id);
-        return MapToDetail(user);
+        return await MapToDetailAsync(user, cancellationToken);
     }
 
     public async Task<UserDetailDto> CreateAsync(CreateUserRequestDto request, CancellationToken cancellationToken = default)
     {
-        var role = await _context.Roles.FindAsync([request.RoleId], cancellationToken)
-            ?? throw new NotFoundException(nameof(Role), request.RoleId);
+        var role = await _roleService.GetByIdAsync(request.RoleId, cancellationToken);
 
         EnsureRoleAssignmentIsAllowed(role, currentRoleOfTargetUser: null);
 
@@ -95,7 +100,7 @@ public class UserService : IUserService
             throw new ConflictException($"Username '{username}' is already in use.");
         }
 
-        var menuIds = await ResolveAssignedMenuIdsAsync(role, request.AssignedMenuIds, cancellationToken);
+        var menuKeys = ResolveAssignedMenuKeys(role, request.AssignedMenuIds);
 
         var user = new User
         {
@@ -103,76 +108,82 @@ public class UserService : IUserService
             LastName = request.LastName.Trim(),
             Username = username,
             PasswordHash = PasswordHasher.Hash(request.Password),
-            RoleId = role.Id,
+            RoleName = role.Name,
+            MenuPermissionsCsv = menuKeys.Count == 0 ? null : string.Join(',', menuKeys),
             Status = UserStatus.Active,
         };
 
-        foreach (var menuId in menuIds)
+        _context.Users.Add(user);
+
+        try
         {
-            user.MenuPermissions.Add(new UserMenuPermission { MenuId = menuId, GrantedAt = DateTime.UtcNow });
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (IsUniqueUsernameViolation(ex))
+        {
+            // The check above and this insert aren't atomic - two requests close together
+            // (e.g. a double-clicked Save button) can both pass the check before either
+            // commits. The database's own unique constraint is what actually catches that
+            // case, so translate it into the same friendly message instead of letting the
+            // raw SqlException surface as an unhandled 500.
+            throw new ConflictException($"Username '{username}' is already in use.");
         }
 
-        _context.Users.Add(user);
-        await _context.SaveChangesAsync(cancellationToken);
-
-        user.Role = role;
-        return MapToDetail(user);
+        return await MapToDetailAsync(user, cancellationToken);
     }
+
+    private static bool IsUniqueUsernameViolation(DbUpdateException ex) =>
+        ex.InnerException is Microsoft.Data.SqlClient.SqlException { Number: 2627 or 2601 } sqlEx &&
+        sqlEx.Message.Contains("UK_Users_01", StringComparison.OrdinalIgnoreCase);
 
     public async Task<UserDetailDto> UpdateAsync(int id, UpdateUserRequestDto request, CancellationToken cancellationToken = default)
     {
         var user = await LoadUserAsync(id, cancellationToken)
             ?? throw new NotFoundException(nameof(User), id);
 
-        var role = await _context.Roles.FindAsync([request.RoleId], cancellationToken)
-            ?? throw new NotFoundException(nameof(Role), request.RoleId);
+        // The Edit button is hidden entirely for Administrator rows, but that's only a UI
+        // hint - a crafted request could still post directly to this endpoint. Administrator
+        // accounts (Role ID 1) are not editable through User Management at all, by anyone.
+        if (user.RoleName == RoleNames.Administrator)
+        {
+            throw new ForbiddenAppException("Administrator accounts cannot be edited through User Management.");
+        }
 
-        EnsureRoleAssignmentIsAllowed(role, currentRoleOfTargetUser: user.Role.Name);
+        var role = await _roleService.GetByIdAsync(request.RoleId, cancellationToken);
+
+        EnsureRoleAssignmentIsAllowed(role, currentRoleOfTargetUser: user.RoleName);
+
+        // The role dropdown is disabled client-side for a Sub-Admin account, but a disabled
+        // field is only a UI hint - a crafted request could still post a different RoleId.
+        if (user.RoleName == RoleNames.SubAdmin && role.Name != user.RoleName)
+        {
+            throw new ForbiddenAppException("The role of a Sub-Admin account cannot be changed.");
+        }
 
         if (!Enum.TryParse<UserStatus>(request.Status, true, out var status))
         {
             throw new BusinessValidationException("Status must be one of: Active, Deactivated, Locked.");
         }
 
-        if (user.RoleId == role.Id && user.Role.Name == RoleNames.Administrator
-            && status != UserStatus.Active
-            && await IsLastActiveAdministratorAsync(user.Id, cancellationToken))
-        {
-            throw new BusinessValidationException("At least one active Administrator account must remain.");
-        }
-
-        var menuIds = await ResolveAssignedMenuIdsAsync(role, request.AssignedMenuIds, cancellationToken);
+        var menuKeys = ResolveAssignedMenuKeys(role, request.AssignedMenuIds);
 
         user.FirstName = request.FirstName.Trim();
         user.LastName = request.LastName.Trim();
-        user.RoleId = role.Id;
+        user.RoleName = role.Name;
         user.Status = status;
-
-        var passwordChanged = !string.IsNullOrWhiteSpace(request.Password);
-        if (passwordChanged)
-        {
-            user.PasswordHash = PasswordHasher.Hash(request.Password!);
-            user.FailedLoginAttempts = 0;
-        }
-
-        user.MenuPermissions.Clear();
-        foreach (var menuId in menuIds)
-        {
-            user.MenuPermissions.Add(new UserMenuPermission { UserId = user.Id, MenuId = menuId, GrantedAt = DateTime.UtcNow });
-        }
+        user.MenuPermissionsCsv = menuKeys.Count == 0 ? null : string.Join(',', menuKeys);
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        // A password reset or a move out of Active status must not leave the user's existing
-        // sessions usable - the access token already issued still works for up to its own
-        // short lifetime, but no further silent refresh will succeed once these are revoked.
-        if (passwordChanged || status != UserStatus.Active)
+        // A move out of Active status must not leave the user's existing sessions usable - the
+        // access token already issued still works for up to its own short lifetime, but no
+        // further silent refresh will succeed once these are revoked.
+        if (status != UserStatus.Active)
         {
             await _authService.RevokeAllRefreshTokensForUserAsync(user.Id, cancellationToken);
         }
 
-        user.Role = role;
-        return MapToDetail(user);
+        return await MapToDetailAsync(user, cancellationToken);
     }
 
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)
@@ -185,28 +196,33 @@ public class UserService : IUserService
             throw new ForbiddenAppException("You cannot delete your own account.");
         }
 
-        if (user.Role.Name == RoleNames.Administrator && await IsLastActiveAdministratorAsync(id, cancellationToken))
+        // The Delete button is hidden entirely for Administrator rows, but that's only a UI
+        // hint - enforce it here too. Administrator accounts aren't deletable through User
+        // Management at all, regardless of how many other Administrators exist.
+        if (user.RoleName == RoleNames.Administrator)
         {
-            throw new BusinessValidationException("At least one active Administrator account must remain.");
+            throw new ForbiddenAppException("Administrator accounts cannot be deleted through User Management.");
         }
 
-        user.IsDeleted = true;
-        user.DeletedAt = DateTime.UtcNow;
-        user.Status = UserStatus.Deactivated;
+        // RefreshTokens.UserId -> Users.Id is a real FK with NO_ACTION, so those rows have to
+        // go before the Users row itself can be removed.
+        var tokens = await _context.RefreshTokens.Where(t => t.UserId == id).ToListAsync(cancellationToken);
+        _context.RefreshTokens.RemoveRange(tokens);
+        _context.Users.Remove(user);
 
         await _context.SaveChangesAsync(cancellationToken);
-        await _authService.RevokeAllRefreshTokensForUserAsync(user.Id, cancellationToken);
     }
 
     private Task<User?> LoadUserAsync(int id, CancellationToken cancellationToken) =>
-        _context.Users
-            .Include(u => u.Role)
-            .Include(u => u.MenuPermissions).ThenInclude(p => p.Menu)
-            .FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+        _context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
-    private void EnsureRoleAssignmentIsAllowed(Role role, string? currentRoleOfTargetUser)
+    private void EnsureRoleAssignmentIsAllowed(RoleDto role, string? currentRoleOfTargetUser)
     {
-        if (role.Name == RoleNames.Administrator)
+        // Administrator is never a selectable option on create, and the role dropdown is
+        // disabled while editing an existing Administrator's own account, so this only fires
+        // for a genuine attempt to newly assign Administrator - not for a resubmission of an
+        // Administrator account that already had that role and isn't changing it.
+        if (role.Name == RoleNames.Administrator && role.Name != currentRoleOfTargetUser)
         {
             throw new ForbiddenAppException("Administrator accounts cannot be created or assigned through this interface.");
         }
@@ -220,41 +236,26 @@ public class UserService : IUserService
         }
     }
 
-    private async Task<List<int>> ResolveAssignedMenuIdsAsync(Role role, IReadOnlyCollection<int> requestedMenuIds, CancellationToken cancellationToken)
+    private IReadOnlyList<string> ResolveAssignedMenuKeys(RoleDto role, IReadOnlyCollection<int> requestedMenuIds)
     {
         if (role.Name != RoleNames.SubAdmin)
         {
-            return new List<int>();
+            return Array.Empty<string>();
         }
 
         if (requestedMenuIds.Count == 0)
         {
-            throw new BusinessValidationException("At least one menu must be assigned to a Sub-Admin account.");
+            throw new BusinessValidationException("Please assign a tab to the user before proceeding.");
         }
 
         var distinctIds = requestedMenuIds.Distinct().ToList();
-        var menus = await _context.Menus.Where(m => distinctIds.Contains(m.Id)).ToListAsync(cancellationToken);
-        if (menus.Count != distinctIds.Count)
+        var keys = _menuService.ResolveKeys(distinctIds);
+        if (keys.Count != distinctIds.Count)
         {
             throw new BusinessValidationException("One or more assigned menus are invalid.");
         }
 
-        return menus.Select(m => m.Id).ToList();
-    }
-
-    private async Task<bool> IsLastActiveAdministratorAsync(int excludingUserId, CancellationToken cancellationToken)
-    {
-        var administratorRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == RoleNames.Administrator, cancellationToken);
-        if (administratorRole is null)
-        {
-            return false;
-        }
-
-        var remainingActiveAdmins = await _context.Users
-            .Where(u => u.RoleId == administratorRole.Id && u.Status == UserStatus.Active && u.Id != excludingUserId)
-            .CountAsync(cancellationToken);
-
-        return remainingActiveAdmins == 0;
+        return keys;
     }
 
     private static UserListItemDto MapToListItem(User user) => new()
@@ -264,20 +265,35 @@ public class UserService : IUserService
         FirstName = user.FirstName,
         LastName = user.LastName,
         Username = user.Username,
-        Role = user.Role.Name,
+        Role = user.RoleName,
         Status = user.Status.ToString(),
     };
 
-    private static UserDetailDto MapToDetail(User user) => new()
+    private async Task<UserDetailDto> MapToDetailAsync(User user, CancellationToken cancellationToken)
     {
-        Id = user.Id,
-        FirstName = user.FirstName,
-        LastName = user.LastName,
-        Username = user.Username,
-        RoleId = user.RoleId,
-        Role = user.Role.Name,
-        Status = user.Status.ToString(),
-        AssignedMenuIds = user.MenuPermissions.Select(p => p.MenuId).ToArray(),
-        DateCreated = user.CreatedAt,
-    };
+        var roles = await _roleService.GetAllAsync(cancellationToken);
+        var roleId = roles.FirstOrDefault(r => r.Name == user.RoleName)?.Id ?? 0;
+
+        // Only a current Sub-Admin has real, explicit menu grants. Other roles can still carry
+        // a leftover/legacy MenuPermissionsCsv value (e.g. from seeding) that has nothing to do
+        // with an intentional Sub-Admin assignment - resolving it here would silently pre-check
+        // menus in the Assign Tab picker that the admin never chose for this account.
+        var menuKeys = user.RoleName == RoleNames.SubAdmin && !string.IsNullOrWhiteSpace(user.MenuPermissionsCsv)
+            ? user.MenuPermissionsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
+
+        return new UserDetailDto
+        {
+            Id = user.Id,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Username = user.Username,
+            PasswordHash = user.PasswordHash,
+            RoleId = roleId,
+            Role = user.RoleName,
+            Status = user.Status.ToString(),
+            AssignedMenuIds = _menuService.ResolveIds(menuKeys),
+            DateCreated = user.CreatedAt,
+        };
+    }
 }
