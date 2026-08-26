@@ -97,7 +97,7 @@ public class UserService : IUserService
         var username = request.Username.Trim();
         if (await _context.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower(), cancellationToken))
         {
-            throw new ConflictException($"Username '{username}' is already in use.");
+            throw new ConflictException("This username already exists. Please choose a different username.");
         }
 
         var menuKeys = ResolveAssignedMenuKeys(role, request.AssignedMenuIds);
@@ -126,7 +126,7 @@ public class UserService : IUserService
             // commits. The database's own unique constraint is what actually catches that
             // case, so translate it into the same friendly message instead of letting the
             // raw SqlException surface as an unhandled 500.
-            throw new ConflictException($"Username '{username}' is already in use.");
+            throw new ConflictException("This username already exists. Please choose a different username.");
         }
 
         return await MapToDetailAsync(user, cancellationToken);
@@ -147,6 +147,13 @@ public class UserService : IUserService
         if (user.RoleName == RoleNames.Administrator)
         {
             throw new ForbiddenAppException("Administrator accounts cannot be edited through User Management.");
+        }
+
+        // Likewise, a Sub-Admin viewer can't edit any Sub-Admin account - another one's, or
+        // their own.
+        if (_currentUser.Role == RoleNames.SubAdmin && user.RoleName == RoleNames.SubAdmin)
+        {
+            throw new ForbiddenAppException("A Sub-Admin cannot edit a Sub-Admin account.");
         }
 
         var role = await _roleService.GetByIdAsync(request.RoleId, cancellationToken);
@@ -202,6 +209,14 @@ public class UserService : IUserService
         if (user.RoleName == RoleNames.Administrator)
         {
             throw new ForbiddenAppException("Administrator accounts cannot be deleted through User Management.");
+        }
+
+        // Likewise, a Sub-Admin viewer can't delete any Sub-Admin account - another one's, or
+        // their own (the self-delete check above already covers that specific case, but this
+        // also blocks a Sub-Admin from deleting a *different* Sub-Admin).
+        if (_currentUser.Role == RoleNames.SubAdmin && user.RoleName == RoleNames.SubAdmin)
+        {
+            throw new ForbiddenAppException("A Sub-Admin cannot delete a Sub-Admin account.");
         }
 
         // RefreshTokens.UserId -> Users.Id is a real FK with NO_ACTION, so those rows have to

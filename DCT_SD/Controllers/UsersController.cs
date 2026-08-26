@@ -124,6 +124,13 @@ public class UsersController : Controller
             return StatusCode(403, "Administrator accounts cannot be edited through User Management.");
         }
 
+        // Likewise, the Edit button is hidden for a Sub-Admin viewer looking at any Sub-Admin
+        // row - another one's, or their own.
+        if (CurrentRole == RoleNames.SubAdmin && user.Role == RoleNames.SubAdmin)
+        {
+            return StatusCode(403, "A Sub-Admin cannot edit a Sub-Admin account.");
+        }
+
         var model = new UserFormViewModel
         {
             Id = user.Id,
