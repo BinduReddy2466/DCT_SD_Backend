@@ -33,12 +33,17 @@ public class UserService : IUserService
 
         if (!string.IsNullOrWhiteSpace(request.SearchTerm))
         {
-            var term = request.SearchTerm.Trim().ToLower();
+            var rawTerm = request.SearchTerm.Trim();
+            var term = rawTerm.ToLower();
+            var isIdMatch = int.TryParse(rawTerm, out var idTerm);
+
+            // Role and Status already have their own dedicated dropdown filters, so this box
+            // is scoped to ID/Name/Username only - matching the search placeholder text.
             query = query.Where(u =>
+                (isIdMatch && u.Id == idTerm) ||
                 u.FirstName.ToLower().Contains(term) ||
                 u.LastName.ToLower().Contains(term) ||
-                u.Username.ToLower().Contains(term) ||
-                u.RoleName.ToLower().Contains(term));
+                u.Username.ToLower().Contains(term));
         }
 
         if (request.RoleId.HasValue)
