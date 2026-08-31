@@ -1,4 +1,5 @@
 using DCT_SD.Models;
+using DCT_SD.Models.Dtos.Reports;
 using DCT_SD.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -31,6 +32,25 @@ public class ReportsController : Controller
     {
         var fields = await _reportService.GetFilterFieldsAsync(reportType, cancellationToken);
         return PartialView("_Filters", fields);
+    }
+
+    // Live preview table: loaded automatically right after a Report Type is selected (with no
+    // filters yet, so it shows every record), and again whenever Search or a pagination link is
+    // used - always reflecting exactly what Generate Report would currently download.
+    [HttpGet]
+    public async Task<IActionResult> Results(string reportType, int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(reportType) || !ReportTypes.Labels.ContainsKey(reportType))
+        {
+            return PartialView("_ResultsTable", new ReportPreviewDto());
+        }
+
+        var filters = Request.Query
+            .Where(kv => kv.Key is not ("reportType" or "pageNumber" or "pageSize"))
+            .ToDictionary(kv => kv.Key, kv => (string?)kv.Value.ToString());
+
+        var preview = await _reportService.GetPreviewAsync(reportType, filters, pageNumber < 1 ? 1 : pageNumber, pageSize < 1 ? 25 : pageSize, cancellationToken);
+        return PartialView("_ResultsTable", preview);
     }
 
     [HttpPost]

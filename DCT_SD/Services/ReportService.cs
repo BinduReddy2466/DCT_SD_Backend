@@ -129,6 +129,197 @@ public class ReportService : IReportService
         return fields;
     }
 
+    public Task<ReportPreviewDto> GetPreviewAsync(string reportType, IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken = default) =>
+        reportType switch
+        {
+            ReportTypes.RootSourcePathHistory => PreviewRootSourcePathHistoryAsync(filters, pageNumber, pageSize, cancellationToken),
+            ReportTypes.FetchHistory => PreviewFetchHistoryAsync(filters, pageNumber, pageSize, cancellationToken),
+            ReportTypes.MigrationMonitoring => PreviewMigrationMonitoringAsync(filters, pageNumber, pageSize, cancellationToken),
+            ReportTypes.ManualValidation => PreviewManualValidationAsync(filters, pageNumber, pageSize, cancellationToken),
+            ReportTypes.EmptyEntryFolders => PreviewEmptyEntryFoldersAsync(filters, pageNumber, pageSize, cancellationToken),
+            ReportTypes.FailedExtraction => PreviewFailedExtractionAsync(filters, pageNumber, pageSize, cancellationToken),
+            _ => Task.FromResult(new ReportPreviewDto()),
+        };
+
+    private static readonly string[] RootSourcePathHistoryHeaders = ["Modified Date & Time", "From Source Path", "To Source Path", "Modified By", "Remarks"];
+
+    private async Task<ReportPreviewDto> PreviewRootSourcePathHistoryAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        var request = new RootPathHistorySearchRequestDto
+        {
+            DateFrom = ParseDate(filters, "DateFrom"),
+            DateTo = ParseDate(filters, "DateTo"),
+            ModifiedBy = GetString(filters, "ModifiedBy"),
+            PageNumber = pageNumber,
+            PageSize = pageSize,
+        };
+
+        var page = await _rdConfigService.SearchRootPathHistoryAsync(request, cancellationToken);
+        return ToPreview(RootSourcePathHistoryHeaders, page, item => new[]
+        {
+            FormatDate(item.ModifiedAt),
+            item.FromPath ?? string.Empty,
+            item.ToPath,
+            item.ModifiedBy,
+            item.Remarks,
+        });
+    }
+
+    private static readonly string[] FetchHistoryHeaders = ["Fetch Date & Time", "Completion Date & Time", "Run Time", "Progress", "Status", "Executed By", "Source Path"];
+
+    private async Task<ReportPreviewDto> PreviewFetchHistoryAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        var request = new FetchHistorySearchRequestDto
+        {
+            DateFrom = ParseDate(filters, "DateFrom"),
+            DateTo = ParseDate(filters, "DateTo"),
+            ExecutedBy = GetString(filters, "ExecutedBy"),
+            PageNumber = pageNumber,
+            PageSize = pageSize,
+        };
+
+        var page = await _rdConfigService.SearchFetchHistoryAsync(request, cancellationToken);
+        return ToPreview(FetchHistoryHeaders, page, item => new[]
+        {
+            FormatDate(item.StartedAt),
+            FormatDate(item.CompletedAt),
+            item.RunTime ?? string.Empty,
+            item.TotalCount.HasValue ? $"{item.ProcessedCount}/{item.TotalCount}" : item.ProcessedCount.ToString(),
+            item.Status,
+            item.ExecutedBy,
+            item.SourcePath,
+        });
+    }
+
+    private static readonly string[] MigrationMonitoringHeaders = ["Request ID", "Migration Date", "RD", "Entry No.", "Title No.", "Title Type", "Migration Status", "SD Status", "Migrated To"];
+
+    private async Task<ReportPreviewDto> PreviewMigrationMonitoringAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        var request = new MigrationSearchRequestDto
+        {
+            RdCode = GetString(filters, "RdCode"),
+            RequestNumber = GetString(filters, "RequestNumber"),
+            EntryNumbersCsv = GetString(filters, "EntryNumbersCsv"),
+            Title = GetString(filters, "Title"),
+            MigrationStatus = GetString(filters, "MigrationStatus"),
+            DateFrom = ParseDate(filters, "DateFrom"),
+            DateTo = ParseDate(filters, "DateTo"),
+            PageNumber = pageNumber,
+            PageSize = pageSize,
+        };
+
+        var page = await _migrationService.SearchAsync(request, cancellationToken);
+        return ToPreview(MigrationMonitoringHeaders, page, item => new[]
+        {
+            item.RequestNumber,
+            FormatDate(item.MigrationDate),
+            item.RdName,
+            item.EntryNumbersCsv ?? string.Empty,
+            item.Title ?? string.Empty,
+            item.TitleType ?? string.Empty,
+            StatusDisplay.MigrationStatusToDisplay(item.MigrationStatus),
+            StatusDisplay.SdStatusToDisplay(item.SdStatus),
+            item.MigratedTo,
+        });
+    }
+
+    private static readonly string[] ManualValidationHeaders = ["Request ID", "RD Code", "RD Name", "Entry No.", "Title No.", "Title Type", "Status", "Missing Fields", "Extraction Date", "Updated By", "Updated Date"];
+
+    private async Task<ReportPreviewDto> PreviewManualValidationAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        var request = new ManualValidationSearchRequestDto
+        {
+            RdCode = GetString(filters, "RdCode"),
+            RequestNumber = GetString(filters, "RequestNumber"),
+            EntryNumbersCsv = GetString(filters, "EntryNumbersCsv"),
+            Title = GetString(filters, "Title"),
+            Status = GetString(filters, "Status"),
+            DateFrom = ParseDate(filters, "DateFrom"),
+            DateTo = ParseDate(filters, "DateTo"),
+            PageNumber = pageNumber,
+            PageSize = pageSize,
+        };
+
+        var page = await _manualValidationService.SearchAsync(request, cancellationToken);
+        return ToPreview(ManualValidationHeaders, page, item => new[]
+        {
+            item.RequestNumber,
+            item.RdCode ?? string.Empty,
+            item.RdName ?? string.Empty,
+            item.EntryNumbersCsv ?? string.Empty,
+            item.Title ?? string.Empty,
+            item.TitleType ?? string.Empty,
+            StatusDisplay.ManualValidationStatusToDisplay(item.Status),
+            StatusDisplay.DescribeMissingFields(item.MissingFields),
+            FormatDate(item.ExtractionDate),
+            item.UpdatedBy ?? string.Empty,
+            FormatDate(item.UpdatedDate),
+        });
+    }
+
+    private static readonly string[] EmptyEntryFoldersHeaders = ["Fetch Date/Time", "RD Code", "RD Name", "Folder Name", "Folder Path", "Status"];
+
+    private async Task<ReportPreviewDto> PreviewEmptyEntryFoldersAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        var request = new EmptyFolderSearchRequestDto
+        {
+            RdCode = GetString(filters, "RdCode"),
+            FolderName = GetString(filters, "FolderName"),
+            DateFrom = ParseDate(filters, "DateFrom"),
+            DateTo = ParseDate(filters, "DateTo"),
+            PageNumber = pageNumber,
+            PageSize = pageSize,
+        };
+
+        var page = await _emptyFolderService.SearchAsync(request, cancellationToken);
+        return ToPreview(EmptyEntryFoldersHeaders, page, item => new[]
+        {
+            FormatDate(item.FetchDateTime),
+            item.RdCode ?? string.Empty,
+            item.RdName ?? string.Empty,
+            item.FolderName,
+            item.FolderPath,
+            item.Status,
+        });
+    }
+
+    private static readonly string[] FailedExtractionHeaders = ["Extraction Date and Time", "RD", "Entry Folder Name", "Folder Path", "Failure Reason"];
+
+    private async Task<ReportPreviewDto> PreviewFailedExtractionAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
+    {
+        var request = new FailedExtractionSearchRequestDto
+        {
+            Rd = GetString(filters, "Rd"),
+            FolderName = GetString(filters, "FolderName"),
+            DateFrom = ParseDate(filters, "DateFrom"),
+            DateTo = ParseDate(filters, "DateTo"),
+            PageNumber = pageNumber,
+            PageSize = pageSize,
+        };
+
+        var page = await _failedExtractionService.SearchAsync(request, cancellationToken);
+        return ToPreview(FailedExtractionHeaders, page, item => new[]
+        {
+            FormatDate(item.ExtractionDateTime),
+            item.RdName ?? string.Empty,
+            item.FolderName,
+            item.FolderPath,
+            item.FailureReason,
+        });
+    }
+
+    private static ReportPreviewDto ToPreview<TItem>(IReadOnlyList<string> headers, PagedResult<TItem> page, Func<TItem, string[]> toRow) => new()
+    {
+        Headers = headers,
+        Rows = page.Items.Select(item => (IReadOnlyList<string>)toRow(item)).ToArray(),
+        TotalCount = page.TotalCount,
+        PageNumber = page.PageNumber,
+        PageSize = page.PageSize,
+    };
+
+    private static string FormatDate(DateTime value) => value.ToString("MM/dd/yyyy h:mm tt");
+    private static string FormatDate(DateTime? value) => value.HasValue ? FormatDate(value.Value) : string.Empty;
+
     public async Task<ReportGenerationResult> GenerateAsync(string reportType, IDictionary<string, string?> filters, CancellationToken cancellationToken = default)
     {
         var label = ReportTypes.Labels.GetValueOrDefault(reportType, reportType);

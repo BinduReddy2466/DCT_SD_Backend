@@ -1,0 +1,40 @@
+@model DCT_SD.Models.Dtos.Reports.ReportPreviewDto
+
+<div class="table-responsive table-frame">
+    <table class="table table-hover align-middle mb-0">
+        @if (Model.Headers.Count > 0)
+        {
+            <thead>
+                <tr>
+                    @foreach (var header in Model.Headers)
+                    {
+                        <th>@header</th>
+                    }
+                </tr>
+            </thead>
+        }
+        <tbody>
+            @if (Model.Rows.Count == 0)
+            {
+                <tr><td colspan="@Math.Max(Model.Headers.Count, 1)" class="text-center text-muted py-4">No records found.</td></tr>
+            }
+            else
+            {
+                @foreach (var row in Model.Rows)
+                {
+                    <tr>
+                        @foreach (var cell in row)
+                        {
+                            <td>@(string.IsNullOrWhiteSpace(cell) ? "—" : cell)</td>
+                        }
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (Model.Rows.Count > 0)
+{
+    @await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })
+}

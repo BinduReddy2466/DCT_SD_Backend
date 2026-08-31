@@ -2,30 +2,39 @@
     var reportTypes = (IReadOnlyDictionary<string, string>)ViewData["ReportTypes"]!;
 }
 
-<div class="card p-4">
+<div class="card p-4 mb-4">
     <h2 class="font-display fs-5 fw-semibold mb-1">Reports</h2>
-    <p class="text-muted mb-4">Select a report type, optionally narrow it down with filters, then generate it as an Excel file.</p>
+    <p class="text-muted mb-4">Select a report type to see its matching records below, optionally narrow them down with filters, then generate the currently-shown records as an Excel file.</p>
 
     <div id="reportTypeError" class="alert alert-danger py-2 small d-none">Report Type is required.</div>
 
-    <form id="reportForm" asp-controller="Reports" asp-action="Generate" method="post">
-        <div class="row g-3">
-            <div class="col-sm-6">
-                <label class="form-label field-label" for="reportType">Report Type</label>
-                <select class="form-select" id="reportType" name="reportType">
-                    <option value="">Select</option>
-                    @foreach (var (key, label) in reportTypes)
-                    {
-                        <option value="@key">@label</option>
-                    }
-                </select>
-            </div>
+    <form id="reportForm" data-list-page-form="reportResults" action="@Url.Action("Results")" method="get" class="filter-grid">
+        <div>
+            <label class="form-label field-label" for="reportType">Report Type</label>
+            <select class="form-select" id="reportType" name="reportType">
+                <option value="">Select</option>
+                @foreach (var (key, label) in reportTypes)
+                {
+                    <option value="@key">@label</option>
+                }
+            </select>
         </div>
 
-        <div class="row g-3 mt-0" id="reportFiltersContainer"></div>
+        <div id="reportFiltersContainer" style="display: contents;"></div>
 
-        <div class="mt-4">
-            <button type="submit" class="btn btn-navy" id="generateReportBtn">Generate Report</button>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-navy flex-fill">Search</button>
+            <button type="button" class="btn btn-gold flex-fill" id="generateReportBtn">Generate Report</button>
         </div>
     </form>
+</div>
+
+<!-- Populated from current filter values on submit - a real POST is required to trigger a
+     native file download, so this can't just be an AJAX request like Search. -->
+<form id="reportGenerateForm" asp-controller="Reports" asp-action="Generate" method="post" class="d-none"></form>
+
+<div class="card p-0">
+    <div id="reportResults" class="p-0">
+        @await Html.PartialAsync("_ResultsTable", new DCT_SD.Models.Dtos.Reports.ReportPreviewDto())
+    </div>
 </div>
