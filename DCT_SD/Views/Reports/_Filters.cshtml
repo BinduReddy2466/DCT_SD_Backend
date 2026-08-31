@@ -1,0 +1,26 @@
+@model IReadOnlyList<DCT_SD.Models.Dtos.Reports.ReportFilterFieldDto>
+
+@foreach (var field in Model)
+{
+    <div>
+        <label class="form-label field-label" for="filter_@field.Key">@field.Label</label>
+        @if (field.Type == "select")
+        {
+            <select class="form-select" id="filter_@field.Key" name="@field.Key">
+                <option value="">Select</option>
+                @foreach (var option in field.Options ?? Array.Empty<DCT_SD.Models.Dtos.Reports.ReportFilterOptionDto>())
+                {
+                    <option value="@option.Value">@option.Label</option>
+                }
+            </select>
+        }
+        else if (field.Type == "date")
+        {
+            <input type="date" class="form-control" id="filter_@field.Key" name="@field.Key" />
+        }
+        else
+        {
+            <input type="text" class="form-control" id="filter_@field.Key" name="@field.Key" placeholder="@field.Placeholder" />
+        }
+    </div>
+}

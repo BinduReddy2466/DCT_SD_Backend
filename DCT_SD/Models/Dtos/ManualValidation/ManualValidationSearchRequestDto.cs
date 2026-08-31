@@ -1,6 +1,8 @@
+using DCT_SD.Services;
+
 namespace DCT_SD.Models.Dtos.ManualValidation;
 
-public class ManualValidationSearchRequestDto
+public class ManualValidationSearchRequestDto : IPageableRequest
 {
     public string? RdCode { get; set; }
     public string? RequestNumber { get; set; }

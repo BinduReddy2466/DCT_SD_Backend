@@ -13,6 +13,8 @@ public static class MenuRoutes
         [MenuKeys.MigrationMonitoring] = "/Migrations",
         [MenuKeys.ManualValidation] = "/ManualValidation",
         [MenuKeys.EmptyFolders] = "/EmptyFolders",
+        [MenuKeys.Reports] = "/Reports",
+        [MenuKeys.FailedExtraction] = "/FailedExtraction",
         [MenuKeys.UserManagement] = "/Users",
         [MenuKeys.Roles] = "/Roles",
         [MenuKeys.Settings] = "/Settings",

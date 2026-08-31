@@ -15,6 +15,8 @@ public class MenuService : IMenuService
         new() { Id = 2, Key = MenuKeys.MigrationMonitoring, Label = "Migration Monitoring", IsBaseMenu = true },
         new() { Id = 4, Key = MenuKeys.ManualValidation, Label = "Manual Validation", IsBaseMenu = true },
         new() { Id = 5, Key = MenuKeys.EmptyFolders, Label = "Empty Entry Folders", IsBaseMenu = true },
+        new() { Id = 10, Key = MenuKeys.Reports, Label = "Reports", IsBaseMenu = true },
+        new() { Id = 11, Key = MenuKeys.FailedExtraction, Label = "Failed Extraction", IsBaseMenu = true },
         new() { Id = 6, Key = MenuKeys.UserManagement, Label = "User Management", IsBaseMenu = false },
         new() { Id = 7, Key = MenuKeys.Roles, Label = "Roles", IsBaseMenu = false },
         new() { Id = 8, Key = MenuKeys.Settings, Label = "Settings", IsBaseMenu = false },

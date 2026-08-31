@@ -1,0 +1,31 @@
+@{
+    var reportTypes = (IReadOnlyDictionary<string, string>)ViewData["ReportTypes"]!;
+}
+
+<div class="card p-4">
+    <h2 class="font-display fs-5 fw-semibold mb-1">Reports</h2>
+    <p class="text-muted mb-4">Select a report type, optionally narrow it down with filters, then generate it as an Excel file.</p>
+
+    <div id="reportTypeError" class="alert alert-danger py-2 small d-none">Report Type is required.</div>
+
+    <form id="reportForm" asp-controller="Reports" asp-action="Generate" method="post">
+        <div class="row g-3">
+            <div class="col-sm-6">
+                <label class="form-label field-label" for="reportType">Report Type</label>
+                <select class="form-select" id="reportType" name="reportType">
+                    <option value="">Select</option>
+                    @foreach (var (key, label) in reportTypes)
+                    {
+                        <option value="@key">@label</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        <div class="row g-3 mt-0" id="reportFiltersContainer"></div>
+
+        <div class="mt-4">
+            <button type="submit" class="btn btn-navy" id="generateReportBtn">Generate Report</button>
+        </div>
+    </form>
+</div>

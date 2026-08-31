@@ -1,6 +1,8 @@
+using DCT_SD.Services;
+
 namespace DCT_SD.Models.Dtos.RdConfig;
 
-public class FetchHistorySearchRequestDto
+public class FetchHistorySearchRequestDto : IPageableRequest
 {
     public DateTime? DateFrom { get; set; }
     public DateTime? DateTo { get; set; }

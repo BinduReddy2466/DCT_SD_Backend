@@ -1,6 +1,8 @@
+using DCT_SD.Services;
+
 namespace DCT_SD.Models.Dtos.EmptyFolders;
 
-public class EmptyFolderSearchRequestDto
+public class EmptyFolderSearchRequestDto : IPageableRequest
 {
     public string? RdCode { get; set; }
     public string? FolderName { get; set; }

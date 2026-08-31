@@ -31,6 +31,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMigrationService, MigrationService>();
         services.AddScoped<IManualValidationService, ManualValidationService>();
         services.AddScoped<ISettingsService, SettingsService>();
+        services.AddScoped<IReportService, ReportService>();
+        services.AddScoped<IFailedExtractionService, FailedExtractionService>();
 
         services.AddSingleton<IAuthorizationHandler, MenuAuthorizationHandler>();
         services.AddAuthorization(options =>

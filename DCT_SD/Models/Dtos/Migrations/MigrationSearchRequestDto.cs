@@ -1,6 +1,8 @@
+using DCT_SD.Services;
+
 namespace DCT_SD.Models.Dtos.Migrations;
 
-public class MigrationSearchRequestDto
+public class MigrationSearchRequestDto : IPageableRequest
 {
     public string? RdCode { get; set; }
     public string? RequestNumber { get; set; }
