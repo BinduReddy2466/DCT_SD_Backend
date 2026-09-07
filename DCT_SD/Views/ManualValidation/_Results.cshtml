@@ -8,14 +8,14 @@
                 <th>Request ID</th>
                 <th>RD Code</th>
                 <th>RD Name</th>
-                <th>Entry No.</th>
-                <th>Title No.</th>
+                <th>Entry Number</th>
+                <th>Title Number</th>
                 <th>Title Type</th>
-                <th>Status</th>
+                <th>Extraction Status</th>
                 <th>Missing Fields</th>
-                <th>Extraction Date</th>
+                <th>Extraction Date and Time</th>
                 <th>Updated By</th>
-                <th>Updated Date</th>
+                <th>Updated Date and Time</th>
                 <th>Action</th>
             </tr>
         </thead>
@@ -37,7 +37,7 @@
                         <td>@(item.TitleType ?? "—")</td>
                         <td><status-badge status="@StatusDisplay.ManualValidationStatusToDisplay(item.Status)"></status-badge></td>
                         <td class="text-muted small">@StatusDisplay.DescribeMissingFields(item.MissingFields)</td>
-                        <td class="font-monospace small">@item.ExtractionDate.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@item.ExtractionDate.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>
                             @if (item.UpdatedBy != null)
                             {
@@ -48,7 +48,7 @@
                                 @:—
                             }
                         </td>
-                        <td class="font-monospace small">@(item.UpdatedDate?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
+                        <td class="font-monospace small">@(item.UpdatedDate.ToIst()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
                         <td>
                             <div class="d-flex gap-1">
                                 <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "ManualValidation", new { id = item.Id })">View</a>

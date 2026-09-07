@@ -5,10 +5,10 @@
         <thead>
             <tr>
                 <th style="width: 2rem;">#</th>
-                <th>Updated</th>
-                <th>By</th>
+                <th>Updated Date and Time</th>
+                <th>Updated By</th>
                 <th>Remarks</th>
-                <th>Action</th>
+                <th>Action Performed</th>
             </tr>
         </thead>
         <tbody>
@@ -24,7 +24,7 @@
                     var r = Model.Remarks.Items[i];
                     <tr>
                         <td>@(start + i + 1)</td>
-                        <td class="font-monospace small">@r.UpdatedAt.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@r.UpdatedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td><span class="chip-mono">@r.By</span></td>
                         <td>@r.Remarks</td>
                         <td><status-badge status="@r.Action"></status-badge></td>

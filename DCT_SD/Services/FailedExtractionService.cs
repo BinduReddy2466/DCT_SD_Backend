@@ -74,13 +74,27 @@ public class FailedExtractionService : IFailedExtractionService
     public Task<bool> AnyRecordsExistAsync(CancellationToken cancellationToken = default) =>
         _context.OcrExtractionRecords.AsNoTracking().AnyAsync(r => r.ExtractionStatus == OcrExtractionStatus.Failed, cancellationToken);
 
-    public async Task RecordFailureAsync(string requestNumber, string? rdCode, string? rdName, string folderPath, string failureReason, DateTime extractionDateTime, CancellationToken cancellationToken = default)
+    public async Task RecordFailureAsync(string requestNumber, string? rdCode, string? rdName, string folderPath, string failureReason, DateTime extractionDateTime, int? fetchRunId = null, CancellationToken cancellationToken = default)
     {
+        // The live fetch stream's folder_result event only ever carries rd_code, never rd_name -
+        // resolve it the same way Manual Validation already does, via the existing CodeLookups
+        // table, so the Failed Extraction page's "RD" column isn't left blank for every real
+        // failure.
+        var resolvedRdName = rdName;
+        if (string.IsNullOrWhiteSpace(resolvedRdName) && !string.IsNullOrWhiteSpace(rdCode))
+        {
+            resolvedRdName = await _context.CodeLookups.AsNoTracking()
+                .Where(c => c.LookupType == CodeLookupTypes.RegistryOffice && c.Code == rdCode)
+                .Select(c => c.Name)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
         var record = new OcrExtractionRecord
         {
             RequestNumber = requestNumber,
+            FetchRunId = fetchRunId,
             RdCode = rdCode,
-            RdName = rdName,
+            RdName = resolvedRdName,
             FolderPath = folderPath,
             DocumentCount = 0,
             ExtractionStatus = OcrExtractionStatus.Failed,

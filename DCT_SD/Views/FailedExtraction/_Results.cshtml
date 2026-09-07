@@ -25,7 +25,7 @@
                 @foreach (var item in items)
                 {
                     <tr>
-                        <td class="font-monospace small">@item.ExtractionDateTime.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@item.ExtractionDateTime.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>@(item.RdName ?? "—")</td>
                         <td>@item.FolderName</td>
                         <td class="font-monospace small">@item.FolderPath</td>

@@ -4,7 +4,7 @@
 }
 
 <div class="card p-4 mb-4">
-    <form data-list-page-form="empty-folders-results" action="@Url.Action("Results")" method="get" class="filter-grid">
+    <form data-list-page-form="empty-folders-results" data-list-page-page-url="@Url.Action("Index")" action="@Url.Action("Results")" method="get" class="filter-grid">
         <div>
             <label class="form-label field-label" for="RdCode">Registry of Deeds Code</label>
             <input type="text" class="form-control" id="RdCode" name="RdCode" value="@q["RdCode"]" />

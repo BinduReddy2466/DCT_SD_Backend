@@ -1,3 +1,6 @@
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
 using DCT_SD.Configuration;
 using DCT_SD.Filters;
 using DCT_SD.Helpers;
@@ -33,6 +36,39 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IFailedExtractionService, FailedExtractionService>();
+
+        // The one external HTTP dependency in this app - a separate RD/fetch service, reachable
+        // only over Paradigm WiFi/VPN. Base URL is config (RdFetchApi:BaseUrl), never hardcoded.
+        // Username/Password authenticate every request via HTTP Basic Auth and, like the JWT
+        // signing key and DB encryption key, live only in user secrets / the
+        // RdFetchApi__Username / RdFetchApi__Password environment variables - never committed.
+        var rdFetchApiBaseUrl = configuration["RdFetchApi:BaseUrl"]
+            ?? throw new InvalidOperationException("RdFetchApi:BaseUrl is not configured.");
+        var rdFetchApiUsername = configuration["RdFetchApi:Username"]
+            ?? throw new InvalidOperationException("RdFetchApi:Username is missing. Set it via the RdFetchApi__Username environment variable or user secrets.");
+        var rdFetchApiPassword = configuration["RdFetchApi:Password"]
+            ?? throw new InvalidOperationException("RdFetchApi:Password is missing. Set it via the RdFetchApi__Password environment variable or user secrets.");
+        var rdFetchApiAuthHeader = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{rdFetchApiUsername}:{rdFetchApiPassword}"));
+
+        services.AddHttpClient<IRdFetchApiClient, RdFetchApiClient>(client =>
+        {
+            client.BaseAddress = new Uri(rdFetchApiBaseUrl);
+            // No fixed HttpClient-level timeout: POST /fetch/start returns a long-running SSE
+            // stream (a full fetch run can take far longer than any reasonable fixed cap), and
+            // HttpClient.Timeout bounds the whole request+body-read, not just headers. Each call
+            // instead gets bounded by the caller's own CancellationToken (ultimately the
+            // browser's request, via HttpContext.RequestAborted).
+            client.Timeout = Timeout.InfiniteTimeSpan;
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", rdFetchApiAuthHeader);
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            // ConnectTimeout is separate from HttpClient.Timeout above - it bounds only the TCP
+            // connect phase, not the (deliberately unbounded) body read. Without this, a
+            // misconfigured host or a silently unreachable address (packets dropped, no RST/ICMP
+            // response - e.g. no network route to it at all) would hang the request indefinitely
+            // instead of failing fast with the normal "could not reach the fetch service" error.
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+        });
 
         services.AddSingleton<IAuthorizationHandler, MenuAuthorizationHandler>();
         services.AddAuthorization(options =>

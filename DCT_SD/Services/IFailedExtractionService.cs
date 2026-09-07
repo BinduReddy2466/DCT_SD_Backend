@@ -14,5 +14,6 @@ public interface IFailedExtractionService
     // What the system-level OCR extraction process should call when extraction fails for an
     // Entry Folder: records the failure (via OcrExtractionRecords + a RecordHistory remark for
     // the reason) and returns normally so the caller can continue with the next folder.
-    Task RecordFailureAsync(string requestNumber, string? rdCode, string? rdName, string folderPath, string failureReason, DateTime extractionDateTime, CancellationToken cancellationToken = default);
+    // fetchRunId links the record back to the FetchRuns row that produced it, when known.
+    Task RecordFailureAsync(string requestNumber, string? rdCode, string? rdName, string folderPath, string failureReason, DateTime extractionDateTime, int? fetchRunId = null, CancellationToken cancellationToken = default);
 }

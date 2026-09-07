@@ -8,7 +8,7 @@
 
     <div id="reportTypeError" class="alert alert-danger py-2 small d-none">Report Type is required.</div>
 
-    <form id="reportForm" data-list-page-form="reportResults" action="@Url.Action("Results")" method="get" class="filter-grid">
+    <form id="reportForm" data-list-page-form="reportResults" data-list-page-page-url="@Url.Action("Index")" action="@Url.Action("Results")" method="get" class="filter-grid">
         <div>
             <label class="form-label field-label" for="reportType">Report Type</label>
             <select class="form-select" id="reportType" name="reportType">

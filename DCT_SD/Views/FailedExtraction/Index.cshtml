@@ -6,7 +6,7 @@
 }
 
 <div class="card p-4 mb-4">
-    <form data-list-page-form="failed-extraction-results" action="@Url.Action("Results")" method="get" class="filter-grid" id="failedExtractionFilterForm">
+    <form data-list-page-form="failed-extraction-results" data-list-page-page-url="@Url.Action("Index")" action="@Url.Action("Results")" method="get" class="filter-grid" id="failedExtractionFilterForm">
         <div>
             <label class="form-label field-label" for="DateFrom">Extraction Date From</label>
             <input type="date" class="form-control" id="DateFrom" name="DateFrom" value="@q["DateFrom"]" />
@@ -39,7 +39,6 @@
 <div class="card p-0">
     <div class="p-4 border-bottom">
         <h2 class="font-display fs-5 fw-semibold mb-0">Failed Extraction</h2>
-        <p class="text-muted small mb-0 mt-1">Entry Folders where OCR extraction failed at the system level.</p>
     </div>
 
     <div id="failed-extraction-results" class="p-0">

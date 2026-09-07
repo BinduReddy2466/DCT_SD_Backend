@@ -7,7 +7,7 @@
 }
 
 <div class="card p-4 mb-4">
-    <form data-list-page-form="migrations-results" action="@Url.Action("Results")" method="get" class="filter-grid">
+    <form data-list-page-form="migrations-results" data-list-page-page-url="@Url.Action("Index")" action="@Url.Action("Results")" method="get" class="filter-grid">
         <div>
             <label class="form-label field-label" for="RdCode">Registry of Deeds</label>
             <select class="form-select" id="RdCode" name="RdCode">

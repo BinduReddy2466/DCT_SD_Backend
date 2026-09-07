@@ -17,7 +17,7 @@
         ("Plan Number", Model.Plan, false),
         ("Block Number", Model.Block, false),
         ("Lot Number", Model.Lot, false),
-        ("Migration Date and Time", Model.MigrationDate.ToString("MM/dd/yyyy h:mm tt"), false),
+        ("Migration Date and Time", Model.MigrationDate.ToIst().ToString("MM/dd/yyyy h:mm tt"), false),
         ("Migration Status", StatusDisplay.MigrationStatusToDisplay(Model.MigrationStatus), false),
     };
 }
@@ -155,7 +155,7 @@
                                     var tooltipLines = new List<string>
                                     {
                                         "Performed By: " + (doc.PerformedBy ?? "—"),
-                                        "Action Date and Time: " + (doc.ActionDate.HasValue ? doc.ActionDate.Value.ToString("MM/dd/yyyy h:mm tt") : "—"),
+                                        "Action Date and Time: " + (doc.ActionDate.HasValue ? doc.ActionDate.Value.ToIst().ToString("MM/dd/yyyy h:mm tt") : "—"),
                                     };
                                     if (doc.Status == "Overwritten")
                                     {

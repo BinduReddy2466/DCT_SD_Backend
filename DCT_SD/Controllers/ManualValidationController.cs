@@ -71,7 +71,7 @@ public class ManualValidationController : Controller
             ViewData["RegistryOffices"] = await _registryOfficeService.GetAllActiveAsync(cancellationToken);
             return View(detail);
         }
-        catch (NotFoundException ex)
+        catch (Exception ex) when (ex is NotFoundException or ForbiddenAppException)
         {
             TempData["ToastMessage"] = ex.Message;
             TempData["ToastVariant"] = "error";
@@ -88,7 +88,7 @@ public class ManualValidationController : Controller
             var detail = await _manualValidationService.SaveAsync(id, model, cancellationToken);
             return Json(new { success = true, message = "Saved Successfully.", rdName = detail.RdName ?? "", missingFields = detail.MissingFields });
         }
-        catch (NotFoundException ex)
+        catch (Exception ex) when (ex is NotFoundException or ForbiddenAppException)
         {
             return Json(new { success = false, message = ex.Message });
         }
@@ -103,7 +103,7 @@ public class ManualValidationController : Controller
             await _manualValidationService.CloseAsync(id, remarks, cancellationToken);
             return Json(new { success = true, message = "Record closed with remarks." });
         }
-        catch (Exception ex) when (ex is NotFoundException or BusinessValidationException)
+        catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException)
         {
             return Json(new { success = false, message = ex.Message });
         }
@@ -118,7 +118,7 @@ public class ManualValidationController : Controller
             await _manualValidationService.MigrateAsync(id, cancellationToken);
             return Json(new { success = true, message = "Record validated and migrated to PHILARIS-RD." });
         }
-        catch (Exception ex) when (ex is NotFoundException or BusinessValidationException)
+        catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException)
         {
             return Json(new { success = false, message = ex.Message });
         }

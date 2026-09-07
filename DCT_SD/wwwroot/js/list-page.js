@@ -27,13 +27,25 @@
     const container = document.getElementById(targetId);
     if (!container) return;
 
+    // The fetch/swap endpoint (data-list-page-form's action, or a pagination/page-size link's
+    // href) returns a bare PartialView with no <head>/CSS/layout - it exists only to be
+    // fetched via AJAX and swapped into the container. The address bar must therefore point at
+    // the real full-page URL (data-list-page-page-url, i.e. the Index action) with the same
+    // query string, not at that partial endpoint - otherwise a refresh, browser back/forward, or
+    // a bookmarked/shared link loads the raw unstyled fragment as if it were the whole page.
+    const pageUrl = form.getAttribute('data-list-page-page-url');
+
+    function pushUrlState(fetchUrl, query) {
+      if (!window.history || !window.history.pushState) return;
+      const target = pageUrl ? (pageUrl + '?' + query) : fetchUrl;
+      window.history.pushState({}, '', target);
+    }
+
     function submitForm() {
-      const params = new URLSearchParams(new FormData(form));
-      const url = form.getAttribute('action') + '?' + params.toString();
+      const query = new URLSearchParams(new FormData(form)).toString();
+      const url = form.getAttribute('action') + '?' + query;
       fetchAndSwap(url, container);
-      if (window.history && window.history.pushState) {
-        window.history.pushState({}, '', url);
-      }
+      pushUrlState(url, query);
     }
 
     form.addEventListener('submit', function (e) {
@@ -53,10 +65,10 @@
       const link = e.target.closest('a[data-list-page-link]');
       if (!link || link.classList.contains('disabled')) return;
       e.preventDefault();
-      fetchAndSwap(link.getAttribute('href'), container);
-      if (window.history && window.history.pushState) {
-        window.history.pushState({}, '', link.getAttribute('href'));
-      }
+      const href = link.getAttribute('href');
+      fetchAndSwap(href, container);
+      const queryIndex = href.indexOf('?');
+      pushUrlState(href, queryIndex >= 0 ? href.slice(queryIndex + 1) : '');
     });
 
     container.addEventListener('change', function (e) {
@@ -65,11 +77,10 @@
       const query = JSON.parse(select.getAttribute('data-query') || '{}');
       query.pageSize = select.value;
       query.pageNumber = 1;
-      const url = select.getAttribute('data-action') + '?' + new URLSearchParams(query).toString();
+      const queryString = new URLSearchParams(query).toString();
+      const url = select.getAttribute('data-action') + '?' + queryString;
       fetchAndSwap(url, container);
-      if (window.history && window.history.pushState) {
-        window.history.pushState({}, '', url);
-      }
+      pushUrlState(url, queryString);
     });
   }
 

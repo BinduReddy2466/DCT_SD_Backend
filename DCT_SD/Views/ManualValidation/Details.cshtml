@@ -126,14 +126,27 @@
                 }
                 else
                 {
-                    <div id="mvDocumentList" style="max-height: 340px; overflow-y: auto;" class="d-flex flex-column gap-2">
-                        @for (var i = 0; i < Model.Documents.Count; i++)
-                        {
-                            var doc = Model.Documents[i];
-                            <div class="border rounded p-2" role="button" data-doc-index="@i" style="cursor: pointer;">
-                                <div class="fw-medium small">@doc.DocumentName</div>
-                            </div>
-                        }
+                    <div style="max-height: 340px; overflow-y: auto;" class="table-responsive">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Image File Name</th>
+                                    <th>Document Name</th>
+                                </tr>
+                            </thead>
+                            <tbody id="mvDocumentList">
+                                @for (var i = 0; i < Model.Documents.Count; i++)
+                                {
+                                    var doc = Model.Documents[i];
+                                    <tr role="button" data-doc-index="@i" style="cursor: pointer;">
+                                        <td class="small">@(i + 1)</td>
+                                        <td class="small font-monospace">@doc.FileName</td>
+                                        <td class="small fw-medium">@doc.DocumentName</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
                     </div>
                 }
             </div>
@@ -155,7 +168,6 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small mb-3">Explain the current state of this record for the next reviewer.</p>
                 <textarea class="form-control" id="mvCloseRemarksText" rows="3" placeholder="e.g. Awaiting confirmation of Plan/Block/Lot from field office"></textarea>
                 <p class="text-danger small mt-1 d-none" id="mvCloseRemarksError">Remarks is required.</p>
             </div>

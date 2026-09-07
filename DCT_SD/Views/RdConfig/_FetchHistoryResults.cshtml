@@ -11,25 +11,30 @@
                 <th>Status</th>
                 <th>Executed By</th>
                 <th>Source Path</th>
+                <th>Action</th>
             </tr>
         </thead>
         <tbody>
             @if (Model.Items.Count == 0)
             {
-                <tr><td colspan="7" class="text-center text-muted py-4">No fetch history found.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted py-4">No fetch history found.</td></tr>
             }
             else
             {
                 @foreach (var item in Model.Items)
                 {
                     <tr>
-                        <td class="font-monospace small">@item.StartedAt.ToString("MM/dd/yyyy h:mm tt")</td>
-                        <td class="font-monospace small">@(item.CompletedAt?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
+                        <td class="font-monospace small">@item.StartedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@(item.CompletedAt.ToIst()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
                         <td>@(item.RunTime ?? "—")</td>
                         <td>@item.ProcessedCount/@(item.TotalCount?.ToString() ?? "—")</td>
                         <td><status-badge status="@(item.Status == "Ongoing" ? "Ongoing Fetching" : item.Status)"></status-badge></td>
                         <td><span class="chip-mono">@item.ExecutedBy</span></td>
                         <td class="font-monospace small">@item.SourcePath</td>
+                        <td>
+                            <button type="button" class="btn btn-outline-secondary btn-sm"
+                                    data-modal-url="@Url.Action("FetchRunDetails", new { id = item.Id })">View</button>
+                        </td>
                     </tr>
                 }
             }

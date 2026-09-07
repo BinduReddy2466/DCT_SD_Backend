@@ -14,6 +14,11 @@ public class ManualValidationService : IManualValidationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    // How long a record stays locked to the user who opened it before it's treated as
+    // abandoned (browser closed, network drop, etc.) and released automatically. Without this,
+    // a lock nobody ever explicitly releases would block that record forever for everyone else.
+    private static readonly TimeSpan LockTimeout = TimeSpan.FromMinutes(15);
+
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
 
@@ -136,6 +141,7 @@ public class ManualValidationService : IManualValidationService
     public async Task<ManualValidationDetailDto> OpenForEditAsync(int id, CancellationToken cancellationToken = default)
     {
         var record = await GetActiveRecordAsync(id, cancellationToken);
+        EnsureNotLockedByAnotherUser(record);
 
         record.LockedByUserId = _currentUserService.UserId;
         record.LockedByUsername = _currentUserService.Username;
@@ -148,6 +154,7 @@ public class ManualValidationService : IManualValidationService
     public async Task<ManualValidationDetailDto> SaveAsync(int id, SaveManualValidationRequestDto request, CancellationToken cancellationToken = default)
     {
         var record = await GetActiveRecordAsync(id, cancellationToken);
+        EnsureNotLockedByAnotherUser(record);
 
         record.RdCode = request.RdCode?.Trim();
         record.EntryNumbersCsv = request.EntryNumbersCsv?.Trim();
@@ -195,6 +202,15 @@ public class ManualValidationService : IManualValidationService
         }
 
         var record = await GetActiveRecordAsync(id, cancellationToken);
+        EnsureNotLockedByAnotherUser(record);
+
+        // Closing is itself a save on the record (it's the action that finalizes it), so it
+        // must update Updated By/Date the same way SaveAsync does - otherwise a record closed
+        // without ever going through the separate Save button keeps showing whatever (possibly
+        // stale, possibly never-set) values it had before.
+        record.UpdatedByUserId = _currentUserService.UserId;
+        record.UpdatedByUsername = _currentUserService.Username;
+        record.UpdatedAt = DateTime.UtcNow;
 
         _context.RecordHistory.Add(new RecordHistory
         {
@@ -214,6 +230,7 @@ public class ManualValidationService : IManualValidationService
     public async Task MigrateAsync(int id, CancellationToken cancellationToken = default)
     {
         var record = await GetActiveRecordAsync(id, cancellationToken);
+        EnsureNotLockedByAnotherUser(record);
 
         if (ComputeMissingFields(record).Length > 0)
         {
@@ -246,6 +263,19 @@ public class ManualValidationService : IManualValidationService
         await _context.ManualValidationRequests
             .FirstOrDefaultAsync(r => r.Id == id && r.MigratedAt == null, cancellationToken)
             ?? throw new NotFoundException("Manual validation record", id);
+
+    private void EnsureNotLockedByAnotherUser(ManualValidationRequest record)
+    {
+        var lockedByAnotherUser = record.LockedByUserId.HasValue
+            && record.LockedByUserId != _currentUserService.UserId
+            && record.LockedAt.HasValue
+            && DateTime.UtcNow - record.LockedAt.Value < LockTimeout;
+
+        if (lockedByAnotherUser)
+        {
+            throw new ForbiddenAppException("This record is currently being reviewed by another user.");
+        }
+    }
 
     private static string[] ComputeMissingFields(ManualValidationRequest r)
     {
@@ -282,7 +312,8 @@ public class ManualValidationService : IManualValidationService
 
     // ManualValidationRequests.DocumentsJson holds a JSON array of
     // {documentTypeCode, documentName, fileName} - no per-item id in storage, so one is
-    // synthesized from position for the API/UI (document list ordering is stable).
+    // synthesized from (sorted) position for the API/UI. Sorted by Document Name then Image
+    // File Name so the Supporting Documents list and the image viewer's Prev/Next order match.
     private static ManualValidationDocumentDto[] ParseDocuments(string? documentsJson)
     {
         if (string.IsNullOrWhiteSpace(documentsJson))
@@ -291,12 +322,15 @@ public class ManualValidationService : IManualValidationService
         }
 
         var items = JsonSerializer.Deserialize<List<DocumentJsonItem>>(documentsJson, JsonOptions) ?? [];
-        return items.Select((d, index) => new ManualValidationDocumentDto
-        {
-            Id = index + 1,
-            DocumentName = d.DocumentName,
-            FileName = d.FileName,
-        }).ToArray();
+        return items
+            .OrderBy(d => d.DocumentName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(d => d.FileName, StringComparer.OrdinalIgnoreCase)
+            .Select((d, index) => new ManualValidationDocumentDto
+            {
+                Id = index + 1,
+                DocumentName = d.DocumentName,
+                FileName = d.FileName,
+            }).ToArray();
     }
 
     private class DocumentJsonItem

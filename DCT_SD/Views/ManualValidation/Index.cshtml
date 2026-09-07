@@ -7,7 +7,7 @@
 }
 
 <div class="card p-4 mb-4">
-    <form data-list-page-form="manual-validation-results" action="@Url.Action("Results")" method="get" class="filter-grid">
+    <form data-list-page-form="manual-validation-results" data-list-page-page-url="@Url.Action("Index")" action="@Url.Action("Results")" method="get" class="filter-grid">
         <div>
             <label class="form-label field-label" for="RdCode">Registry of Deeds</label>
             <select class="form-select" id="RdCode" name="RdCode">
@@ -31,7 +31,7 @@
             <input type="text" class="form-control" id="Title" name="Title" value="@q["Title"]" />
         </div>
         <div>
-            <label class="form-label field-label" for="Status">Status</label>
+            <label class="form-label field-label" for="Status">Extraction Status</label>
             <select class="form-select" id="Status" name="Status">
                 <option value="">Select</option>
                 @foreach (var status in new[] { "IncompleteExtraction", "TargetRdNotIdentified" })

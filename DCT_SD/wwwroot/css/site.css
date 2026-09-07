@@ -165,9 +165,6 @@ body {
 .sidebar-profile-menu button:hover {
   background: #F7F8FA;
 }
-.sidebar-profile-menu form button {
-  border-top: 1px solid var(--color-border);
-}
 
 /* Sidebar collapse */
 #appShell.sidebar-collapsed .app-sidebar {

@@ -25,7 +25,7 @@
                 @foreach (var item in result.Items)
                 {
                     <tr>
-                        <td class="font-monospace small">@item.ModifiedAt.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@item.ModifiedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td class="font-monospace small text-muted">@(item.FromPath ?? "—")</td>
                         <td class="font-monospace small">@item.ToPath</td>
                         <td><span class="chip-mono">@item.ModifiedBy</span></td>

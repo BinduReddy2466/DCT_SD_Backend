@@ -24,7 +24,7 @@
                 @foreach (var item in Model.Items)
                 {
                     <tr>
-                        <td class="font-monospace small">@item.FetchDateTime.ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@item.FetchDateTime.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>@(item.RdCode ?? "—")</td>
                         <td>@(item.RdName ?? "—")</td>
                         <td>@item.FolderName</td>

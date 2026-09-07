@@ -30,7 +30,7 @@
                         var r = Model.Remarks.Items[i];
                         <tr>
                             <td>@(start + i + 1)</td>
-                            <td class="font-monospace small">@r.UpdatedAt.ToString("MM/dd/yyyy h:mm tt")</td>
+                            <td class="font-monospace small">@r.UpdatedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                             <td><span class="chip-mono">@r.By</span></td>
                             <td>@r.Remarks</td>
                             <td><status-badge status="@r.Action"></status-badge></td>

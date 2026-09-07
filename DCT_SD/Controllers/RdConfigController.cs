@@ -1,9 +1,13 @@
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using DCT_SD.Helpers.Exceptions;
 using DCT_SD.Models;
 using DCT_SD.Models.Dtos.RdConfig;
 using DCT_SD.Models.ViewModels;
 using DCT_SD.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 
 namespace DCT_SD.Controllers;
@@ -12,10 +16,20 @@ namespace DCT_SD.Controllers;
 public class RdConfigController : Controller
 {
     private readonly IRdConfigService _rdConfigService;
+    private readonly IRdFetchApiClient _rdFetchApiClient;
+    private readonly IFailedExtractionService _failedExtractionService;
+    private readonly ILogger<RdConfigController> _logger;
 
-    public RdConfigController(IRdConfigService rdConfigService)
+    public RdConfigController(
+        IRdConfigService rdConfigService,
+        IRdFetchApiClient rdFetchApiClient,
+        IFailedExtractionService failedExtractionService,
+        ILogger<RdConfigController> logger)
     {
         _rdConfigService = rdConfigService;
+        _rdFetchApiClient = rdFetchApiClient;
+        _failedExtractionService = failedExtractionService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -79,7 +93,27 @@ public class RdConfigController : Controller
 
         try
         {
-            await _rdConfigService.UpdateRootPathAsync(new UpdateRootPathRequestDto { NewPath = model.RootPath, Remarks = model.Remarks }, cancellationToken);
+            // The external service is now authoritative for whether this update succeeds.
+            var path = model.RootPath.Trim();
+            var remarks = model.Remarks.Trim();
+            var response = await _rdFetchApiClient.UpdateRootPathAsync(path, remarks, cancellationToken);
+
+            // Mirror the confirmed change into the existing local history table so the rest of
+            // this page - the Root Source Path field, "Last Updated", and the History tab -
+            // keeps rendering exactly as it always has, now reflecting the external result.
+            try
+            {
+                await _rdConfigService.UpdateRootPathAsync(
+                    new UpdateRootPathRequestDto { NewPath = response.Path ?? path, Remarks = remarks },
+                    cancellationToken);
+            }
+            catch (BusinessValidationException)
+            {
+                // Local history's latest entry is already this exact path (e.g. re-applying the
+                // same value) - the external update itself still succeeded, so this isn't an
+                // error worth surfacing on top of that.
+            }
+
             TempData["ToastMessage"] = "Root Source Path has been updated successfully.";
             TempData["ToastVariant"] = "success";
         }
@@ -92,22 +126,383 @@ public class RdConfigController : Controller
         return RedirectToAction("Index");
     }
 
+    // Streams POST /fetch/start's Server-Sent Events straight through to the browser as they
+    // arrive (no buffering, no waiting for the run to finish) so the page can render live
+    // progress. This is a plain fetch() POST from JS, not a native form submit - the antiforgery
+    // token travels as a form field, same as every other fetch()-driven action in this app.
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> StartFetch(CancellationToken cancellationToken)
+    public async Task<IActionResult> StartFetchStream(CancellationToken cancellationToken)
     {
+        FetchRunItemDto localRun;
         try
         {
-            await _rdConfigService.StartFetchAsync(cancellationToken);
-            TempData["ToastMessage"] = "Fetching process started.";
-            TempData["ToastVariant"] = "success";
+            // Reuses the existing guard (root path configured, no other run already Ongoing)
+            // and creates the local FetchRuns mirror row up front, exactly as the old
+            // synchronous StartFetch action did.
+            localRun = await _rdConfigService.StartFetchAsync(cancellationToken);
         }
         catch (BusinessValidationException ex)
         {
-            TempData["ToastMessage"] = ex.Message;
-            TempData["ToastVariant"] = "error";
+            return BadRequest(new { message = ex.Message });
         }
 
-        return RedirectToAction("Index");
+        HttpResponseMessage externalResponse;
+        try
+        {
+            externalResponse = await _rdFetchApiClient.StartFetchStreamAsync(cancellationToken);
+        }
+        catch (BusinessValidationException ex)
+        {
+            // Nothing has been written to the response yet, so this can still be a normal JSON
+            // error - but the local "Ongoing" row from above must not be left stuck that way
+            // (SearchFetchHistoryAsync's own hasOngoing guard would then permanently block every
+            // future attempt to start a fetch).
+            await _rdConfigService.FailFetchRunAsync(localRun.Id, CancellationToken.None);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (OperationCanceledException)
+        {
+            // The caller (browser) disconnected before the external service even responded - not
+            // a BusinessValidationException, so it wouldn't be caught above, but the local row
+            // still must not be left stuck Ongoing for the same reason.
+            await _rdConfigService.FailFetchRunAsync(localRun.Id, CancellationToken.None);
+            throw;
+        }
+
+        using (externalResponse)
+        {
+            Response.ContentType = "text/event-stream";
+            Response.Headers.CacheControl = "no-cache";
+            Response.Headers["X-Accel-Buffering"] = "no"; // no-op locally, prevents buffering behind an nginx-style reverse proxy
+
+            // The IIS in-process hosting model (the default when this app is published behind
+            // IIS, per Setup-DCT_SD-IIS.ps1) buffers the response body by default - each
+            // Response.Body.WriteAsync below would sit in that buffer instead of reaching the
+            // browser until either the buffer fills or the response ends, which is exactly the
+            // "nothing shows until the whole fetch finishes" symptom. This is the documented
+            // opt-out for streaming responses; harmless (no-op) under Kestrel/out-of-process
+            // hosting, where nothing buffers this way to begin with.
+            HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
+            RunCompleteInfo? runComplete = null;
+            var streamedOk = true;
+            try
+            {
+                await using var upstream = await externalResponse.Content.ReadAsStreamAsync(cancellationToken);
+                var buffer = new byte[8192];
+                var frameBuilder = new StringBuilder();
+
+                int bytesRead;
+                while ((bytesRead = await upstream.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    await Response.Body.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+                    await Response.Body.FlushAsync(cancellationToken);
+
+                    frameBuilder.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
+                    var (foundRunComplete, failures) = ProcessCompleteRecords(frameBuilder);
+                    runComplete ??= foundRunComplete;
+
+                    foreach (var failure in failures)
+                    {
+                        await RecordFolderFailureAsync(localRun.Id, failure, cancellationToken);
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Headers (text/event-stream) are already sent, so this can no longer become a
+                // JSON error response - the client sees the connection simply end and falls back
+                // to its own "stream closed" handling. This also catches the client disconnecting
+                // mid-stream (browser closed, tab navigated away, network drop): that cancels
+                // cancellationToken and throws OperationCanceledException here too, and it must
+                // still mark the local row below - otherwise it stays stuck Ongoing forever and
+                // StartFetchAsync's own guard permanently blocks every future fetch attempt.
+                streamedOk = false;
+            }
+
+            // The run has finished (successfully, or the connection dropped) as far as this
+            // request is concerned. Reconcile the local mirror row with the authoritative final
+            // state so the existing Fetch History table reflects it without the page reloading.
+            if (runComplete is { FetchRunId: { } fetchRunId })
+            {
+                try
+                {
+                    var details = await _rdFetchApiClient.GetFetchRunDetailsAsync(fetchRunId, CancellationToken.None);
+                    if (details is not null)
+                    {
+                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, details, CancellationToken.None);
+                    }
+                    else
+                    {
+                        // GET /fetch/{id} came back 404 for an id run_complete itself just gave
+                        // us - fall back to the run_complete payload's own fields rather than
+                        // treating an already-known-successful run as failed.
+                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), CancellationToken.None);
+                    }
+                }
+                catch (BusinessValidationException)
+                {
+                    await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), CancellationToken.None);
+                }
+            }
+            else if (runComplete is not null)
+            {
+                // run_complete arrived but without a fetch_run_id (e.g. "nothing new to
+                // process" - no run was actually created on the external side) - there's no id
+                // to query GET /fetch/{id} with, so reconcile directly from this payload.
+                await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(null), CancellationToken.None);
+            }
+            else if (!streamedOk)
+            {
+                await _rdConfigService.FailFetchRunAsync(localRun.Id, CancellationToken.None);
+            }
+        }
+
+        return new EmptyResult();
+    }
+
+    private sealed record FolderFailure(string? FolderPath, string? RdCode, string? RdName, string? FailureReason);
+
+    // Captured from a run_complete SSE record. FetchRunId is null when the external service
+    // never assigned one for this run (e.g. it found nothing new to process) - the other fields
+    // are still meaningful in that case and are what CompleteFetchRunAsync falls back to.
+    private sealed record RunCompleteInfo(int? FetchRunId, string? Status, int? ProcessedCount, int? TotalCount)
+    {
+        public FetchRunDetailDto ToDetailDto(int? fetchRunId) => new()
+        {
+            Id = fetchRunId ?? 0,
+            Status = Status ?? "Completed",
+            ProcessedCount = ProcessedCount ?? 0,
+            TotalCount = TotalCount,
+        };
+    }
+
+    // Splits whatever new text has arrived into complete SSE records (separated by a blank
+    // line, per the SSE spec) and parses each one's "event:"/"data:" lines independently,
+    // exactly like the browser-side parser - so a field that happens to be named e.g. "id"
+    // inside an unrelated event is never mistaken for run_complete's fetch_run_id. Only the
+    // trailing, possibly-incomplete record is kept in the buffer for the next read.
+    private static (RunCompleteInfo? RunComplete, List<FolderFailure> Failures) ProcessCompleteRecords(StringBuilder frameBuilder)
+    {
+        var text = frameBuilder.ToString();
+        var records = Regex.Split(text, "\r?\n\r?\n");
+
+        frameBuilder.Clear();
+        frameBuilder.Append(records[^1]);
+        var completeRecords = records[..^1];
+
+        RunCompleteInfo? runComplete = null;
+        var failures = new List<FolderFailure>();
+
+        foreach (var record in completeRecords)
+        {
+            if (string.IsNullOrWhiteSpace(record))
+            {
+                continue;
+            }
+
+            string? eventName = null;
+            var dataLines = new List<string>();
+            foreach (var rawLine in record.Split('\n'))
+            {
+                var line = rawLine.TrimEnd('\r');
+                if (line.StartsWith("event:", StringComparison.Ordinal))
+                {
+                    eventName = line["event:".Length..].Trim();
+                }
+                else if (line.StartsWith("data:", StringComparison.Ordinal))
+                {
+                    dataLines.Add(line["data:".Length..].Trim());
+                }
+            }
+
+            var json = string.Join('\n', dataLines);
+            if (json.Length == 0)
+            {
+                continue;
+            }
+
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(json);
+            }
+            catch (JsonException)
+            {
+                continue; // A partial JSON object caught mid-frame - skip it, not worth retrying.
+            }
+
+            using (doc)
+            {
+                var root = doc.RootElement;
+                eventName ??= TryGetString(root, "event", "type", "event_type", "kind");
+
+                if (eventName == "run_complete" && runComplete is null)
+                {
+                    runComplete = new RunCompleteInfo(
+                        TryGetInt(root, "fetch_run_id", "run_id", "id"),
+                        TryGetString(root, "status"),
+                        TryGetInt(root, "processed_count", "processedCount"),
+                        TryGetInt(root, "total_count", "totalCount"));
+                }
+
+                if (eventName == "folder_result")
+                {
+                    var status = TryGetString(root, "status") ?? string.Empty;
+                    if (status.Contains("fail", StringComparison.OrdinalIgnoreCase))
+                    {
+                        failures.Add(new FolderFailure(
+                            TryGetString(root, "folder_path", "folderPath"),
+                            TryGetString(root, "rd_code", "rdCode"),
+                            TryGetString(root, "rd_name", "rdName"),
+                            // "reason" is the confirmed field name (per the real service's own
+                            // captured event stream); the others are fallbacks in case a future
+                            // version of the API renames it.
+                            TryGetString(root, "reason", "failure_reason", "failureReason", "error", "message", "detail")));
+                    }
+                }
+            }
+        }
+
+        return (runComplete, failures);
+    }
+
+    private static string? TryGetString(JsonElement root, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!root.TryGetProperty(key, out var value))
+            {
+                continue;
+            }
+
+            if (value.ValueKind == JsonValueKind.String)
+            {
+                return value.GetString();
+            }
+
+            if (value.ValueKind is JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
+            {
+                return value.ToString();
+            }
+        }
+
+        return null;
+    }
+
+    // JsonElement.TryGetInt32() throws InvalidOperationException (not just "returns false") when
+    // the value's ValueKind isn't Number - e.g. the real fetch service sends "fetch_run_id": null
+    // whenever a run finds nothing new to process, and that must resolve to "no id", not crash
+    // the whole relay loop mid-stream.
+    private static int? TryGetInt(JsonElement root, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var id))
+            {
+                return id;
+            }
+        }
+
+        return null;
+    }
+
+    // Records a failed folder into the existing Failed Extraction table (OcrExtractionRecords +
+    // RecordHistory) as it's observed live in the stream. Best-effort: a problem persisting this
+    // bookkeeping must never interrupt relaying the run's progress to the browser.
+    private async Task RecordFolderFailureAsync(int localFetchRunId, FolderFailure failure, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(failure.FolderPath))
+        {
+            return;
+        }
+
+        // RequestNumber only exists here as an internal, unique bookkeeping key (Failed
+        // Extraction never displays it) - the folder never got far enough to be assigned a real
+        // one by the extraction pipeline.
+        var requestNumber = $"FAILED-{DateTime.UtcNow:yyMMddHHmmssfff}-{Random.Shared.Next(1000, 9999)}";
+        var reason = string.IsNullOrWhiteSpace(failure.FailureReason)
+            ? "The fetch service reported this folder as failed."
+            : failure.FailureReason!;
+
+        try
+        {
+            await _failedExtractionService.RecordFailureAsync(
+                requestNumber,
+                failure.RdCode,
+                failure.RdName,
+                failure.FolderPath!,
+                reason,
+                DateTime.UtcNow,
+                localFetchRunId,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Failed to record a folder failure into Failed Extraction for fetch run {LocalFetchRunId}, folder {FolderPath}.", localFetchRunId, failure.FolderPath);
+        }
+    }
+
+    // For the JS that just received `run_complete`: it already has the external fetch_run_id
+    // straight from that event, so this looks it up directly - no local row involved. Rendered
+    // into the inline live-progress panel, so this returns bare content (no modal chrome).
+    [HttpGet]
+    public async Task<IActionResult> FetchRunExternalDetails(int externalFetchRunId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var details = await _rdFetchApiClient.GetFetchRunDetailsAsync(externalFetchRunId, cancellationToken);
+            return PartialView("_FetchRunDetails", details);
+        }
+        catch (BusinessValidationException ex)
+        {
+            ViewData["FetchRunDetailsError"] = ex.Message;
+            return PartialView("_FetchRunDetails", (FetchRunDetailDto?)null);
+        }
+    }
+
+    // For the Fetch History table's "View" action (opened in the shared #ajaxModal, hence the
+    // modal-chrome view here): id is the *local* FetchRuns row id (the one shown/paginated in
+    // the table). Looks up whatever external fetch_run_id was stashed on it and re-queries the
+    // external service live; falls back to the local mirror's own data if no external id was
+    // ever recorded (e.g. a row from before this integration existed) or the external call
+    // turns up nothing.
+    [HttpGet]
+    public async Task<IActionResult> FetchRunDetails(int id, CancellationToken cancellationToken)
+    {
+        var local = await _rdConfigService.GetFetchRunAsync(id, cancellationToken);
+        if (local is null)
+        {
+            return PartialView("_FetchRunDetailsModal", (FetchRunDetailDto?)null);
+        }
+
+        FetchRunDetailDto? details = null;
+        if (local.Value.ExternalFetchRunId is { } externalId)
+        {
+            try
+            {
+                details = await _rdFetchApiClient.GetFetchRunDetailsAsync(externalId, cancellationToken);
+            }
+            catch (BusinessValidationException)
+            {
+                // Fall back to the local mirror's own data below rather than failing the view.
+            }
+        }
+
+        details ??= new FetchRunDetailDto
+        {
+            Id = local.Value.Item.Id,
+            Status = local.Value.Item.Status,
+            ProcessedCount = local.Value.Item.ProcessedCount,
+            TotalCount = local.Value.Item.TotalCount,
+            RunTime = local.Value.Item.RunTime,
+            ExecutedBy = local.Value.Item.ExecutedBy,
+            SourcePath = local.Value.Item.SourcePath,
+            StartedAt = local.Value.Item.StartedAt,
+            CompletedAt = local.Value.Item.CompletedAt,
+        };
+
+        return PartialView("_FetchRunDetailsModal", details);
     }
 }

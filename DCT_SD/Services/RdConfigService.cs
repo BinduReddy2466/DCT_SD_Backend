@@ -123,6 +123,61 @@ public class RdConfigService : IRdConfigService
         return MapToFetchRunItem(run);
     }
 
+    public async Task CompleteFetchRunAsync(int localFetchRunId, FetchRunDetailDto details, CancellationToken cancellationToken = default)
+    {
+        var run = await _context.FetchRuns
+            .FirstOrDefaultAsync(r => r.Id == localFetchRunId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
+        if (run is null)
+        {
+            return;
+        }
+
+        run.Status = Enum.TryParse<FetchRunStatus>(details.Status, true, out var status) ? status : run.Status;
+        run.ProcessedCount = details.ProcessedCount;
+        run.TotalCount = details.TotalCount;
+        run.CompletedAt = details.CompletedAt ?? DateTime.UtcNow;
+        run.LastProcessedFolderPath = details.LastProcessedFolderPath;
+        run.LastProcessedAt = DateTime.UtcNow;
+        // FromPath is otherwise unused for RecordKind=FetchRun rows (it only carries meaning for
+        // PathChange rows) - reusing it to remember the external service's own fetch_run_id lets
+        // the "View" action look the run back up (GET /fetch/{id}) without any schema change.
+        // Id 0 means no external id was ever assigned for this run (e.g. it found nothing new to
+        // process) - leave FromPath as-is rather than stashing a meaningless "0".
+        if (details.Id > 0)
+        {
+            run.FromPath = details.Id.ToString();
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task FailFetchRunAsync(int localFetchRunId, CancellationToken cancellationToken = default)
+    {
+        var run = await _context.FetchRuns
+            .FirstOrDefaultAsync(r => r.Id == localFetchRunId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
+        if (run is null || run.Status != FetchRunStatus.Ongoing)
+        {
+            return;
+        }
+
+        run.Status = FetchRunStatus.Failed;
+        run.CompletedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<(FetchRunItemDto Item, int? ExternalFetchRunId)?> GetFetchRunAsync(int localFetchRunId, CancellationToken cancellationToken = default)
+    {
+        var run = await _context.FetchRuns.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == localFetchRunId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
+        if (run is null)
+        {
+            return null;
+        }
+
+        var externalId = int.TryParse(run.FromPath, out var parsed) ? parsed : (int?)null;
+        return (MapToFetchRunItem(run), externalId);
+    }
+
     public async Task<PagedResult<FetchRunItemDto>> SearchFetchHistoryAsync(FetchHistorySearchRequestDto request, CancellationToken cancellationToken = default)
     {
         var query = _context.FetchRuns.AsNoTracking().Where(r => r.RecordKind == FetchRunRecordKinds.FetchRun);

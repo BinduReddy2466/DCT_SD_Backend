@@ -1,0 +1,41 @@
+@using DCT_SD.Helpers
+@model DCT_SD.Models.Dtos.RdConfig.FetchRunDetailDto?
+
+@if (Model is null)
+{
+    <div class="text-center text-muted py-4">@(ViewData["FetchRunDetailsError"] as string ?? "Fetch run not found.")</div>
+}
+else
+{
+    <dl class="row small mb-0">
+        <dt class="col-5">ID</dt>
+        <dd class="col-7 font-monospace">@Model.Id</dd>
+
+        <dt class="col-5">Status</dt>
+        <dd class="col-7"><status-badge status="@(Model.Status == "Ongoing" ? "Ongoing Fetching" : Model.Status)"></status-badge></dd>
+
+        <dt class="col-5">Processed Count</dt>
+        <dd class="col-7">@Model.ProcessedCount</dd>
+
+        <dt class="col-5">Total Count</dt>
+        <dd class="col-7">@(Model.TotalCount?.ToString() ?? "—")</dd>
+
+        <dt class="col-5">Run Time</dt>
+        <dd class="col-7">@(Model.RunTime ?? "—")</dd>
+
+        <dt class="col-5">Executed By</dt>
+        <dd class="col-7"><span class="chip-mono">@Model.ExecutedBy</span></dd>
+
+        <dt class="col-5">Source Path</dt>
+        <dd class="col-7 font-monospace">@Model.SourcePath</dd>
+
+        <dt class="col-5">Last Processed Folder Path</dt>
+        <dd class="col-7 font-monospace">@(Model.LastProcessedFolderPath ?? "—")</dd>
+
+        <dt class="col-5">Started At</dt>
+        <dd class="col-7 font-monospace">@Model.StartedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</dd>
+
+        <dt class="col-5">Completed At</dt>
+        <dd class="col-7 font-monospace">@(Model.CompletedAt.ToIst()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</dd>
+    </dl>
+}
