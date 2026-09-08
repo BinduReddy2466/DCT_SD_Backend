@@ -27,13 +27,14 @@ public class RdConfigService : IRdConfigService
 
     public async Task<RootPathDto> UpdateRootPathAsync(UpdateRootPathRequestDto request, CancellationToken cancellationToken = default)
     {
+        // No same-path guard here (unlike GetCurrentRootPathAsync's caller in the controller,
+        // which correctly checks the OLD path before ever calling the external service): by the
+        // time this runs, the external RD Fetch API call has already completed and - since it
+        // writes its own audit row directly to this same FetchRuns table - "latest" here already
+        // reflects the just-submitted new path. Comparing against it would reject every real
+        // update as a false "no-op" and silently drop the local mirror's own history entry.
         var latest = await GetLatestHistoryAsync(cancellationToken);
         var newPath = request.NewPath.Trim();
-
-        if (latest is not null && string.Equals(latest.SourcePath, newPath, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new BusinessValidationException("The selected Root Source Path is the same as the current configuration. No changes have been made.");
-        }
 
         var history = new FetchRun
         {
