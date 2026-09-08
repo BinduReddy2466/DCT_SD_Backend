@@ -118,9 +118,9 @@ public class RdConfigService : IRdConfigService
             StartedAt = DateTime.UtcNow,
         };
 
-        _context.FetchRuns.Add(run);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        // No local insert here - the external RD Fetch API now creates the single authoritative
+        // FetchRuns record itself (it writes directly into this same shared table). run.Id stays
+        // 0 (never persisted); callers must not treat it as a real row id.
         return MapToFetchRunItem(run);
     }
 

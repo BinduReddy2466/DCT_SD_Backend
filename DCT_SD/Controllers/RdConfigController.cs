@@ -233,7 +233,11 @@ public class RdConfigController : Controller
 
                     foreach (var failure in failures)
                     {
-                        await RecordFolderFailureAsync(localRun.Id, failure, cancellationToken);
+                        // localRun.Id is always 0 now (no local row is ever persisted - see
+                        // RdConfigService.StartFetchAsync), so there's no real FetchRuns id to
+                        // link this failure to; OcrExtractionRecord.FetchRunId is nullable for
+                        // exactly this reason.
+                        await RecordFolderFailureAsync(null, failure, cancellationToken);
                     }
                 }
             }
@@ -478,7 +482,7 @@ public class RdConfigController : Controller
     // Records a failed folder into the existing Failed Extraction table (OcrExtractionRecords +
     // RecordHistory) as it's observed live in the stream. Best-effort: a problem persisting this
     // bookkeeping must never interrupt relaying the run's progress to the browser.
-    private async Task RecordFolderFailureAsync(int localFetchRunId, FolderFailure failure, CancellationToken cancellationToken)
+    private async Task RecordFolderFailureAsync(int? localFetchRunId, FolderFailure failure, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(failure.FolderPath))
         {
