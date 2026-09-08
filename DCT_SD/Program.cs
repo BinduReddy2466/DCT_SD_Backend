@@ -11,6 +11,15 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// One timestamped file per run under Logs/, capturing everything already going to the console -
+// every outbound call to the external RD Fetch API (the built-in HttpClient logging handlers
+// log "Sending HTTP request POST http://.../fetch/start" etc. for every request/response),
+// every existing _logger.LogError/LogWarning call, and EF Core's own command logging. No other
+// code needs to change: this is just an additional sink on the same ILogger pipeline.
+var fileLoggerProvider = new FileLoggerProvider(Path.Combine(builder.Environment.ContentRootPath, "Logs"));
+builder.Logging.AddProvider(fileLoggerProvider);
+Console.WriteLine($"Logging this run to: {fileLoggerProvider.LogFilePath}");
+
 builder.Services.AddDctServices(builder.Configuration);
 builder.Services.AddControllersWithViews();
 

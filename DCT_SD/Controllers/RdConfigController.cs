@@ -145,10 +145,19 @@ public class RdConfigController : Controller
     // arrive (no buffering, no waiting for the run to finish) so the page can render live
     // progress. This is a plain fetch() POST from JS, not a native form submit - the antiforgery
     // token travels as a form field, same as every other fetch()-driven action in this app.
+    // rootPath is whatever the RD Configuration UI's Root Source Path field showed at the moment
+    // Start Fetching was clicked (never hardcoded here) - passed straight through as
+    // /fetch/start's "path" field.
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> StartFetchStream(CancellationToken cancellationToken)
+    public async Task<IActionResult> StartFetchStream(string? rootPath, CancellationToken cancellationToken)
     {
+        rootPath = rootPath?.Trim();
+        if (string.IsNullOrWhiteSpace(rootPath))
+        {
+            return BadRequest(new { message = "The root source path must be configured before starting a fetch." });
+        }
+
         FetchRunItemDto localRun;
         try
         {
@@ -165,7 +174,7 @@ public class RdConfigController : Controller
         HttpResponseMessage externalResponse;
         try
         {
-            externalResponse = await _rdFetchApiClient.StartFetchStreamAsync(cancellationToken);
+            externalResponse = await _rdFetchApiClient.StartFetchStreamAsync(rootPath, cancellationToken);
         }
         catch (BusinessValidationException ex)
         {

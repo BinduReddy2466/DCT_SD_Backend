@@ -279,9 +279,16 @@
       startBtn.disabled = true;
       resetLiveState();
 
+      // The Root Source Path the fetch actually runs against is whatever the RD Configuration
+      // UI currently shows in this field - never a hardcoded value - so it's read fresh at
+      // click time, not cached from page load. Server-side, StartFetchStream passes this
+      // straight through as /fetch/start's "path" field.
+      var rootPathField = document.getElementById('rootPathField');
+      var rootPath = rootPathField ? rootPathField.value : '';
+
       fetch('/RdConfig/StartFetchStream', {
         method: 'POST',
-        body: new URLSearchParams({ __RequestVerificationToken: token }),
+        body: new URLSearchParams({ __RequestVerificationToken: token, rootPath: rootPath }),
       }).then(function (response) {
         if (!response.ok) {
           return response.json().catch(function () { return {}; }).then(function (data) {

@@ -22,6 +22,9 @@ public class ExternalUpdateRootPathResponse
 
 public class ExternalStartFetchRequest
 {
+    [JsonPropertyName("path")]
+    public string Path { get; set; } = string.Empty;
+
     [JsonPropertyName("dry_run")]
     public bool DryRun { get; set; }
 

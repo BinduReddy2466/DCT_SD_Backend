@@ -22,11 +22,12 @@ public class RdFetchApiClient : IRdFetchApiClient
 
     private static readonly JsonSerializerOptions DetailsJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    public async Task<HttpResponseMessage> StartFetchStreamAsync(CancellationToken cancellationToken = default)
+    public async Task<HttpResponseMessage> StartFetchStreamAsync(string rootPath, CancellationToken cancellationToken = default)
     {
         // Always false/false per the integration requirement - file moves and dry-run mode are
-        // not enabled from this button.
-        var request = new ExternalStartFetchRequest { DryRun = false, ApplyFileMoves = false };
+        // not enabled from this button. Path is whatever the caller resolved from the RD
+        // Configuration UI - never hardcoded here.
+        var request = new ExternalStartFetchRequest { Path = rootPath, DryRun = false, ApplyFileMoves = false };
 
         HttpResponseMessage response;
         try
