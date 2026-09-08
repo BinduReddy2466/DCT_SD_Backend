@@ -91,11 +91,25 @@ public class RdConfigController : Controller
             return View("Index", invalidModel);
         }
 
+        var path = model.RootPath.Trim();
+        var remarks = model.Remarks.Trim();
+
+        // Checked locally, before ever calling the external service: resubmitting the path
+        // that's already configured is a no-op. Without this, the old flow called the external
+        // API unconditionally, then silently swallowed the local mirror's own "no change"
+        // rejection and told the user it succeeded anyway - a false positive, and an unnecessary
+        // external call/history entry on the external side for every re-submission.
+        var current = await _rdConfigService.GetCurrentRootPathAsync(cancellationToken);
+        if (string.Equals(current.CurrentPath, path, StringComparison.OrdinalIgnoreCase))
+        {
+            TempData["ToastMessage"] = "The selected Root Source Path is the same as the current configuration. No changes have been made.";
+            TempData["ToastVariant"] = "default";
+            return RedirectToAction("Index");
+        }
+
         try
         {
             // The external service is now authoritative for whether this update succeeds.
-            var path = model.RootPath.Trim();
-            var remarks = model.Remarks.Trim();
             var response = await _rdFetchApiClient.UpdateRootPathAsync(path, remarks, cancellationToken);
 
             // Mirror the confirmed change into the existing local history table so the rest of
@@ -109,9 +123,10 @@ public class RdConfigController : Controller
             }
             catch (BusinessValidationException)
             {
-                // Local history's latest entry is already this exact path (e.g. re-applying the
-                // same value) - the external update itself still succeeded, so this isn't an
-                // error worth surfacing on top of that.
+                // The external service's own resolved path ended up matching what's already
+                // recorded locally (e.g. it normalized the path differently than expected) - the
+                // external update itself still succeeded, so this isn't worth surfacing as an
+                // error on top of that.
             }
 
             TempData["ToastMessage"] = "Root Source Path has been updated successfully.";
