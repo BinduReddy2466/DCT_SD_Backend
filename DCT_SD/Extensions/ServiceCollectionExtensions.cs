@@ -44,11 +44,11 @@ public static class ServiceCollectionExtensions
         // RdFetchApi__Username / RdFetchApi__Password environment variables - never committed.
         var rdFetchApiBaseUrl = configuration["RdFetchApi:BaseUrl"]
             ?? throw new InvalidOperationException("RdFetchApi:BaseUrl is not configured.");
-        var rdFetchApiUsername = configuration["RdFetchApi:Username"]
-            ?? throw new InvalidOperationException("RdFetchApi:Username is missing. Set it via the RdFetchApi__Username environment variable or user secrets.");
-        var rdFetchApiPassword = configuration["RdFetchApi:Password"]
-            ?? throw new InvalidOperationException("RdFetchApi:Password is missing. Set it via the RdFetchApi__Password environment variable or user secrets.");
-        var rdFetchApiAuthHeader = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{rdFetchApiUsername}:{rdFetchApiPassword}"));
+        // var rdFetchApiUsername = configuration["RdFetchApi:Username"]
+        //     ?? throw new InvalidOperationException("RdFetchApi:Username is missing. Set it via the RdFetchApi__Username environment variable or user secrets.");
+        // var rdFetchApiPassword = configuration["RdFetchApi:Password"]
+        //     ?? throw new InvalidOperationException("RdFetchApi:Password is missing. Set it via the RdFetchApi__Password environment variable or user secrets.");
+        // var rdFetchApiAuthHeader = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{rdFetchApiUsername}:{rdFetchApiPassword}"));
 
         services.AddHttpClient<IRdFetchApiClient, RdFetchApiClient>(client =>
         {
@@ -59,7 +59,7 @@ public static class ServiceCollectionExtensions
             // instead gets bounded by the caller's own CancellationToken (ultimately the
             // browser's request, via HttpContext.RequestAborted).
             client.Timeout = Timeout.InfiniteTimeSpan;
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", rdFetchApiAuthHeader);
+            //client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", rdFetchApiAuthHeader);
         }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {
             // ConnectTimeout is separate from HttpClient.Timeout above - it bounds only the TCP
