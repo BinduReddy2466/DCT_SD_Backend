@@ -47,9 +47,9 @@ public class RdConfigService : IRdConfigService
             StartedAt = DateTime.UtcNow,
         };
 
-        _context.FetchRuns.Add(history);
-        await _context.SaveChangesAsync(cancellationToken);
-
+        // No local insert here - the external RD Fetch API now creates the single authoritative
+        // FetchRuns record itself (it writes directly into this same shared table), same as
+        // StartFetchAsync below.
         return new RootPathDto { CurrentPath = history.SourcePath };
     }
 

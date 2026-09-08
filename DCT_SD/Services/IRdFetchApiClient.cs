@@ -7,7 +7,10 @@ namespace DCT_SD.Services;
 // calls out to an external API.
 public interface IRdFetchApiClient
 {
-    Task<ExternalUpdateRootPathResponse> UpdateRootPathAsync(string path, string remarks, CancellationToken cancellationToken = default);
+    /// executedByUserId is the logged-in user who clicked Update, sent as "Executed_By_UserID"
+    /// so the external service's own FetchRuns record attributes the change to them instead of
+    /// its own service identity.
+    Task<ExternalUpdateRootPathResponse> UpdateRootPathAsync(string path, string remarks, int executedByUserId, CancellationToken cancellationToken = default);
 
     /// Starts a fetch run and returns the raw streaming response (POST /fetch/start, an SSE
     /// stream) - the caller is responsible for reading and disposing it. rootPath is sent as the

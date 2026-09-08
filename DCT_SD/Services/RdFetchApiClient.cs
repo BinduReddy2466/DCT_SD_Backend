@@ -16,9 +16,9 @@ public class RdFetchApiClient : IRdFetchApiClient
         _logger = logger;
     }
 
-    public async Task<ExternalUpdateRootPathResponse> UpdateRootPathAsync(string path, string remarks, CancellationToken cancellationToken = default)
+    public async Task<ExternalUpdateRootPathResponse> UpdateRootPathAsync(string path, string remarks, int executedByUserId, CancellationToken cancellationToken = default)
     {
-        var request = new ExternalUpdateRootPathRequest { Path = path, Remarks = remarks };
+        var request = new ExternalUpdateRootPathRequest { Path = path, ExecutedByUserId = executedByUserId, Remarks = remarks };
         return await PostAsync<ExternalUpdateRootPathRequest, ExternalUpdateRootPathResponse>("/rd-config", request, cancellationToken);
     }
 

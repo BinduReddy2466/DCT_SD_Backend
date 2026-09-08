@@ -10,6 +10,11 @@ public class ExternalUpdateRootPathRequest
     [JsonPropertyName("path")]
     public string Path { get; set; } = string.Empty;
 
+    // Same field name/casing as ExternalStartFetchRequest's Executed_By_UserID (confirmed with
+    // the external API owner for /fetch/start) - not separately re-confirmed for /rd-config.
+    [JsonPropertyName("Executed_By_UserID")]
+    public int ExecutedByUserId { get; set; }
+
     [JsonPropertyName("remarks")]
     public string Remarks { get; set; } = string.Empty;
 }

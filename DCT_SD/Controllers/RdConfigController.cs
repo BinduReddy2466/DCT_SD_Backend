@@ -111,7 +111,8 @@ public class RdConfigController : Controller
         try
         {
             // The external service is now authoritative for whether this update succeeds.
-            var response = await _rdFetchApiClient.UpdateRootPathAsync(path, remarks, cancellationToken);
+            var executedByUserId = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var parsedUserId) ? parsedUserId : 0;
+            var response = await _rdFetchApiClient.UpdateRootPathAsync(path, remarks, executedByUserId, cancellationToken);
 
             // Mirror the confirmed change into the existing local history table so the rest of
             // this page - the Root Source Path field, "Last Updated", and the History tab -
