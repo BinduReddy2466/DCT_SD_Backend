@@ -106,7 +106,11 @@
 
       function renderDoc() {
         var doc = documents[activeIndex];
-        viewer.load(window.dctPlaceholderImage(doc.fileName), doc.fileName, { fitOnLoad: false });
+        // doc.id is the 1-based position synthesized server-side (ManualValidationDocumentDto.Id);
+        // the actual image file is always looked up server-side from that document's imagePath
+        // in DocumentsJson - never a client-constructed path. doc.renamedFileName is the exact
+        // renamedFileName value from DocumentsJson, shown as-is.
+        viewer.load('/ManualValidation/DocumentImage?id=' + recordId + '&documentId=' + doc.id, doc.renamedFileName, { fitOnLoad: false });
         viewer.setNavDisabled(activeIndex === 0, activeIndex === documents.length - 1);
         if (headerRightEl) headerRightEl.textContent = 'Image ' + (activeIndex + 1) + ' of ' + documents.length;
         if (listEl) {

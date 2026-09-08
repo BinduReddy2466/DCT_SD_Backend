@@ -5,6 +5,7 @@ using DCT_SD.Models.ViewModels;
 using DCT_SD.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.StaticFiles;
 
 namespace DCT_SD.Controllers;
 
@@ -77,6 +78,27 @@ public class ManualValidationController : Controller
             TempData["ToastVariant"] = "error";
             return RedirectToAction("Index");
         }
+    }
+
+    // Streams a supporting document's image straight from disk, using the imagePath stored in
+    // that record's DocumentsJson - never a client-supplied path (documentId is only the
+    // synthesized 1-based position from ManualValidationDocumentDto.Id; the actual file path is
+    // always looked up server-side).
+    [HttpGet]
+    public async Task<IActionResult> DocumentImage(int id, int documentId, CancellationToken cancellationToken)
+    {
+        var imagePath = await _manualValidationService.GetDocumentImagePathAsync(id, documentId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(imagePath) || !System.IO.File.Exists(imagePath))
+        {
+            return NotFound();
+        }
+
+        if (!new FileExtensionContentTypeProvider().TryGetContentType(imagePath, out var contentType))
+        {
+            contentType = "application/octet-stream";
+        }
+
+        return PhysicalFile(imagePath, contentType);
     }
 
     [HttpPost]

@@ -310,33 +310,55 @@ public class ManualValidationService : IManualValidationService
         Documents = ParseDocuments(r.DocumentsJson),
     };
 
-    // ManualValidationRequests.DocumentsJson holds a JSON array of
-    // {documentTypeCode, documentName, fileName} - no per-item id in storage, so one is
-    // synthesized from (sorted) position for the API/UI. Sorted by Document Name then Image
-    // File Name so the Supporting Documents list and the image viewer's Prev/Next order match.
-    private static ManualValidationDocumentDto[] ParseDocuments(string? documentsJson)
+    // ManualValidationRequests.DocumentsJson holds a JSON array of {documentId, documentTypeCode,
+    // documentName, originalFileName, renamedFileName, imagePath} - no per-item id in storage,
+    // so one is synthesized from (sorted) position for the API/UI. Sorted by Document Name then
+    // Image File Name (renamedFileName) so the Supporting Documents list and the image viewer's
+    // Prev/Next order match. This is the single place DocumentsJson gets parsed and sorted -
+    // ParseDocuments (the client-facing list) and GetDocumentImagePathAsync (the image lookup)
+    // both build on it, so a document's position/Id means the same thing in both.
+    private static List<DocumentJsonItem> ParseAndSortDocumentItems(string? documentsJson)
     {
         if (string.IsNullOrWhiteSpace(documentsJson))
         {
-            return Array.Empty<ManualValidationDocumentDto>();
+            return [];
         }
 
         var items = JsonSerializer.Deserialize<List<DocumentJsonItem>>(documentsJson, JsonOptions) ?? [];
         return items
             .OrderBy(d => d.DocumentName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(d => d.FileName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(d => d.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static ManualValidationDocumentDto[] ParseDocuments(string? documentsJson) =>
+        ParseAndSortDocumentItems(documentsJson)
             .Select((d, index) => new ManualValidationDocumentDto
             {
                 Id = index + 1,
                 DocumentName = d.DocumentName,
-                FileName = d.FileName,
+                RenamedFileName = d.RenamedFileName,
             }).ToArray();
+
+    public async Task<string?> GetDocumentImagePathAsync(int id, int documentId, CancellationToken cancellationToken = default)
+    {
+        var documentsJson = await _context.ManualValidationRequests.AsNoTracking()
+            .Where(r => r.Id == id && r.MigratedAt == null)
+            .Select(r => r.DocumentsJson)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var items = ParseAndSortDocumentItems(documentsJson);
+        var index = documentId - 1;
+        return index >= 0 && index < items.Count ? items[index].ImagePath : null;
     }
 
     private class DocumentJsonItem
     {
+        public string? DocumentId { get; set; }
         public string? DocumentTypeCode { get; set; }
         public string DocumentName { get; set; } = string.Empty;
-        public string FileName { get; set; } = string.Empty;
+        public string? OriginalFileName { get; set; }
+        public string RenamedFileName { get; set; } = string.Empty;
+        public string? ImagePath { get; set; }
     }
 }

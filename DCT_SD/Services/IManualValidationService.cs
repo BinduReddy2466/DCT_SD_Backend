@@ -12,4 +12,10 @@ public interface IManualValidationService
     Task CloseAsync(int id, string remarks, CancellationToken cancellationToken = default);
     Task MigrateAsync(int id, CancellationToken cancellationToken = default);
     Task<TitleSequenceDto> RetrieveTitleSequenceAsync(RetrieveTitleSequenceRequestDto request, CancellationToken cancellationToken = default);
+
+    /// Looks up the imagePath stored in DocumentsJson for the document at the given 1-based
+    /// position (the same ordering/position used by ManualValidationDocumentDto.Id from
+    /// OpenForEditAsync's Documents list). Returns null if the record, or a document at that
+    /// position, doesn't exist.
+    Task<string?> GetDocumentImagePathAsync(int id, int documentId, CancellationToken cancellationToken = default);
 }
