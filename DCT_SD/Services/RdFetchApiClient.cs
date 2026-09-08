@@ -8,10 +8,12 @@ namespace DCT_SD.Services;
 public class RdFetchApiClient : IRdFetchApiClient
 {
     private readonly HttpClient _httpClient;
+    private readonly ILogger<RdFetchApiClient> _logger;
 
-    public RdFetchApiClient(HttpClient httpClient)
+    public RdFetchApiClient(HttpClient httpClient, ILogger<RdFetchApiClient> logger)
     {
         _httpClient = httpClient;
+        _logger = logger;
     }
 
     public async Task<ExternalUpdateRootPathResponse> UpdateRootPathAsync(string path, string remarks, CancellationToken cancellationToken = default)
@@ -40,13 +42,15 @@ public class RdFetchApiClient : IRdFetchApiClient
             // whole (potentially very long-running) SSE body first - the caller streams it live.
             response = await _httpClient.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            _logger.LogError(ex, "POST {BaseAddress}/fetch/start failed: could not reach the fetch service.", _httpClient.BaseAddress);
             throw new BusinessValidationException(
                 "Could not reach the fetch service. Make sure you're connected to Paradigm WiFi or VPN and try again.");
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.LogError(ex, "POST {BaseAddress}/fetch/start timed out.", _httpClient.BaseAddress);
             throw new BusinessValidationException(
                 "The fetch service did not respond in time. Make sure you're connected to Paradigm WiFi or VPN and try again.");
         }
@@ -54,6 +58,9 @@ public class RdFetchApiClient : IRdFetchApiClient
         if (!response.IsSuccessStatusCode)
         {
             var message = await BuildErrorMessageAsync(response, cancellationToken);
+            _logger.LogError(
+                "POST {BaseAddress}/fetch/start returned HTTP {StatusCode}: {Message}",
+                _httpClient.BaseAddress, (int)response.StatusCode, message);
             response.Dispose();
             throw new BusinessValidationException(message);
         }
@@ -68,13 +75,15 @@ public class RdFetchApiClient : IRdFetchApiClient
         {
             response = await _httpClient.GetAsync($"/fetch/{fetchRunId}", cancellationToken);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            _logger.LogError(ex, "GET {BaseAddress}/fetch/{FetchRunId} failed: could not reach the fetch service.", _httpClient.BaseAddress, fetchRunId);
             throw new BusinessValidationException(
                 "Could not reach the fetch service. Make sure you're connected to Paradigm WiFi or VPN and try again.");
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.LogError(ex, "GET {BaseAddress}/fetch/{FetchRunId} timed out.", _httpClient.BaseAddress, fetchRunId);
             throw new BusinessValidationException(
                 "The fetch service did not respond in time. Make sure you're connected to Paradigm WiFi or VPN and try again.");
         }
@@ -88,7 +97,11 @@ public class RdFetchApiClient : IRdFetchApiClient
 
             if (!response.IsSuccessStatusCode)
             {
-                throw new BusinessValidationException(await BuildErrorMessageAsync(response, cancellationToken));
+                var errorMessage = await BuildErrorMessageAsync(response, cancellationToken);
+                _logger.LogError(
+                    "GET {BaseAddress}/fetch/{FetchRunId} returned HTTP {StatusCode}: {Message}",
+                    _httpClient.BaseAddress, fetchRunId, (int)response.StatusCode, errorMessage);
+                throw new BusinessValidationException(errorMessage);
             }
 
             ExternalFetchRunDetailsResponse? parsed;
@@ -96,8 +109,9 @@ public class RdFetchApiClient : IRdFetchApiClient
             {
                 parsed = await response.Content.ReadFromJsonAsync<ExternalFetchRunDetailsResponse>(DetailsJsonOptions, cancellationToken);
             }
-            catch (JsonException)
+            catch (JsonException ex)
             {
+                _logger.LogError(ex, "GET {BaseAddress}/fetch/{FetchRunId} returned a response that could not be parsed.", _httpClient.BaseAddress, fetchRunId);
                 throw new BusinessValidationException("The fetch service returned a response that could not be understood.");
             }
 
@@ -147,20 +161,26 @@ public class RdFetchApiClient : IRdFetchApiClient
         {
             response = await _httpClient.PostAsJsonAsync(requestUri, body, cancellationToken);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
+            _logger.LogError(ex, "POST {BaseAddress}{RequestUri} failed: could not reach the fetch service.", _httpClient.BaseAddress, requestUri);
             throw new BusinessValidationException(
                 "Could not reach the fetch service. Make sure you're connected to Paradigm WiFi or VPN and try again.");
         }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
+            _logger.LogError(ex, "POST {BaseAddress}{RequestUri} timed out.", _httpClient.BaseAddress, requestUri);
             throw new BusinessValidationException(
                 "The fetch service did not respond in time. Make sure you're connected to Paradigm WiFi or VPN and try again.");
         }
 
         if (!response.IsSuccessStatusCode)
         {
-            throw new BusinessValidationException(await BuildErrorMessageAsync(response, cancellationToken));
+            var errorMessage = await BuildErrorMessageAsync(response, cancellationToken);
+            _logger.LogError(
+                "POST {BaseAddress}{RequestUri} returned HTTP {StatusCode}: {Message}",
+                _httpClient.BaseAddress, requestUri, (int)response.StatusCode, errorMessage);
+            throw new BusinessValidationException(errorMessage);
         }
 
         try
@@ -168,8 +188,9 @@ public class RdFetchApiClient : IRdFetchApiClient
             var result = await response.Content.ReadFromJsonAsync<TResponse>(cancellationToken: cancellationToken);
             return result ?? throw new BusinessValidationException("The fetch service returned an unexpected empty response.");
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
+            _logger.LogError(ex, "POST {BaseAddress}{RequestUri} returned a response that could not be parsed.", _httpClient.BaseAddress, requestUri);
             throw new BusinessValidationException("The fetch service returned a response that could not be understood.");
         }
     }

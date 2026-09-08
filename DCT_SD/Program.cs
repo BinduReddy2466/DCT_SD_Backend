@@ -62,6 +62,11 @@ builder.Services
             },
             OnChallenge = context =>
             {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogWarning(
+                    "Authentication challenge: {Method} {Path} has no valid access token ({Error}).",
+                    context.Request.Method, context.Request.Path, context.AuthenticateFailure?.Message ?? "no token presented");
+
                 context.HandleResponse();
                 var returnUrl = Uri.EscapeDataString(context.Request.Path + context.Request.QueryString);
                 context.Response.Redirect($"/Account/Login?returnUrl={returnUrl}");
@@ -69,6 +74,11 @@ builder.Services
             },
             OnForbidden = context =>
             {
+                var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<Program>>();
+                logger.LogWarning(
+                    "Authorization forbidden: user {Username} does not have access to {Method} {Path}.",
+                    context.HttpContext.User.Identity?.Name ?? "(unknown)", context.Request.Method, context.Request.Path);
+
                 context.Response.Redirect("/Account/AccessDenied");
                 return Task.CompletedTask;
             },
@@ -120,6 +130,33 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 app.UseRouting();
+
+// Centralized request/exception logging: wraps every request from here through endpoint
+// execution (silent refresh, auth, controller actions), so any unhandled exception or
+// error-status response from ANY layer is logged with the request that triggered it before
+// continuing to behave exactly as before - rethrown unhandled exceptions still reach
+// UseExceptionHandler/UseDeveloperExceptionPage above unchanged, nothing here is swallowed.
+app.Use(async (context, next) =>
+{
+    var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+    var method = context.Request.Method;
+    var path = context.Request.Path + context.Request.QueryString;
+
+    try
+    {
+        await next();
+
+        if (context.Response.StatusCode >= 400)
+        {
+            logger.LogWarning("HTTP {Method} {Path} responded {StatusCode}.", method, path, context.Response.StatusCode);
+        }
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+        logger.LogError(ex, "Unhandled exception while processing {Method} {Path}.", method, path);
+        throw;
+    }
+});
 
 // Silent refresh: if the access token cookie is missing/expired but a still-valid refresh
 // token cookie is present, rotate it and mint a fresh access token before authentication runs,

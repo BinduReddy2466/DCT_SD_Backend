@@ -225,7 +225,7 @@ public class RdConfigController : Controller
                     await Response.Body.FlushAsync(cancellationToken);
 
                     frameBuilder.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
-                    var (foundRunComplete, failures, foundFailureReason) = ProcessCompleteRecords(frameBuilder);
+                    var (foundRunComplete, failures, foundFailureReason) = ProcessCompleteRecords(frameBuilder, localRun.Id, _logger);
                     runComplete ??= foundRunComplete;
                     runFailureReason ??= foundFailureReason;
 
@@ -235,15 +235,20 @@ public class RdConfigController : Controller
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // Headers (text/event-stream) are already sent, so this can no longer become a
                 // JSON error response - the client sees the connection simply end and falls back
-                // to its own "stream closed" handling. This also catches the client disconnecting
-                // mid-stream (browser closed, tab navigated away, network drop): that cancels
-                // cancellationToken and throws OperationCanceledException here too, and it must
-                // still mark the local row below - otherwise it stays stuck Ongoing forever and
-                // StartFetchAsync's own guard permanently blocks every future fetch attempt.
+                // to its own "stream closed" handling. Still log the real cause: this is exactly
+                // the case where a fetch run appears to just "stop" with no explanation anywhere
+                // else.
+                _logger.LogError(ex, "SSE stream for fetch run {LocalFetchRunId} ended unexpectedly while relaying /fetch/start.", localRun.Id);
+                streamedOk = false;
+            }
+            catch (OperationCanceledException)
+            {
+                // The caller (browser) disconnected before the run finished (tab closed,
+                // navigated away, network drop) - expected, not an error worth logging.
                 streamedOk = false;
             }
 
@@ -309,7 +314,7 @@ public class RdConfigController : Controller
     // exactly like the browser-side parser - so a field that happens to be named e.g. "id"
     // inside an unrelated event is never mistaken for run_complete's fetch_run_id. Only the
     // trailing, possibly-incomplete record is kept in the buffer for the next read.
-    private static (RunCompleteInfo? RunComplete, List<FolderFailure> Failures, string? RunFailureReason) ProcessCompleteRecords(StringBuilder frameBuilder)
+    private static (RunCompleteInfo? RunComplete, List<FolderFailure> Failures, string? RunFailureReason) ProcessCompleteRecords(StringBuilder frameBuilder, int localFetchRunId, ILogger logger)
     {
         var text = frameBuilder.ToString();
         var records = Regex.Split(text, "\r?\n\r?\n");
@@ -355,9 +360,14 @@ public class RdConfigController : Controller
             {
                 doc = JsonDocument.Parse(json);
             }
-            catch (JsonException)
+            catch (JsonException ex)
             {
-                continue; // A partial JSON object caught mid-frame - skip it, not worth retrying.
+                // Usually just a partial JSON object caught mid-frame (not worth retrying), but
+                // could also be a genuinely malformed event from the external service - log it so
+                // an unexpected/malformed SSE event is traceable instead of silently dropped.
+                logger.LogWarning(ex, "Skipped an unparsable SSE record for fetch run {LocalFetchRunId}: {Record}",
+                    localFetchRunId, json.Length > 300 ? json[..300] + "…" : json);
+                continue;
             }
 
             using (doc)
