@@ -174,7 +174,7 @@ public class RdConfigController : Controller
         HttpResponseMessage externalResponse;
         try
         {
-            externalResponse = await _rdFetchApiClient.StartFetchStreamAsync(rootPath, cancellationToken);
+            externalResponse = await _rdFetchApiClient.StartFetchStreamAsync(rootPath, User.Identity?.Name ?? "unknown", cancellationToken);
         }
         catch (BusinessValidationException ex)
         {
