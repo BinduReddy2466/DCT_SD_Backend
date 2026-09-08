@@ -123,7 +123,7 @@ public class RdConfigService : IRdConfigService
         return MapToFetchRunItem(run);
     }
 
-    public async Task CompleteFetchRunAsync(int localFetchRunId, FetchRunDetailDto details, CancellationToken cancellationToken = default)
+    public async Task CompleteFetchRunAsync(int localFetchRunId, FetchRunDetailDto details, string? failureReason = null, CancellationToken cancellationToken = default)
     {
         var run = await _context.FetchRuns
             .FirstOrDefaultAsync(r => r.Id == localFetchRunId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
@@ -149,9 +149,10 @@ public class RdConfigService : IRdConfigService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        await RecordFailureReasonAsync(run.Id, failureReason ?? details.FailureReason, cancellationToken);
     }
 
-    public async Task FailFetchRunAsync(int localFetchRunId, CancellationToken cancellationToken = default)
+    public async Task FailFetchRunAsync(int localFetchRunId, string? failureReason = null, CancellationToken cancellationToken = default)
     {
         var run = await _context.FetchRuns
             .FirstOrDefaultAsync(r => r.Id == localFetchRunId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
@@ -163,9 +164,34 @@ public class RdConfigService : IRdConfigService
         run.Status = FetchRunStatus.Failed;
         run.CompletedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
+        await RecordFailureReasonAsync(run.Id, failureReason, cancellationToken);
     }
 
-    public async Task<(FetchRunItemDto Item, int? ExternalFetchRunId)?> GetFetchRunAsync(int localFetchRunId, CancellationToken cancellationToken = default)
+    // Persists why a run failed via the existing generic RecordHistory table (same mechanism
+    // Manual Validation remarks and Failed Extraction reasons already use) - no schema change.
+    // Neither GET /fetch/{id} nor run_complete itself ever carries a reason, so without this the
+    // only place it was ever visible was the live SSE stream at the moment it happened.
+    private async Task RecordFailureReasonAsync(int localFetchRunId, string? failureReason, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(failureReason))
+        {
+            return;
+        }
+
+        _context.RecordHistory.Add(new RecordHistory
+        {
+            TableName = RecordHistoryTables.FetchRuns,
+            RecordId = localFetchRunId,
+            Action = "RunFailed",
+            Remarks = failureReason,
+            ByUserId = _currentUser.UserId,
+            ByUsername = _currentUser.Username,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<(FetchRunItemDto Item, int? ExternalFetchRunId, string? FailureReason)?> GetFetchRunAsync(int localFetchRunId, CancellationToken cancellationToken = default)
     {
         var run = await _context.FetchRuns.AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == localFetchRunId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
@@ -175,7 +201,13 @@ public class RdConfigService : IRdConfigService
         }
 
         var externalId = int.TryParse(run.FromPath, out var parsed) ? parsed : (int?)null;
-        return (MapToFetchRunItem(run), externalId);
+        var failureReason = await _context.RecordHistory.AsNoTracking()
+            .Where(h => h.TableName == RecordHistoryTables.FetchRuns && h.RecordId == localFetchRunId)
+            .OrderByDescending(h => h.CreatedAt)
+            .Select(h => h.Remarks)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return (MapToFetchRunItem(run), externalId, failureReason);
     }
 
     public async Task<PagedResult<FetchRunItemDto>> SearchFetchHistoryAsync(FetchHistorySearchRequestDto request, CancellationToken cancellationToken = default)

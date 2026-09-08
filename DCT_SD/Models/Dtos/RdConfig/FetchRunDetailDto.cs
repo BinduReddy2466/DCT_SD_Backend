@@ -14,4 +14,9 @@ public class FetchRunDetailDto
     public string? LastProcessedFolderPath { get; set; }
     public DateTime StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+
+    // Only ever set for a Failed run - captured from the SSE stream's own connectivity_check
+    // (ok: false) or system_error event at the time it happened, since neither the external
+    // service's GET /fetch/{id} response nor its own run_complete event carries a reason.
+    public string? FailureReason { get; set; }
 }

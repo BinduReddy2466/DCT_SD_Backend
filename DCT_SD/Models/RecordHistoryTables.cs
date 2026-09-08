@@ -4,4 +4,5 @@ namespace DCT_SD.Models;
 public static class RecordHistoryTables
 {
     public const string ManualValidationRequests = "ManualValidationRequests";
+    public const string FetchRuns = "FetchRuns";
 }

@@ -158,7 +158,7 @@ public class RdConfigController : Controller
             // error - but the local "Ongoing" row from above must not be left stuck that way
             // (SearchFetchHistoryAsync's own hasOngoing guard would then permanently block every
             // future attempt to start a fetch).
-            await _rdConfigService.FailFetchRunAsync(localRun.Id, CancellationToken.None);
+            await _rdConfigService.FailFetchRunAsync(localRun.Id, ex.Message, CancellationToken.None);
             return BadRequest(new { message = ex.Message });
         }
         catch (OperationCanceledException)
@@ -166,7 +166,7 @@ public class RdConfigController : Controller
             // The caller (browser) disconnected before the external service even responded - not
             // a BusinessValidationException, so it wouldn't be caught above, but the local row
             // still must not be left stuck Ongoing for the same reason.
-            await _rdConfigService.FailFetchRunAsync(localRun.Id, CancellationToken.None);
+            await _rdConfigService.FailFetchRunAsync(localRun.Id, cancellationToken: CancellationToken.None);
             throw;
         }
 
@@ -186,6 +186,7 @@ public class RdConfigController : Controller
             HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
             RunCompleteInfo? runComplete = null;
+            string? runFailureReason = null;
             var streamedOk = true;
             try
             {
@@ -200,8 +201,9 @@ public class RdConfigController : Controller
                     await Response.Body.FlushAsync(cancellationToken);
 
                     frameBuilder.Append(Encoding.UTF8.GetString(buffer, 0, bytesRead));
-                    var (foundRunComplete, failures) = ProcessCompleteRecords(frameBuilder);
+                    var (foundRunComplete, failures, foundFailureReason) = ProcessCompleteRecords(frameBuilder);
                     runComplete ??= foundRunComplete;
+                    runFailureReason ??= foundFailureReason;
 
                     foreach (var failure in failures)
                     {
@@ -231,19 +233,19 @@ public class RdConfigController : Controller
                     var details = await _rdFetchApiClient.GetFetchRunDetailsAsync(fetchRunId, CancellationToken.None);
                     if (details is not null)
                     {
-                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, details, CancellationToken.None);
+                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, details, runFailureReason, CancellationToken.None);
                     }
                     else
                     {
                         // GET /fetch/{id} came back 404 for an id run_complete itself just gave
                         // us - fall back to the run_complete payload's own fields rather than
                         // treating an already-known-successful run as failed.
-                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), CancellationToken.None);
+                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), runFailureReason, CancellationToken.None);
                     }
                 }
                 catch (BusinessValidationException)
                 {
-                    await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), CancellationToken.None);
+                    await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), runFailureReason, CancellationToken.None);
                 }
             }
             else if (runComplete is not null)
@@ -251,11 +253,11 @@ public class RdConfigController : Controller
                 // run_complete arrived but without a fetch_run_id (e.g. "nothing new to
                 // process" - no run was actually created on the external side) - there's no id
                 // to query GET /fetch/{id} with, so reconcile directly from this payload.
-                await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(null), CancellationToken.None);
+                await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(null), runFailureReason, CancellationToken.None);
             }
             else if (!streamedOk)
             {
-                await _rdConfigService.FailFetchRunAsync(localRun.Id, CancellationToken.None);
+                await _rdConfigService.FailFetchRunAsync(localRun.Id, runFailureReason, CancellationToken.None);
             }
         }
 
@@ -283,7 +285,7 @@ public class RdConfigController : Controller
     // exactly like the browser-side parser - so a field that happens to be named e.g. "id"
     // inside an unrelated event is never mistaken for run_complete's fetch_run_id. Only the
     // trailing, possibly-incomplete record is kept in the buffer for the next read.
-    private static (RunCompleteInfo? RunComplete, List<FolderFailure> Failures) ProcessCompleteRecords(StringBuilder frameBuilder)
+    private static (RunCompleteInfo? RunComplete, List<FolderFailure> Failures, string? RunFailureReason) ProcessCompleteRecords(StringBuilder frameBuilder)
     {
         var text = frameBuilder.ToString();
         var records = Regex.Split(text, "\r?\n\r?\n");
@@ -293,6 +295,7 @@ public class RdConfigController : Controller
         var completeRecords = records[..^1];
 
         RunCompleteInfo? runComplete = null;
+        string? runFailureReason = null;
         var failures = new List<FolderFailure>();
 
         foreach (var record in completeRecords)
@@ -347,6 +350,29 @@ public class RdConfigController : Controller
                         TryGetInt(root, "total_count", "totalCount"));
                 }
 
+                if (eventName == "connectivity_check" && runFailureReason is null && TryGetBool(root, "ok") == false)
+                {
+                    var message = TryGetString(root, "message");
+                    if (message is null)
+                    {
+                        // The real service reports connectivity as booleans with no message when
+                        // something's down ({ database, llm, root_path, ok }) - build one from
+                        // whichever checks came back false, mirroring the browser-side fallback.
+                        var problems = new[] { "database", "llm", "root_path" }
+                            .Where(key => TryGetBool(root, key) == false)
+                            .ToArray();
+                        message = problems.Length > 0
+                            ? $"Connectivity issue: {string.Join(", ", problems)} not reachable."
+                            : "Connectivity issue detected.";
+                    }
+                    runFailureReason = message;
+                }
+
+                if (eventName == "system_error" && runFailureReason is null)
+                {
+                    runFailureReason = TryGetString(root, "message", "reason", "detail");
+                }
+
                 if (eventName == "folder_result")
                 {
                     var status = TryGetString(root, "status") ?? string.Empty;
@@ -365,8 +391,13 @@ public class RdConfigController : Controller
             }
         }
 
-        return (runComplete, failures);
+        return (runComplete, failures, runFailureReason);
     }
+
+    private static bool? TryGetBool(JsonElement root, string key) =>
+        root.TryGetProperty(key, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean()
+            : null;
 
     private static string? TryGetString(JsonElement root, params string[] keys)
     {
@@ -444,24 +475,6 @@ public class RdConfigController : Controller
         }
     }
 
-    // For the JS that just received `run_complete`: it already has the external fetch_run_id
-    // straight from that event, so this looks it up directly - no local row involved. Rendered
-    // into the inline live-progress panel, so this returns bare content (no modal chrome).
-    [HttpGet]
-    public async Task<IActionResult> FetchRunExternalDetails(int externalFetchRunId, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var details = await _rdFetchApiClient.GetFetchRunDetailsAsync(externalFetchRunId, cancellationToken);
-            return PartialView("_FetchRunDetails", details);
-        }
-        catch (BusinessValidationException ex)
-        {
-            ViewData["FetchRunDetailsError"] = ex.Message;
-            return PartialView("_FetchRunDetails", (FetchRunDetailDto?)null);
-        }
-    }
-
     // For the Fetch History table's "View" action (opened in the shared #ajaxModal, hence the
     // modal-chrome view here): id is the *local* FetchRuns row id (the one shown/paginated in
     // the table). Looks up whatever external fetch_run_id was stashed on it and re-queries the
@@ -502,6 +515,11 @@ public class RdConfigController : Controller
             StartedAt = local.Value.Item.StartedAt,
             CompletedAt = local.Value.Item.CompletedAt,
         };
+
+        // Neither GET /fetch/{id} nor run_complete itself ever carries a reason - it only ever
+        // existed in the live SSE stream at the moment the run failed, which is why it's
+        // recorded locally (RdConfigService.RecordFailureReasonAsync) instead.
+        details.FailureReason ??= local.Value.FailureReason;
 
         return PartialView("_FetchRunDetailsModal", details);
     }

@@ -37,5 +37,11 @@ else
 
         <dt class="col-5">Completed At</dt>
         <dd class="col-7 font-monospace">@(Model.CompletedAt.ToIst()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</dd>
+
+        @if (!string.IsNullOrWhiteSpace(Model.FailureReason))
+        {
+            <dt class="col-5">Failure Reason</dt>
+            <dd class="col-7 text-danger">@Model.FailureReason</dd>
+        }
     </dl>
 }
