@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -174,7 +175,8 @@ public class RdConfigController : Controller
         HttpResponseMessage externalResponse;
         try
         {
-            externalResponse = await _rdFetchApiClient.StartFetchStreamAsync(rootPath, User.Identity?.Name ?? "unknown", cancellationToken);
+            var executedByUserId = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var parsedUserId) ? parsedUserId : 0;
+            externalResponse = await _rdFetchApiClient.StartFetchStreamAsync(rootPath, executedByUserId, cancellationToken);
         }
         catch (BusinessValidationException ex)
         {

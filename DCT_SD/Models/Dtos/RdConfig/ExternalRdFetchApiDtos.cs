@@ -27,8 +27,8 @@ public class ExternalStartFetchRequest
 
     // Casing confirmed directly with the external API owner - not snake_case like the other
     // fields here, but this is the exact field name their service expects.
-    [JsonPropertyName("Executed_By_Username")]
-    public string ExecutedByUsername { get; set; } = string.Empty;
+    [JsonPropertyName("Executed_By_UserID")]
+    public int ExecutedByUserId { get; set; }
 
     [JsonPropertyName("dry_run")]
     public bool DryRun { get; set; }
