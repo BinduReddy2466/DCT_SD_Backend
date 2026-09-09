@@ -8,9 +8,9 @@
     <table class="table table-hover align-middle">
         <thead>
             <tr>
-                <th>Modified Date &amp; Time</th>
                 <th>From Source Path</th>
                 <th>To Source Path</th>
+                <th>Modified Date &amp; Time</th>
                 <th>Modified By</th>
                 <th>Remarks</th>
             </tr>
@@ -25,9 +25,9 @@
                 @foreach (var item in result.Items)
                 {
                     <tr>
-                        <td class="font-monospace small">@item.ModifiedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td class="font-monospace small text-muted">@(item.FromPath ?? "—")</td>
                         <td class="font-monospace small">@item.ToPath</td>
+                        <td class="font-monospace small">@item.ModifiedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td><span class="chip-mono">@item.ModifiedBy</span></td>
                         <td>@item.Remarks</td>
                     </tr>

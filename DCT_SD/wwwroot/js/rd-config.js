@@ -25,6 +25,30 @@
       });
     }
 
+    // Root Source Path Update History: block Search when no criterion is set, without touching
+    // list-page.js (shared by every other list/search screen) or this form's own Clear button
+    // (which calls submitForm() directly, never through a "submit" event, so it's unaffected).
+    // Registered on document with capture:true so this runs - and can veto the event via
+    // stopPropagation() - before list-page.js's own submit listener on this same form fires,
+    // regardless of which script tag happens to load first.
+    var rootHistoryForm = document.querySelector('[data-list-page-form="root-history-results"]');
+    if (rootHistoryForm) {
+      document.addEventListener('submit', function (e) {
+        if (e.target !== rootHistoryForm) return;
+
+        var rootModifiedBy = document.getElementById('rootModifiedBy');
+        var hasCriteria = (rootDateFrom && rootDateFrom.value)
+          || (rootDateTo && rootDateTo.value)
+          || (rootModifiedBy && rootModifiedBy.value.trim());
+
+        if (!hasCriteria) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (window.showToast) window.showToast('At least one search criterion is required.', 'default');
+        }
+      }, true);
+    }
+
     var contentEl = document.getElementById('ajaxModalContent');
     if (!contentEl) return;
 
