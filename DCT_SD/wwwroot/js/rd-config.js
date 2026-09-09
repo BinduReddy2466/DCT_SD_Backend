@@ -155,10 +155,13 @@
       return container ? container.querySelector('tbody') : null;
     }
 
-    // Prepends one live row - matching _FetchHistoryResults.cshtml's 8 columns exactly - to the
-    // existing Fetch History table, removing its "No fetch history found." empty state if
-    // present. Cell references are grabbed once here rather than re-queried by id, since this
-    // row (unlike the rest of the table) is never re-rendered by the server while the fetch runs.
+    // Prepends one live row - matching _FetchHistoryResults.cshtml's 9 columns exactly (Fetch
+    // Date and Time, Fetch Completion Date and Time, Fetch Run Time, Fetch Progress, Fetch
+    // Status, Executed By, Failure Reason, Source Path, Action) - to the existing Fetch History
+    // table, removing its "No fetch history found." empty state if present. Failure Reason and
+    // Action stay blank while ongoing (no failure to report yet, no persisted row to link to).
+    // Cell references are grabbed once here rather than re-queried by id, since this row (unlike
+    // the rest of the table) is never re-rendered by the server while the fetch runs.
     function createLiveRow() {
       var tbody = getHistoryTbody();
       if (!tbody) return null;
@@ -174,13 +177,14 @@
         '<td data-cell="progress">0 / —</td>' +
         '<td data-cell="status"><span class="badge badge-info">Starting…</span></td>' +
         '<td><span class="chip-mono"></span></td>' +
+        '<td class="small">—</td>' +
         '<td class="font-monospace small"></td>' +
         '<td></td>';
 
       var cells = row.querySelectorAll('td');
       cells[0].textContent = formatNow(new Date());
       cells[5].querySelector('.chip-mono').textContent = currentUsername;
-      cells[6].textContent = (document.getElementById('rootPathField') || {}).value || '';
+      cells[7].textContent = (document.getElementById('rootPathField') || {}).value || '';
 
       tbody.insertBefore(row, tbody.firstChild);
       return { root: row, progress: cells[3], status: cells[4] };
