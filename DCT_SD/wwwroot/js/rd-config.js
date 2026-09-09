@@ -57,6 +57,32 @@
       }, true);
     }
 
+    // Fetch History: same rule, same technique - but this form is also submitted
+    // programmatically (refreshFetchHistory(), via form.requestSubmit() with no argument) right
+    // after a Start Fetching run completes, to reload the table with no criteria at all. A real
+    // Search-button click sets SubmitEvent.submitter to that button; requestSubmit() with no
+    // argument leaves it null - so only a genuine user click is validated, and the post-fetch
+    // auto-refresh is untouched.
+    var fetchHistoryForm = document.querySelector('[data-list-page-form="fetch-history-results"]');
+    if (fetchHistoryForm) {
+      document.addEventListener('submit', function (e) {
+        if (e.target !== fetchHistoryForm || !e.submitter) return;
+
+        var fetchDateFrom = document.getElementById('fetchDateFrom');
+        var fetchDateTo = document.getElementById('fetchDateTo');
+        var fetchExecutedBy = document.getElementById('fetchExecutedBy');
+        var hasCriteria = (fetchDateFrom && fetchDateFrom.value)
+          || (fetchDateTo && fetchDateTo.value)
+          || (fetchExecutedBy && fetchExecutedBy.value.trim());
+
+        if (!hasCriteria) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (window.showToast) window.showToast('At least one search criterion is required.', 'default');
+        }
+      }, true);
+    }
+
     var contentEl = document.getElementById('ajaxModalContent');
     if (!contentEl) return;
 

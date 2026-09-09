@@ -10,5 +10,6 @@ public class FetchRunItemDto
     public int? TotalCount { get; set; }
     public string Status { get; set; } = string.Empty;
     public string ExecutedBy { get; set; } = string.Empty;
+    public string? FailureReason { get; set; }
     public string SourcePath { get; set; } = string.Empty;
 }

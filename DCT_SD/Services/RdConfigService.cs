@@ -241,9 +241,19 @@ public class RdConfigService : IRdConfigService
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
+        // Failure reasons live in the existing RecordHistory table (same mechanism Manual
+        // Validation remarks and Failed Extraction reasons already use), keyed by each row's
+        // real FetchRuns id - no new table/column, no FetchRuns write.
+        var itemIds = items.Select(r => r.Id).ToArray();
+        var failureReasons = await _context.RecordHistory.AsNoTracking()
+            .Where(h => h.TableName == RecordHistoryTables.FetchRuns && h.RecordId.HasValue && itemIds.Contains(h.RecordId.Value) && h.Action == "RunFailed")
+            .GroupBy(h => h.RecordId!.Value)
+            .Select(g => new { RecordId = g.Key, Reason = g.OrderByDescending(h => h.CreatedAt).Select(h => h.Remarks).First() })
+            .ToDictionaryAsync(x => x.RecordId, x => x.Reason, cancellationToken);
+
         return new PagedResult<FetchRunItemDto>
         {
-            Items = items.Select(MapToFetchRunItem).ToArray(),
+            Items = items.Select(r => MapToFetchRunItem(r, failureReasons.GetValueOrDefault(r.Id))).ToArray(),
             TotalCount = totalCount,
             PageNumber = pageNumber,
             PageSize = pageSize,
@@ -346,7 +356,7 @@ public class RdConfigService : IRdConfigService
         Remarks = h.Remarks,
     };
 
-    private static FetchRunItemDto MapToFetchRunItem(FetchRun r) => new()
+    private static FetchRunItemDto MapToFetchRunItem(FetchRun r, string? failureReason = null) => new()
     {
         Id = r.Id,
         StartedAt = r.StartedAt,
@@ -356,9 +366,11 @@ public class RdConfigService : IRdConfigService
         TotalCount = r.TotalCount,
         Status = r.Status?.ToString() ?? string.Empty,
         ExecutedBy = r.ExecutedByUsername,
+        FailureReason = failureReason,
         SourcePath = r.SourcePath,
     };
 
+    // HH:MM:SS per the Fetch History table's Fetch Run Time column requirement.
     private static string? FormatRunTime(DateTime startedAt, DateTime? completedAt)
     {
         if (completedAt is null)
@@ -367,10 +379,11 @@ public class RdConfigService : IRdConfigService
         }
 
         var span = completedAt.Value - startedAt;
-        return span.TotalHours >= 1
-            ? $"{(int)span.TotalHours}h {span.Minutes}m {span.Seconds}s"
-            : span.TotalMinutes >= 1
-                ? $"{span.Minutes}m {span.Seconds}s"
-                : $"{span.Seconds}s";
+        if (span < TimeSpan.Zero)
+        {
+            span = TimeSpan.Zero;
+        }
+
+        return $"{(int)span.TotalHours:D2}:{span.Minutes:D2}:{span.Seconds:D2}";
     }
 }
