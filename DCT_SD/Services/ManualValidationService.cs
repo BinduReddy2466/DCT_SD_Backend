@@ -306,7 +306,12 @@ public class ManualValidationService : IManualValidationService
         Lot = r.Lot,
         TitleSequence = r.TitleSequence,
         Status = r.Status.ToString(),
-        MissingFields = r.MissingFieldsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+        // Computed live from the record's actual field values (same rule the Save path already
+        // uses) rather than trusting the stored MissingFieldsCsv - that column is populated by
+        // the external OCR pipeline at record-creation time and doesn't reliably reflect which
+        // Title Record fields are actually blank (e.g. leaves plan/block unflagged even when
+        // empty, and carries unrelated keys like "documentClassification").
+        MissingFields = ComputeMissingFields(r),
         Documents = ParseDocuments(r.DocumentsJson),
     };
 

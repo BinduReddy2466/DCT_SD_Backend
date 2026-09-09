@@ -24,12 +24,12 @@
     <div class="row g-3">
         <div class="col-12 col-xl-3">
             <div class="card p-4 h-100">
-                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Extracted Information</h6>
-
                 <div class="mb-3">
                     <div class="field-label">Request ID</div>
                     <div class="chip-mono mt-1 d-inline-block">@Model.RequestNumber</div>
                 </div>
+
+                <h6 class="text-muted text-uppercase small fw-semibold mb-3">General Information</h6>
 
                 <div class="mb-3 @MissingClass("rdCode")">
                     <label class="field-label" for="mvRdCode">RD Code</label>
@@ -43,6 +43,9 @@
                     <label class="field-label" for="mvEntry">Entry Number</label>
                     <input type="text" class="form-control mt-1" id="mvEntry" name="EntryNumbersCsv" value="@Model.EntryNumbersCsv" />
                 </div>
+
+                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Title Record</h6>
+
                 <div class="mb-3 @MissingClass("title")">
                     <label class="field-label" for="mvTitle">Title Number</label>
                     <input type="text" class="form-control mt-1" id="mvTitle" name="Title" value="@Model.Title" />
