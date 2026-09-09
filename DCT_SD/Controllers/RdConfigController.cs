@@ -42,7 +42,7 @@ public class RdConfigController : Controller
 
     private async Task<RdConfigIndexViewModel> BuildIndexViewModelAsync(CancellationToken cancellationToken)
     {
-        ViewData["Title"] = "RD Configuration";
+        ViewData["Title"] = "Fetching Management";
         ViewData["ActiveMenu"] = MenuKeys.RdConfig;
 
         var rootPath = await _rdConfigService.GetCurrentRootPathAsync(cancellationToken);
