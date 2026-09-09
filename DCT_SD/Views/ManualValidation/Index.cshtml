@@ -1,4 +1,3 @@
-@using DCT_SD.Helpers
 @using DCT_SD.Models.Dtos.RdConfig
 @model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.ManualValidation.ManualValidationListItemDto>
 @{
@@ -19,26 +18,8 @@
             </select>
         </div>
         <div>
-            <label class="form-label field-label" for="RequestNumber">Request ID</label>
-            <input type="text" class="form-control" id="RequestNumber" name="RequestNumber" value="@q["RequestNumber"]" />
-        </div>
-        <div>
             <label class="form-label field-label" for="EntryNumbersCsv">Entry Number</label>
             <input type="text" class="form-control" id="EntryNumbersCsv" name="EntryNumbersCsv" value="@q["EntryNumbersCsv"]" />
-        </div>
-        <div>
-            <label class="form-label field-label" for="Title">Title Number</label>
-            <input type="text" class="form-control" id="Title" name="Title" value="@q["Title"]" />
-        </div>
-        <div>
-            <label class="form-label field-label" for="Status">Extraction Status</label>
-            <select class="form-select" id="Status" name="Status">
-                <option value="">Select</option>
-                @foreach (var status in new[] { "IncompleteExtraction", "TargetRdNotIdentified" })
-                {
-                    <option value="@status" selected="@(q["Status"] == status)">@StatusDisplay.ManualValidationStatusToDisplay(status)</option>
-                }
-            </select>
         </div>
         <div>
             <label class="form-label field-label" for="DateFrom">Extraction Date From</label>
@@ -60,3 +41,7 @@
         @await Html.PartialAsync("_Results", Model)
     </div>
 </div>
+
+@section Scripts {
+    <script src="~/js/manual-validation.js" asp-append-version="true"></script>
+}
