@@ -26,10 +26,10 @@ public class RdFetchApiClient : IRdFetchApiClient
 
     public async Task<HttpResponseMessage> StartFetchStreamAsync(string rootPath, int executedByUserId, CancellationToken cancellationToken = default)
     {
-        // Always false/false per the integration requirement - file moves and dry-run mode are
-        // not enabled from this button. Path is whatever the caller resolved from the RD
-        // Configuration UI - never hardcoded here.
-        var request = new ExternalStartFetchRequest { Path = rootPath, ExecutedByUserId = executedByUserId, DryRun = false, ApplyFileMoves = false };
+        // dry_run is always false, apply_file_moves is always true, per the integration
+        // requirement. Path is whatever the caller resolved from the RD Configuration UI -
+        // never hardcoded here.
+        var request = new ExternalStartFetchRequest { Path = rootPath, ExecutedByUserId = executedByUserId, DryRun = false, ApplyFileMoves = true };
 
         HttpResponseMessage response;
         try

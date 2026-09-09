@@ -17,7 +17,7 @@ public interface IRdFetchApiClient
     /// request's "path" field (the RD Configuration UI's current Root Source Path - never
     /// hardcoded here). executedByUserId is the logged-in user who clicked Start Fetching, sent
     /// as "Executed_By_UserID" so the external service's own FetchRuns record attributes the run
-    /// to them instead of its own service identity. Always dry_run=false, apply_file_moves=false
+    /// to them instead of its own service identity. Always dry_run=false, apply_file_moves=true
     /// per the integration requirement.
     Task<HttpResponseMessage> StartFetchStreamAsync(string rootPath, int executedByUserId, CancellationToken cancellationToken = default);
 
