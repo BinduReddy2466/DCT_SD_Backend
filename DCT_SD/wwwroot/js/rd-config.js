@@ -12,6 +12,14 @@
   'use strict';
 
   document.addEventListener('DOMContentLoaded', function () {
+    // Disabled-Start-Fetching tooltip: a plain title attribute can't be styled (native browser
+    // tooltip), so it's a Bootstrap tooltip instead - same pattern as migration-details.js.
+    // Only present when the Root Source Path isn't configured (see Index.cshtml).
+    var startFetchTooltipWrapper = document.getElementById('startFetchTooltipWrapper');
+    if (window.bootstrap && startFetchTooltipWrapper && startFetchTooltipWrapper.getAttribute('data-bs-toggle') === 'tooltip') {
+      new window.bootstrap.Tooltip(startFetchTooltipWrapper);
+    }
+
     // Root Source Path Update History: Date From/To mutually constrain each other so the user
     // can never pick an invalid (From > To) range in the first place.
     var rootDateFrom = document.getElementById('rootDateFrom');

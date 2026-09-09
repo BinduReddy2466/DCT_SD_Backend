@@ -1,4 +1,8 @@
 @model RdConfigIndexViewModel
+@{
+    var hasRootPath = !string.IsNullOrWhiteSpace(Model.RootPathForm.RootPath);
+    var startFetchDisabledTitle = "Root Source Path must be configured before fetching can be started.";
+}
 
 <div class="card p-4 mb-4">
     <h2 class="font-display fs-6 fw-semibold mb-4">Root Source Path Configuration</h2>
@@ -45,7 +49,14 @@
         </div>
         <div class="d-flex gap-2">
             <button type="submit" form="updateRootPathForm" class="btn btn-navy">Update</button>
-            <button type="button" id="startFetchBtn" class="btn btn-gold" data-current-username="@User.Identity!.Name">Start Fetching</button>
+            @* A disabled <button> doesn't fire hover/title tooltips in Chrome/Firefox (disabled
+               elements stop receiving pointer interaction), so the tooltip has to live on a
+               non-disabled wrapper around it instead. *@
+            <span id="startFetchTooltipWrapper" title="@(hasRootPath ? null : startFetchDisabledTitle)"
+                  data-bs-toggle="@(hasRootPath ? null : "tooltip")" data-bs-custom-class="@(hasRootPath ? null : "start-fetch-tooltip")">
+                <button type="button" id="startFetchBtn" class="btn btn-gold" data-current-username="@User.Identity!.Name"
+                        disabled="@(!hasRootPath)">Start Fetching</button>
+            </span>
         </div>
     </div>
 </div>

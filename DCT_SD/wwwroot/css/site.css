@@ -335,3 +335,9 @@ body {
   align-items: center;
   gap: 6px;
 }
+
+/* Disabled-Start-Fetching Bootstrap tooltip (Fetching Management page) - scoped via
+   data-bs-custom-class so this doesn't affect the unrelated tooltip on Migration Details. */
+.start-fetch-tooltip .tooltip-inner {
+  color: var(--color-err-text);
+}
