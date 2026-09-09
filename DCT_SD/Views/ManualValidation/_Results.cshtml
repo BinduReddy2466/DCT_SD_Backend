@@ -5,14 +5,10 @@
     <table class="table table-hover align-middle">
         <thead>
             <tr>
-                <th>Request ID</th>
                 <th>RD Code</th>
                 <th>RD Name</th>
                 <th>Entry Number</th>
-                <th>Title Number</th>
-                <th>Title Type</th>
                 <th>Extraction Status</th>
-                <th>Missing Fields</th>
                 <th>Extraction Date and Time</th>
                 <th>Updated By</th>
                 <th>Updated Date and Time</th>
@@ -22,21 +18,24 @@
         <tbody>
             @if (Model.Items.Count == 0)
             {
-                <tr><td colspan="12" class="text-center text-muted py-4">No manual validation records found.</td></tr>
+                <tr><td colspan="8" class="text-center text-muted py-4">No manual validation records found.</td></tr>
             }
             else
             {
                 @foreach (var item in Model.Items)
                 {
                     <tr>
-                        <td><span class="chip-mono">@item.RequestNumber</span></td>
                         <td class="font-monospace small">@(item.RdCode ?? "—")</td>
                         <td>@(item.RdName ?? "—")</td>
                         <td>@(item.EntryNumbersCsv ?? "—")</td>
-                        <td class="font-monospace small">@(item.Title ?? "—")</td>
-                        <td>@(item.TitleType ?? "—")</td>
-                        <td><status-badge status="@StatusDisplay.ManualValidationStatusToDisplay(item.Status)"></status-badge></td>
-                        <td class="text-muted small">@StatusDisplay.DescribeMissingFields(item.MissingFields)</td>
+                        @* Acceptance criteria requires the Extraction Status cell to read exactly
+                           "Incomplete Extraction." (trailing period) - applied here, display-only.
+                           The shared StatusDisplay map is intentionally left unchanged: it also
+                           backs the Status column's EF value converter (see
+                           ManualValidationRequestConfiguration), and existing rows already have
+                           "Incomplete Extraction" (no period) stored - changing the shared map's
+                           value would break parsing those rows back into the enum on read. *@
+                        <td><status-badge status="@(item.Status == "IncompleteExtraction" ? "Incomplete Extraction." : StatusDisplay.ManualValidationStatusToDisplay(item.Status))"></status-badge></td>
                         <td class="font-monospace small">@item.ExtractionDate.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>
                             @if (item.UpdatedBy != null)
@@ -50,11 +49,7 @@
                         </td>
                         <td class="font-monospace small">@(item.UpdatedDate.ToIst()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
                         <td>
-                            <div class="d-flex gap-1">
-                                <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "ManualValidation", new { id = item.Id })">View</a>
-                                <button type="button" class="btn btn-outline-secondary btn-sm"
-                                        data-modal-url="@Url.Action("RemarksHistory", "ManualValidation", new { id = item.Id, requestNumber = item.RequestNumber })">History</button>
-                            </div>
+                            <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "ManualValidation", new { id = item.Id })">View</a>
                         </td>
                     </tr>
                 }

@@ -19,7 +19,7 @@ public class StatusBadgeTagHelper : TagHelper
         ["All Supporting Documents Migrated"] = "ok",
         ["Partially Duplicate SD"] = "warn",
         ["All Supporting Documents are Duplicate SD"] = "err",
-        ["Incomplete Extraction"] = "warn",
+        ["Incomplete Extraction."] = "warn",
         ["Target RD Not Identified"] = "err",
         ["Fully Extracted"] = "ok",
         ["Partially Extracted"] = "warn",
