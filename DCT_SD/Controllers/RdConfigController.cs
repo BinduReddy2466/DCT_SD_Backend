@@ -163,9 +163,10 @@ public class RdConfigController : Controller
         FetchRunItemDto localRun;
         try
         {
-            // Reuses the existing guard (root path configured, no other run already Ongoing)
-            // and creates the local FetchRuns mirror row up front, exactly as the old
-            // synchronous StartFetch action did.
+            // Validation only (root path configured, no other run already Ongoing) - no local
+            // FetchRuns row is created. The external /fetch/start API is the sole creator of the
+            // FetchRuns record for this run; localRun.Id is always 0 (never persisted) and exists
+            // only to satisfy this method's return shape for the calls below.
             localRun = await _rdConfigService.StartFetchAsync(cancellationToken);
         }
         catch (BusinessValidationException ex)
