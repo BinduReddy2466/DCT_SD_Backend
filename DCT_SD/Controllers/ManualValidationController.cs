@@ -153,11 +153,16 @@ public class ManualValidationController : Controller
         try
         {
             var result = await _manualValidationService.RetrieveTitleSequenceAsync(model, cancellationToken);
+            if (result.IsAmbiguous)
+            {
+                return Json(new { success = false, ambiguous = true, candidates = result.Candidates });
+            }
+
             return Json(new { success = true, sequence = result.Sequence });
         }
-        catch (NotFoundException)
+        catch (NotFoundException ex)
         {
-            return Json(new { success = false });
+            return Json(new { success = false, message = ex.Message });
         }
     }
 }

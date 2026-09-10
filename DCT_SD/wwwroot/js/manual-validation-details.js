@@ -66,31 +66,85 @@
     });
 
     // --- Retrieve Title Sequence ---
+    // Matching is staged server-side: RD Code + Title Number + Title Type first; if that's
+    // still ambiguous, Plan/Block/Lot narrow it further; if it's *still* ambiguous (a genuinely
+    // Repeating Title Number), the server returns every remaining candidate instead of guessing,
+    // and this shows them in the shared #ajaxModal for manual selection.
     var retrieveBtn = document.getElementById('mvRetrieveTitleSeqBtn');
     if (retrieveBtn) {
+      var rtnModalEl = document.getElementById('ajaxModal');
+      var rtnModalContentEl = document.getElementById('ajaxModalContent');
+      var rtnModal = rtnModalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(rtnModalEl) : null;
+
+      function showRepeatingTitleNumberModal(candidates) {
+        if (!rtnModalContentEl || !rtnModal) return;
+
+        rtnModalContentEl.innerHTML =
+          '<div class="modal-header">' +
+          '<h5 class="modal-title">Repeating Title Number</h5>' +
+          '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>' +
+          '</div>' +
+          '<div class="modal-body">' +
+          '<div class="table-responsive"><table class="table table-hover align-middle">' +
+          '<thead><tr><th>RD Code</th><th>Title Number</th><th>Title Type</th><th>Plan Number</th><th>Block Number</th><th>Lot Number</th><th>Title Sequence Number</th><th>Action</th></tr></thead>' +
+          '<tbody id="mvRtnCandidatesBody"></tbody>' +
+          '</table></div>' +
+          '</div>' +
+          '<div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button></div>';
+
+        var tbody = document.getElementById('mvRtnCandidatesBody');
+        candidates.forEach(function (c) {
+          var row = document.createElement('tr');
+          [c.rdCode, c.title, c.titleType, c.plan, c.block, c.lot, c.sequence].forEach(function (value) {
+            var td = document.createElement('td');
+            td.textContent = value || '—';
+            row.appendChild(td);
+          });
+          var actionTd = document.createElement('td');
+          var selectBtn = document.createElement('button');
+          selectBtn.type = 'button';
+          selectBtn.className = 'btn btn-outline-secondary btn-sm';
+          selectBtn.textContent = 'Select';
+          selectBtn.addEventListener('click', function () {
+            fieldEls.mvTitleSeq.value = c.sequence;
+            rtnModal.hide();
+            toast('Title Sequence retrieved successfully.', 'success');
+          });
+          actionTd.appendChild(selectBtn);
+          row.appendChild(actionTd);
+          tbody.appendChild(row);
+        });
+
+        rtnModal.show();
+      }
+
       retrieveBtn.addEventListener('click', function () {
+        var rdCode = fieldEls.mvRdCode.value.trim();
         var title = fieldEls.mvTitle.value.trim();
         var titleType = fieldEls.mvTitleType.value.trim();
         var plan = fieldEls.mvPlan.value.trim();
         var block = fieldEls.mvBlock.value.trim();
         var lot = fieldEls.mvLot.value.trim();
 
-        if (!title || !titleType || !plan || !block || !lot) {
+        if (!title || !titleType) {
           fieldEls.mvTitleSeq.value = '';
-          toast('No matching title sequence found for the title record.');
+          toast('No Title Sequence record was found.');
           return;
         }
 
-        var body = new URLSearchParams({ Title: title, TitleType: titleType, Plan: plan, Block: block, Lot: lot, __RequestVerificationToken: token });
+        var body = new URLSearchParams({ RdCode: rdCode, Title: title, TitleType: titleType, Plan: plan, Block: block, Lot: lot, __RequestVerificationToken: token });
         fetch('/ManualValidation/RetrieveTitleSequence', { method: 'POST', body: body })
           .then(function (r) { return r.json(); })
           .then(function (data) {
             if (data.success) {
               fieldEls.mvTitleSeq.value = data.sequence;
               toast('Title Sequence retrieved successfully.', 'success');
+            } else if (data.ambiguous) {
+              fieldEls.mvTitleSeq.value = '';
+              showRepeatingTitleNumberModal(data.candidates || []);
             } else {
               fieldEls.mvTitleSeq.value = '';
-              toast('No matching title sequence found for the title record.');
+              toast(data.message || 'No Title Sequence record was found.');
             }
           });
       });

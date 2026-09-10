@@ -241,22 +241,112 @@ public class ManualValidationService : IManualValidationService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    // Matching is staged per the acceptance criteria:
+    //   1. RD Code + Title Number + Title Type.
+    //   2. If still ambiguous, narrow further using Plan/Block/Lot (TCT/OCT - the only two
+    //      TitleType values this codebase has, see Models/Enums/TitleType.cs).
+    //   3. If still ambiguous after that (a genuinely Repeating Title Number), return every
+    //      remaining candidate for the caller to show a manual-selection window instead of
+    //      picking one arbitrarily.
+    // RD Code isn't part of CodeLookups.Code's existing composite key/DataJson for any row in
+    // the live data today, so it's only enforced against rows whose DataJson actually records
+    // one - rows without it are never excluded on that basis, which keeps every existing
+    // Title Sequence lookup working exactly as it does today.
     public async Task<TitleSequenceDto> RetrieveTitleSequenceAsync(RetrieveTitleSequenceRequestDto request, CancellationToken cancellationToken = default)
     {
         if (!Enum.TryParse<TitleType>(request.TitleType, true, out var titleType))
         {
-            throw new NotFoundException("No matching title sequence found for the title record.");
+            throw new NotFoundException("No Title Sequence record was found.");
         }
 
-        var key = TitleSequenceKey.Build(request.Title.Trim(), titleType, request.Plan.Trim(), request.Block.Trim(), request.Lot.Trim());
+        var rdCode = request.RdCode.Trim();
+        var title = request.Title.Trim();
+        var plan = request.Plan.Trim();
+        var block = request.Block.Trim();
+        var lot = request.Lot.Trim();
 
-        var sequence = await _context.CodeLookups.AsNoTracking()
-            .Where(c => c.LookupType == CodeLookupTypes.TitleSequence && c.Code == key)
-            .Select(c => c.Name)
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? throw new NotFoundException("No matching title sequence found for the title record.");
+        var rows = await _context.CodeLookups.AsNoTracking()
+            .Where(c => c.LookupType == CodeLookupTypes.TitleSequence && c.IsActive)
+            .ToListAsync(cancellationToken);
 
-        return new TitleSequenceDto { Sequence = sequence };
+        var parsed = rows
+            .Select(r => (Row: r, Data: DeserializeTitleSequenceData(r.DataJson)))
+            .Where(x => x.Data is not null)
+            .ToList();
+
+        var stage1 = parsed.Where(x =>
+            string.Equals(x.Data!.Title?.Trim(), title, StringComparison.OrdinalIgnoreCase)
+            && x.Data.TitleType == (int)titleType
+            && (string.IsNullOrWhiteSpace(x.Data.RdCode) || string.Equals(x.Data.RdCode!.Trim(), rdCode, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        if (stage1.Count == 0)
+        {
+            throw new NotFoundException("No Title Sequence record was found.");
+        }
+
+        if (stage1.Count == 1)
+        {
+            return new TitleSequenceDto { Sequence = stage1[0].Row.Name };
+        }
+
+        var stage2 = stage1.Where(x =>
+            string.Equals(x.Data!.Plan?.Trim(), plan, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Data.Block?.Trim(), block, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Data.Lot?.Trim(), lot, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (stage2.Count == 0)
+        {
+            throw new NotFoundException("No Title Sequence record was found.");
+        }
+
+        if (stage2.Count == 1)
+        {
+            return new TitleSequenceDto { Sequence = stage2[0].Row.Name };
+        }
+
+        return new TitleSequenceDto
+        {
+            IsAmbiguous = true,
+            Candidates = stage2.Select(x => new TitleSequenceCandidateDto
+            {
+                RdCode = x.Data!.RdCode,
+                Title = x.Data.Title ?? title,
+                TitleType = titleType.ToString(),
+                Plan = x.Data.Plan,
+                Block = x.Data.Block,
+                Lot = x.Data.Lot,
+                Sequence = x.Row.Name,
+            }).ToArray(),
+        };
+    }
+
+    private static TitleSequenceDataJson? DeserializeTitleSequenceData(string? dataJson)
+    {
+        if (string.IsNullOrWhiteSpace(dataJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<TitleSequenceDataJson>(dataJson, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private class TitleSequenceDataJson
+    {
+        public string? RdCode { get; set; }
+        public string? Title { get; set; }
+        public int? TitleType { get; set; }
+        public string? Plan { get; set; }
+        public string? Block { get; set; }
+        public string? Lot { get; set; }
     }
 
     private async Task<ManualValidationRequest> GetActiveRecordAsync(int id, CancellationToken cancellationToken) =>

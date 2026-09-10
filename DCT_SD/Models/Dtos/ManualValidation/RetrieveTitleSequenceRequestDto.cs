@@ -2,6 +2,7 @@ namespace DCT_SD.Models.Dtos.ManualValidation;
 
 public class RetrieveTitleSequenceRequestDto
 {
+    public string RdCode { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string TitleType { get; set; } = string.Empty;
     public string Plan { get; set; } = string.Empty;
