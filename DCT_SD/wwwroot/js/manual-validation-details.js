@@ -219,6 +219,7 @@
           row.setAttribute('role', 'button');
           row.setAttribute('data-doc-index', String(index));
           row.style.cursor = 'pointer';
+          row.classList.toggle('table-active', index === activeIndex);
 
           var idxTd = document.createElement('td');
           idxTd.className = 'small';
@@ -298,7 +299,7 @@
         if (listEl) {
           Array.prototype.forEach.call(listEl.querySelectorAll('[data-doc-index]'), function (el) {
             var isActive = Number(el.getAttribute('data-doc-index')) === activeIndex;
-            el.style.background = isActive ? '#EEF2F8' : '';
+            el.classList.toggle('table-active', isActive);
           });
         }
       }
