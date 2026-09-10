@@ -189,9 +189,92 @@ public class ManualValidationService : IManualValidationService
             CreatedAt = DateTime.UtcNow,
         });
 
-        await _context.SaveChangesAsync(cancellationToken);
+        // Others -> real Document Type correction: the physical file is renamed (never the
+        // containing folder) and DocumentsJson updated only here, as part of Save itself - never
+        // when the dropdown selection changes. If the rename fails, nothing below has touched the
+        // database yet, so there's nothing to roll back; if the rename succeeds but the database
+        // save then fails for some other reason, the rename is undone so the file, DocumentsJson,
+        // and imagePath all stay consistent with each other either way.
+        (string NewPath, string OriginalPath)? renameToRollBack = null;
+        if (request.DocumentChangeIndex is { } changeIndex && changeIndex > 0
+            && !string.IsNullOrWhiteSpace(request.DocumentChangeCode) && !string.IsNullOrWhiteSpace(request.DocumentChangeName))
+        {
+            renameToRollBack = ApplyDocumentTypeChange(record, changeIndex, request.DocumentChangeCode.Trim(), request.DocumentChangeName.Trim());
+        }
+
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            if (renameToRollBack is { } rollback && System.IO.File.Exists(rollback.NewPath))
+            {
+                System.IO.File.Move(rollback.NewPath, rollback.OriginalPath);
+            }
+
+            throw;
+        }
 
         return MapToDetail(record);
+    }
+
+    // Renames the physical image file to "<DocumentID>_<DocumentName><extension>" (falling back
+    // to a numeric suffix, the same disambiguation convention the OCR pipeline's own
+    // renamedFileName already uses, only if that exact name is already taken by a different
+    // file) and updates the matching item's documentId/documentName/renamedFileName/imagePath in
+    // DocumentsJson. Returns the (new, original) path pair so the caller can undo the rename if
+    // the database save that follows ends up failing.
+    private static (string NewPath, string OriginalPath)? ApplyDocumentTypeChange(ManualValidationRequest record, int changeIndex, string newCode, string newName)
+    {
+        var items = string.IsNullOrWhiteSpace(record.DocumentsJson)
+            ? []
+            : JsonSerializer.Deserialize<List<DocumentJsonItem>>(record.DocumentsJson, JsonOptions) ?? [];
+
+        var sorted = items
+            .OrderBy(d => d.DocumentName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(d => d.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var target = changeIndex - 1 < sorted.Count ? sorted[changeIndex - 1] : null;
+        if (target is null || string.IsNullOrWhiteSpace(target.ImagePath))
+        {
+            return null;
+        }
+
+        if (!System.IO.File.Exists(target.ImagePath))
+        {
+            throw new BusinessValidationException("The original image file could not be found on disk. The Document Type change was not saved.");
+        }
+
+        var directory = Path.GetDirectoryName(target.ImagePath)!;
+        var extension = Path.GetExtension(target.ImagePath);
+        var baseName = $"{newCode}_{newName}";
+
+        var newFileName = baseName + extension;
+        var newPath = Path.Combine(directory, newFileName);
+        var suffix = 1;
+        while (System.IO.File.Exists(newPath) && !string.Equals(newPath, target.ImagePath, StringComparison.OrdinalIgnoreCase))
+        {
+            suffix++;
+            newFileName = $"{baseName}_{suffix}{extension}";
+            newPath = Path.Combine(directory, newFileName);
+        }
+
+        (string NewPath, string OriginalPath)? rollback = null;
+        if (!string.Equals(newPath, target.ImagePath, StringComparison.OrdinalIgnoreCase))
+        {
+            System.IO.File.Move(target.ImagePath, newPath);
+            rollback = (newPath, target.ImagePath);
+        }
+
+        target.DocumentId = newCode;
+        target.DocumentName = newName;
+        target.RenamedFileName = newFileName;
+        target.ImagePath = newPath;
+
+        record.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
+        return rollback;
     }
 
     public async Task CloseAsync(int id, string remarks, CancellationToken cancellationToken = default)
@@ -431,6 +514,7 @@ public class ManualValidationService : IManualValidationService
             .Select((d, index) => new ManualValidationDocumentDto
             {
                 Id = index + 1,
+                DocumentId = d.DocumentId,
                 DocumentName = d.DocumentName,
                 RenamedFileName = d.RenamedFileName,
             }).ToArray();

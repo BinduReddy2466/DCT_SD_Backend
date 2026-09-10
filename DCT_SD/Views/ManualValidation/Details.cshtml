@@ -6,6 +6,7 @@
     var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     var documentsJson = JsonSerializer.Serialize(Model.Documents, jsonOptions);
     var registryOfficesJson = JsonSerializer.Serialize((IReadOnlyList<DCT_SD.Models.Dtos.RdConfig.RegistryOfficeDto>)ViewData["RegistryOffices"]!, jsonOptions);
+    var documentTypesJson = JsonSerializer.Serialize((IReadOnlyList<DCT_SD.Models.Dtos.ManualValidation.DocumentTypeDto>)ViewData["DocumentTypes"]!, jsonOptions);
     var missing = new HashSet<string>(Model.MissingFields);
     var remarksVm = new RemarksHistoryViewModel { RecordId = Model.Id, Remarks = (DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.ManualValidation.ManualValidationRemarkDto>)ViewData["Remarks"]! };
 
@@ -20,6 +21,11 @@
 <form id="mvDetailsForm">
     @Html.AntiForgeryToken()
     <input type="hidden" id="mvRecordId" value="@Model.Id" />
+    <!-- Pending Others -> Document Type correction, per the acceptance criteria: only ever sent
+         to the server as part of this same Save submit - never on selection change. -->
+    <input type="hidden" id="mvDocumentChangeIndex" name="DocumentChangeIndex" value="" />
+    <input type="hidden" id="mvDocumentChangeCode" name="DocumentChangeCode" value="" />
+    <input type="hidden" id="mvDocumentChangeName" name="DocumentChangeName" value="" />
 
     <div class="row g-3">
         <div class="col-12 col-xl-3">
@@ -90,6 +96,14 @@
                 {
                     <div class="mb-3 d-flex justify-content-end small text-muted" data-viewer-header-right></div>
                     <div class="chip-mono mb-3 d-inline-block" data-viewer-filename></div>
+
+                    <div class="mb-3 d-flex align-items-center gap-2">
+                        <span class="field-label mb-0">Document Type</span>
+                        <span class="small" id="mvDocTypeText"></span>
+                        <select class="form-select form-select-sm d-none" style="max-width: 320px;" id="mvDocTypeSelect">
+                            <option value="">Select</option>
+                        </select>
+                    </div>
 
                     <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
                         <div class="d-flex flex-wrap gap-2">
@@ -204,6 +218,7 @@
 @section Scripts {
     <script id="mvDocumentsData" type="application/json">@Html.Raw(documentsJson)</script>
     <script id="mvRegistryOfficesData" type="application/json">@Html.Raw(registryOfficesJson)</script>
+    <script id="mvDocumentTypesData" type="application/json">@Html.Raw(documentTypesJson)</script>
     <script src="~/js/placeholder-image.js"></script>
     <script src="~/js/doc-viewer.js"></script>
     <script src="~/js/manual-validation-details.js"></script>

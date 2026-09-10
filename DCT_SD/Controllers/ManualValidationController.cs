@@ -14,11 +14,13 @@ public class ManualValidationController : Controller
 {
     private readonly IManualValidationService _manualValidationService;
     private readonly IRegistryOfficeService _registryOfficeService;
+    private readonly IDocumentTypeService _documentTypeService;
 
-    public ManualValidationController(IManualValidationService manualValidationService, IRegistryOfficeService registryOfficeService)
+    public ManualValidationController(IManualValidationService manualValidationService, IRegistryOfficeService registryOfficeService, IDocumentTypeService documentTypeService)
     {
         _manualValidationService = manualValidationService;
         _registryOfficeService = registryOfficeService;
+        _documentTypeService = documentTypeService;
     }
 
     [HttpGet]
@@ -70,6 +72,7 @@ public class ManualValidationController : Controller
             ViewData["ActiveMenu"] = MenuKeys.ManualValidation;
             ViewData["Remarks"] = remarks;
             ViewData["RegistryOffices"] = await _registryOfficeService.GetAllActiveAsync(cancellationToken);
+            ViewData["DocumentTypes"] = await _documentTypeService.GetAllActiveAsync(cancellationToken);
             return View(detail);
         }
         catch (Exception ex) when (ex is NotFoundException or ForbiddenAppException)
@@ -108,9 +111,12 @@ public class ManualValidationController : Controller
         try
         {
             var detail = await _manualValidationService.SaveAsync(id, model, cancellationToken);
-            return Json(new { success = true, message = "Saved Successfully.", rdName = detail.RdName ?? "", missingFields = detail.MissingFields });
+            // Renaming a document's file changes its DocumentName, which the Supporting
+            // Documents list/viewer are sorted by - so the full, freshly re-sorted list is
+            // returned here too, not just on the initial page load.
+            return Json(new { success = true, message = "Saved Successfully.", rdName = detail.RdName ?? "", missingFields = detail.MissingFields, documents = detail.Documents });
         }
-        catch (Exception ex) when (ex is NotFoundException or ForbiddenAppException)
+        catch (Exception ex) when (ex is NotFoundException or ForbiddenAppException or BusinessValidationException)
         {
             return Json(new { success = false, message = ex.Message });
         }
