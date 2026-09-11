@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DCT_SD.Configuration;
 using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
@@ -189,28 +190,40 @@ public class ManualValidationService : IManualValidationService
             CreatedAt = DateTime.UtcNow,
         });
 
-        // Others -> real Document Type correction: the physical file is renamed (never the
+        // Others -> real Document Type correction(s): the physical file(s) are renamed (never the
         // containing folder) and DocumentsJson updated only here, as part of Save itself - never
-        // when the dropdown selection changes. If the rename fails, nothing below has touched the
-        // database yet, so there's nothing to roll back; if the rename succeeds but the database
-        // save then fails for some other reason, the rename is undone so the file, DocumentsJson,
-        // and imagePath all stay consistent with each other either way.
-        (string NewPath, string OriginalPath)? renameToRollBack = null;
-        if (request.DocumentChangeIndex is { } changeIndex && changeIndex > 0
-            && !string.IsNullOrWhiteSpace(request.DocumentChangeCode) && !string.IsNullOrWhiteSpace(request.DocumentChangeName))
-        {
-            renameToRollBack = ApplyDocumentTypeChange(record, changeIndex, request.DocumentChangeCode.Trim(), request.DocumentChangeName.Trim());
-        }
-
+        // when a dropdown selection changes. renamesToRollBack is populated as each rename
+        // actually happens (not just returned at the end) and this whole block - including
+        // ApplyDocumentTypeChanges itself, not only the SaveChangesAsync call after it - is
+        // covered by the catch below, so a rename that fails partway through a multi-change Save
+        // still correctly undoes whichever earlier renames in this same Save already succeeded,
+        // and if the database save then fails for some other reason every rename applied in this
+        // Save is undone too - the file(s), DocumentsJson, and imagePath(s) stay consistent either way.
+        var renamesToRollBack = new List<(string NewPath, string OriginalPath)>();
         try
         {
+            if (!string.IsNullOrWhiteSpace(request.DocumentChangesJson))
+            {
+                var changes = (JsonSerializer.Deserialize<List<DocumentChangeItemDto>>(request.DocumentChangesJson, JsonOptions) ?? [])
+                    .Where(c => c.Index > 0 && !string.IsNullOrWhiteSpace(c.Code) && !string.IsNullOrWhiteSpace(c.Name))
+                    .ToList();
+
+                if (changes.Count > 0)
+                {
+                    ApplyDocumentTypeChanges(record, changes, renamesToRollBack);
+                }
+            }
+
             await _context.SaveChangesAsync(cancellationToken);
         }
         catch
         {
-            if (renameToRollBack is { } rollback && System.IO.File.Exists(rollback.NewPath))
+            foreach (var rollback in renamesToRollBack)
             {
-                System.IO.File.Move(rollback.NewPath, rollback.OriginalPath);
+                if (System.IO.File.Exists(rollback.NewPath))
+                {
+                    System.IO.File.Move(rollback.NewPath, rollback.OriginalPath);
+                }
             }
 
             throw;
@@ -219,25 +232,52 @@ public class ManualValidationService : IManualValidationService
         return MapToDetail(record);
     }
 
-    // Renames the physical image file to "<DocumentID>_<DocumentName><extension>" (falling back
-    // to a numeric suffix, the same disambiguation convention the OCR pipeline's own
-    // renamedFileName already uses, only if that exact name is already taken by a different
-    // file) and updates the matching item's documentId/documentName/renamedFileName/imagePath in
-    // DocumentsJson. Returns the (new, original) path pair so the caller can undo the rename if
-    // the database save that follows ends up failing.
-    private static (string NewPath, string OriginalPath)? ApplyDocumentTypeChange(ManualValidationRequest record, int changeIndex, string newCode, string newName)
+    // Applies one or more pending Others -> real Document Type corrections in a single Save.
+    // Every change's target document is resolved up front, against ONE pre-change sorted
+    // snapshot of DocumentsJson (the same sort - by DocumentName then RenamedFileName - that
+    // assigned each document's client-facing Id) - because renaming a document changes its
+    // DocumentName, which is the sort key, resolving each change's index one at a time as it's
+    // applied would let an earlier rename in this same batch shift the sort order and cause a
+    // later change to silently target the wrong document. rollbacks is populated in place as each
+    // rename succeeds - if a later change in this same call throws, the caller still has every
+    // rollback recorded so far.
+    private static void ApplyDocumentTypeChanges(ManualValidationRequest record, List<DocumentChangeItemDto> changes, List<(string NewPath, string OriginalPath)> rollbacks)
     {
-        var items = string.IsNullOrWhiteSpace(record.DocumentsJson)
-            ? []
-            : JsonSerializer.Deserialize<List<DocumentJsonItem>>(record.DocumentsJson, JsonOptions) ?? [];
+        var items = ParseAndSortDocumentItems(record.DocumentsJson);
 
-        var sorted = items
-            .OrderBy(d => d.DocumentName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(d => d.RenamedFileName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var targets = new List<(DocumentJsonItem Target, DocumentChangeItemDto Change)>();
+        foreach (var change in changes)
+        {
+            if (change.Index - 1 < items.Count)
+            {
+                targets.Add((items[change.Index - 1], change));
+            }
+        }
 
-        var target = changeIndex - 1 < sorted.Count ? sorted[changeIndex - 1] : null;
-        if (target is null || string.IsNullOrWhiteSpace(target.ImagePath))
+        foreach (var (target, change) in targets)
+        {
+            var rollback = ApplyDocumentTypeChange(items, target, change.Code.Trim(), change.Name.Trim());
+            if (rollback is { } r)
+            {
+                rollbacks.Add(r);
+            }
+        }
+
+        record.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
+    }
+
+    // Renames one document's physical image file to
+    // "<DocumentID>_<DocumentName>_<SequenceNumber><extension>" - SequenceNumber is always one
+    // past the highest existing sequence number already used by this record's OTHER documents
+    // that share this exact Document ID + Document Name (or 1 if none do; see
+    // NextDocumentSequenceNumber) - and updates the matching item's
+    // documentId/documentName/renamedFileName/imagePath in `items` (the caller re-serializes
+    // `items` back into record.DocumentsJson once every requested change has been applied, so a
+    // second change targeting the same Document Type in this same batch sees the first change's
+    // rename and is assigned the next number after it).
+    private static (string NewPath, string OriginalPath)? ApplyDocumentTypeChange(List<DocumentJsonItem> items, DocumentJsonItem target, string newCode, string newName)
+    {
+        if (string.IsNullOrWhiteSpace(target.ImagePath))
         {
             return null;
         }
@@ -249,17 +289,9 @@ public class ManualValidationService : IManualValidationService
 
         var directory = Path.GetDirectoryName(target.ImagePath)!;
         var extension = Path.GetExtension(target.ImagePath);
-        var baseName = $"{newCode}_{newName}";
-
-        var newFileName = baseName + extension;
+        var sequence = NextDocumentSequenceNumber(items, newCode, newName);
+        var newFileName = $"{SanitizeForFileName(newCode)}_{SanitizeForFileName(newName)}_{sequence}{extension}";
         var newPath = Path.Combine(directory, newFileName);
-        var suffix = 1;
-        while (System.IO.File.Exists(newPath) && !string.Equals(newPath, target.ImagePath, StringComparison.OrdinalIgnoreCase))
-        {
-            suffix++;
-            newFileName = $"{baseName}_{suffix}{extension}";
-            newPath = Path.Combine(directory, newFileName);
-        }
 
         (string NewPath, string OriginalPath)? rollback = null;
         if (!string.Equals(newPath, target.ImagePath, StringComparison.OrdinalIgnoreCase))
@@ -273,8 +305,47 @@ public class ManualValidationService : IManualValidationService
         target.RenamedFileName = newFileName;
         target.ImagePath = newPath;
 
-        record.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
         return rollback;
+    }
+
+    // Scans this record's existing supporting documents for ones already classified under the
+    // exact same Document ID + Document Name, extracts the trailing "_<number>" sequence from
+    // their renamedFileName (matching "<DocumentID>_<DocumentName>_<N>.<extension>"), and
+    // returns the highest one found, plus 1 - or 1 if none match. Gaps are preserved on purpose
+    // (existing _1 and _4 -> next is _5, not _2) since this always takes the true maximum, never
+    // the first free slot.
+    private static int NextDocumentSequenceNumber(List<DocumentJsonItem> items, string code, string name)
+    {
+        var pattern = new Regex("^" + Regex.Escape(SanitizeForFileName(code)) + "_" + Regex.Escape(SanitizeForFileName(name)) + @"_(\d+)\.[^.]+$", RegexOptions.IgnoreCase);
+        var max = 0;
+        foreach (var item in items)
+        {
+            if (!string.Equals(item.DocumentId, code, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(item.DocumentName, name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var match = pattern.Match(item.RenamedFileName);
+            if (match.Success && int.TryParse(match.Groups[1].Value, out var n) && n > max)
+            {
+                max = n;
+            }
+        }
+
+        return max + 1;
+    }
+
+    // A CodeLookups Document Name can contain characters that are invalid in a file name (e.g.
+    // "Tax Declaration on Improvement (Certified Copy)/Certificate of No Improvement" has a "/"),
+    // so the generated renamedFileName replaces them with "_" - matching the same substitution
+    // the OCR pipeline's own file names already use for these exact document types. Only the
+    // physical/generated file name is sanitized this way; the documentName value stored in
+    // DocumentsJson keeps the original, unmodified CodeLookups Name.
+    private static string SanitizeForFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        return new string(value.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
     }
 
     public async Task CloseAsync(int id, string remarks, CancellationToken cancellationToken = default)
@@ -294,6 +365,14 @@ public class ManualValidationService : IManualValidationService
         record.UpdatedByUserId = _currentUserService.UserId;
         record.UpdatedByUsername = _currentUserService.Username;
         record.UpdatedAt = DateTime.UtcNow;
+
+        // Closing releases the "opened for edit" lock (OpenForEditAsync sets it on every Details
+        // view) - without this, a record the closing user simply viewed and then closed stays
+        // reported as locked to them for the rest of the 15-minute LockTimeout, blocking any
+        // other user from opening it even though nobody is actually still editing it.
+        record.LockedByUserId = null;
+        record.LockedByUsername = null;
+        record.LockedAt = null;
 
         _context.RecordHistory.Add(new RecordHistory
         {

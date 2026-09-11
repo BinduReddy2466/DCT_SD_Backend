@@ -11,11 +11,11 @@ public class SaveManualValidationRequestDto
     public string? Lot { get; set; }
     public string? TitleSequence { get; set; }
 
-    // A pending "Others" -> real Document Type correction, submitted only as part of Save (per
-    // the acceptance criteria: the change stays pending client-side and is never persisted -
-    // file rename, DocumentsJson, imagePath - until Save succeeds). DocumentChangeIndex is the
-    // same synthesized 1-based position as ManualValidationDocumentDto.Id.
-    public int? DocumentChangeIndex { get; set; }
-    public string? DocumentChangeCode { get; set; }
-    public string? DocumentChangeName { get; set; }
+    // Zero or more pending "Others" -> real Document Type corrections, submitted only as part of
+    // Save (per the acceptance criteria: changes stay pending client-side and are never
+    // persisted - file rename, DocumentsJson, imagePath - until Save succeeds). JSON-serialized
+    // client-side as an array of {index, code, name} - a plain array survives a form POST far
+    // more simply than trying to model-bind a list of complex objects from FormData. index is
+    // the same synthesized 1-based position as ManualValidationDocumentDto.Id.
+    public string? DocumentChangesJson { get; set; }
 }

@@ -21,11 +21,10 @@
 <form id="mvDetailsForm">
     @Html.AntiForgeryToken()
     <input type="hidden" id="mvRecordId" value="@Model.Id" />
-    <!-- Pending Others -> Document Type correction, per the acceptance criteria: only ever sent
-         to the server as part of this same Save submit - never on selection change. -->
-    <input type="hidden" id="mvDocumentChangeIndex" name="DocumentChangeIndex" value="" />
-    <input type="hidden" id="mvDocumentChangeCode" name="DocumentChangeCode" value="" />
-    <input type="hidden" id="mvDocumentChangeName" name="DocumentChangeName" value="" />
+    <!-- Zero or more pending Others -> Document Type corrections (JSON array of {index, code,
+         name}), per the acceptance criteria: only ever sent to the server as part of this same
+         Save submit - never on selection change. -->
+    <input type="hidden" id="mvDocumentChangesJson" name="DocumentChangesJson" value="" />
 
     <div class="card p-4 mb-4">
         <h6 class="text-muted text-uppercase small fw-semibold mb-3">General Information</h6>

@@ -18,7 +18,7 @@
     var documentTypes = JSON.parse((document.getElementById('mvDocumentTypesData') || {}).textContent || '[]');
 
     var fieldIds = ['mvRdCode', 'mvEntry', 'mvTitle', 'mvTitleType', 'mvPlan', 'mvBlock', 'mvLot', 'mvTitleSeq', 'mvRdName',
-      'mvDocumentChangeIndex', 'mvDocumentChangeCode', 'mvDocumentChangeName'];
+      'mvDocumentChangesJson'];
     var fieldEls = {};
     fieldIds.forEach(function (id) {
       fieldEls[id] = document.getElementById(id);
@@ -169,10 +169,11 @@
       var docTypeSelect = document.getElementById('mvDocTypeSelect');
       var activeIndex = 0;
 
-      // A pending "Others" -> real Document Type correction for at most one document at a time
-      // (matching what Save accepts) - { index: doc.id, code, name } or null. Never sent to the
-      // server except as part of Save itself; cleared on a successful save or on discard.
-      var pendingChange = null;
+      // Zero or more pending "Others" -> real Document Type corrections, keyed by doc.id (one at
+      // most per document - selecting again for the same document just replaces its own pending
+      // choice). Never sent to the server except as part of Save itself; cleared entirely on a
+      // successful save or on discard. { [docId]: { code, name } }
+      var pendingChanges = {};
 
       if (docTypeSelect) {
         documentTypes.forEach(function (t) {
@@ -185,23 +186,72 @@
       }
 
       function effectiveDocumentName(doc) {
-        return pendingChange && pendingChange.index === doc.id ? pendingChange.name : doc.documentName;
+        var p = pendingChanges[doc.id];
+        return p ? p.name : doc.documentName;
       }
 
-      // Mirrors the server's ApplyDocumentTypeChange naming rule (<DocumentID>_<DocumentName><ext>)
-      // so the Image File Name a pending correction will produce is visible immediately on
-      // selection, per the acceptance criteria - this is only a preview: the actual rename (with
-      // its collision-suffix fallback, which depends on what's already on disk) happens on Save.
+      function escapeRegExp(s) {
+        return (s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      }
+
+      // Mirrors the server's SanitizeForFileName: a CodeLookups Document Name can contain
+      // characters that aren't valid in a file name (e.g. a "/"), so the generated file name
+      // replaces them with "_" - same substitution the OCR pipeline's own file names already use.
+      function sanitizeForFileName(s) {
+        return (s || '').replace(/[\/\\]/g, '_');
+      }
+
+      // Mirrors the server's NextDocumentSequenceNumber: the highest existing "_<N>" sequence
+      // number already used by this record's documents that share this exact Document ID + Name
+      // (matching "<DocumentID>_<DocumentName>_<N>.<ext>"), plus 1 - or 1 if none match. Looks at
+      // ORIGINAL (persisted) documents first, then walks any OTHER pending changes targeting the
+      // same type in a stable ascending-by-id order (matching the order Save submits and applies
+      // them in) up to `excludeDocId`, so two documents pending the same type in the browser
+      // preview as sequential numbers exactly like they will after Save - without needing to
+      // recursively resolve each other's preview (which target the same type would deadlock).
+      function nextDocumentSequenceNumber(excludeDocId, code, name) {
+        var pattern = new RegExp('^' + escapeRegExp(sanitizeForFileName(code)) + '_' + escapeRegExp(sanitizeForFileName(name)) + '_(\\d+)\\.[^.]+$', 'i');
+        var max = 0;
+        documents.forEach(function (d) {
+          if ((d.documentId || '').toLowerCase() !== code.toLowerCase()) return;
+          if ((d.documentName || '').toLowerCase() !== name.toLowerCase()) return;
+          var m = pattern.exec(d.renamedFileName || '');
+          if (m) {
+            var n = parseInt(m[1], 10);
+            if (!isNaN(n) && n > max) max = n;
+          }
+        });
+
+        var pendingIds = Object.keys(pendingChanges)
+          .map(Number)
+          .filter(function (id) {
+            var p = pendingChanges[id];
+            return p && p.code.toLowerCase() === code.toLowerCase() && p.name.toLowerCase() === name.toLowerCase();
+          })
+          .sort(function (a, b) { return a - b; });
+
+        for (var i = 0; i < pendingIds.length; i++) {
+          if (pendingIds[i] === excludeDocId) break;
+          max++;
+        }
+
+        return max + 1;
+      }
+
+      // Mirrors the server's ApplyDocumentTypeChange naming rule
+      // (<DocumentID>_<DocumentName>_<SequenceNumber><ext>) so the Image File Name a pending
+      // correction will produce is visible immediately on selection, per the acceptance criteria
+      // - this is only a preview: the actual rename happens on Save.
       function generatedFileName(doc, code, name) {
         var match = /\.[^.]+$/.exec(doc.renamedFileName || '');
         var ext = match ? match[0] : '';
-        return code + '_' + name + ext;
+        var seq = nextDocumentSequenceNumber(doc.id, code, name);
+        return sanitizeForFileName(code) + '_' + sanitizeForFileName(name) + '_' + seq + ext;
       }
 
       function effectiveFileName(doc) {
-        return pendingChange && pendingChange.index === doc.id
-          ? generatedFileName(doc, pendingChange.code, pendingChange.name)
-          : doc.renamedFileName;
+        var p = pendingChanges[doc.id];
+        return p ? generatedFileName(doc, p.code, p.name) : doc.renamedFileName;
       }
 
       // Rebuilds the Supporting Documents table (never raw HTML from doc data - built via
@@ -252,14 +302,21 @@
         }
         if (docTypeSelect) {
           docTypeSelect.classList.toggle('d-none', !isOthers);
-          docTypeSelect.value = pendingChange && pendingChange.index === doc.id ? pendingChange.code : '';
+          var p = pendingChanges[doc.id];
+          docTypeSelect.value = p ? p.code : '';
         }
       }
 
-      function setPendingChangeFields() {
-        document.getElementById('mvDocumentChangeIndex').value = pendingChange ? pendingChange.index : '';
-        document.getElementById('mvDocumentChangeCode').value = pendingChange ? pendingChange.code : '';
-        document.getElementById('mvDocumentChangeName').value = pendingChange ? pendingChange.name : '';
+      // Serializes every currently pending change into the one hidden field Save submits, in
+      // ascending doc.id order - matching the order the server applies them in, so a document
+      // that lands after another one targeting the same type gets the next sequence number.
+      function syncPendingChangesField() {
+        var ids = Object.keys(pendingChanges).map(Number).sort(function (a, b) { return a - b; });
+        var arr = ids.map(function (id) {
+          var p = pendingChanges[id];
+          return { index: id, code: p.code, name: p.name };
+        });
+        document.getElementById('mvDocumentChangesJson').value = arr.length ? JSON.stringify(arr) : '';
       }
 
       if (docTypeSelect) {
@@ -267,12 +324,12 @@
           var doc = documents[activeIndex];
           var code = docTypeSelect.value;
           if (!code) {
-            pendingChange = null;
+            delete pendingChanges[doc.id];
           } else {
             var opt = docTypeSelect.options[docTypeSelect.selectedIndex];
-            pendingChange = { index: doc.id, code: code, name: opt.getAttribute('data-name') || opt.textContent };
+            pendingChanges[doc.id] = { code: code, name: opt.getAttribute('data-name') || opt.textContent };
           }
-          setPendingChangeFields();
+          syncPendingChangesField();
           renderDocumentList();
           updateDocTypeControls();
           // Update just the filename label - not a full viewer.load(), which would reset
@@ -308,11 +365,12 @@
         renderDoc();
       }
 
-      // Drops any pending Document Type correction and restores the original documents/UI state
-      // - used on discard (Close Without Saving) and is also safe to call after a failed Save.
+      // Drops every pending Document Type correction and restores the original documents/UI
+      // state - used on discard (Close Without Saving) and is also safe to call after a failed
+      // Save.
       revertPendingDocumentChange = function () {
-        pendingChange = null;
-        setPendingChangeFields();
+        pendingChanges = {};
+        syncPendingChangesField();
         renderDocumentList();
         updateDocTypeControls();
       };
@@ -324,8 +382,8 @@
         if (!newDocuments || !newDocuments.length) return;
         var current = documents[activeIndex];
         documents = newDocuments;
-        pendingChange = null;
-        setPendingChangeFields();
+        pendingChanges = {};
+        syncPendingChangesField();
 
         var matchIndex = documents.findIndex(function (d) {
           return current && (d.renamedFileName === current.renamedFileName || d.id === current.id);
