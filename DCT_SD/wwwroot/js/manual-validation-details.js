@@ -184,10 +184,6 @@
         });
       }
 
-      function effectiveDocumentId(doc) {
-        return pendingChange && pendingChange.index === doc.id ? pendingChange.code : doc.documentId;
-      }
-
       function effectiveDocumentName(doc) {
         return pendingChange && pendingChange.index === doc.id ? pendingChange.name : doc.documentName;
       }
@@ -241,12 +237,14 @@
       }
 
       // Shows the read-only Document Type text for anything already classified, or the
-      // CodeLookups-backed dropdown when the current (or currently pending) Document Type is
+      // CodeLookups-backed dropdown when the document's ORIGINAL (persisted) Document Type is
       // "Others" - per the acceptance criteria, only Others documents are ever correctable.
+      // Deliberately checks doc.documentId, not the pending selection: once the user picks a
+      // type, that pick must stay changeable (re-pick as many times as they like) right up until
+      // Save, rather than locking the dropdown the moment a non-Others type is chosen.
       function updateDocTypeControls() {
         var doc = documents[activeIndex];
-        var docId = effectiveDocumentId(doc);
-        var isOthers = (docId || '').toUpperCase() === 'OTHERS';
+        var isOthers = (doc.documentId || '').toUpperCase() === 'OTHERS';
 
         if (docTypeText) {
           docTypeText.textContent = effectiveDocumentName(doc);
