@@ -294,6 +294,11 @@ body {
   background: repeating-conic-gradient(#EDEFF3 0% 25%, #F7F8FA 0% 50%) 50%/16px 16px;
   border-radius: 10px;
   overflow: hidden;
+  /* Mouse-wheel zoom (doc-viewer.js) calls preventDefault() on 'wheel', but without this the
+     scroll gesture can still chain up to the page's own scroll container on some browsers/
+     trackpads - this keeps the wheel gesture contained to the viewer itself. */
+  overscroll-behavior: contain;
+  touch-action: none;
 }
 
 /* Field info tooltip ("i" icon, hover/focus reveals a requirements popover) */

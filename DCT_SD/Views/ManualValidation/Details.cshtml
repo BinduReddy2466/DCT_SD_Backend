@@ -27,62 +27,85 @@
     <input type="hidden" id="mvDocumentChangeCode" name="DocumentChangeCode" value="" />
     <input type="hidden" id="mvDocumentChangeName" name="DocumentChangeName" value="" />
 
-    <div class="row g-4">
-        <div class="col-12 col-xl-3">
-            <div class="card p-4 h-100">
-                <h6 class="text-muted text-uppercase small fw-semibold mb-3">General Information</h6>
-
-                <div class="mb-3 @MissingClass("rdCode")">
-                    <label class="field-label" for="mvRdCode">RD Code</label>
-                    <input type="text" class="form-control mt-1" id="mvRdCode" name="RdCode" value="@Model.RdCode" />
-                </div>
-                <div class="mb-3 @MissingClass("rdName")">
-                    <label class="field-label" for="mvRdName">RD Name</label>
-                    <input type="text" class="form-control mt-1 bg-body-secondary" id="mvRdName" readonly value="@Model.RdName" />
-                </div>
-                <div class="mb-3 @MissingClass("entry")">
-                    <label class="field-label" for="mvEntry">Entry Number</label>
-                    <input type="text" class="form-control mt-1" id="mvEntry" name="EntryNumbersCsv" value="@Model.EntryNumbersCsv" />
-                </div>
-
-                <h6 class="text-muted text-uppercase small fw-semibold mb-3 mt-4 pt-3 border-top">Title Record</h6>
-
-                <div class="mb-3 @MissingClass("title")">
-                    <label class="field-label" for="mvTitle">Title Number</label>
-                    <input type="text" class="form-control mt-1" id="mvTitle" name="Title" value="@Model.Title" />
-                </div>
-                <div class="mb-3 @MissingClass("titleType")">
-                    <label class="field-label" for="mvTitleType">Title Type</label>
-                    <select class="form-select mt-1" id="mvTitleType" name="TitleType">
-                        <option value="">Select</option>
-                        <option value="TCT" selected="@(Model.TitleType == "TCT")">TCT</option>
-                        <option value="OCT" selected="@(Model.TitleType == "OCT")">OCT</option>
-                    </select>
-                </div>
-                <div class="mb-3 @MissingClass("plan")">
-                    <label class="field-label" for="mvPlan">Plan Number</label>
-                    <input type="text" class="form-control mt-1" id="mvPlan" name="Plan" placeholder="Required" value="@Model.Plan" />
-                </div>
-                <div class="mb-3 @MissingClass("block")">
-                    <label class="field-label" for="mvBlock">Block Number</label>
-                    <input type="text" class="form-control mt-1" id="mvBlock" name="Block" placeholder="Required" value="@Model.Block" />
-                </div>
-                <div class="mb-3 @MissingClass("lot")">
-                    <label class="field-label" for="mvLot">Lot Number</label>
-                    <input type="text" class="form-control mt-1" id="mvLot" name="Lot" placeholder="Required" value="@Model.Lot" />
-                </div>
-                <div class="mb-3 @MissingClass("titleSequence")">
-                    <label class="field-label" for="mvTitleSeq">Title Sequence</label>
-                    <input type="text" class="form-control mt-1 bg-body-secondary font-monospace small" id="mvTitleSeq" name="TitleSequence" readonly
-                           placeholder="@(string.IsNullOrWhiteSpace(Model.TitleSequence) ? "Not yet retrieved" : "")" value="@Model.TitleSequence" />
-                </div>
-                <button type="button" id="mvRetrieveTitleSeqBtn" class="btn btn-outline-secondary w-100 mt-1">Retrieve Title Sequence</button>
-                <p class="text-muted small mt-2 mb-0">Fields outlined in gold were flagged missing during OCR extraction.</p>
+    <div class="card p-4 mb-4">
+        <h6 class="text-muted text-uppercase small fw-semibold mb-3">General Information</h6>
+        <div class="row g-3">
+            <div class="col-12 col-md-4 mb-3 @MissingClass("rdCode")">
+                <label class="field-label" for="mvRdCode">RD Code</label>
+                <input type="text" class="form-control mt-1" id="mvRdCode" name="RdCode" value="@Model.RdCode" />
+            </div>
+            <div class="col-12 col-md-4 mb-3 @MissingClass("rdName")">
+                <label class="field-label" for="mvRdName">RD Name</label>
+                <input type="text" class="form-control mt-1 bg-body-secondary" id="mvRdName" readonly value="@Model.RdName" />
+            </div>
+            <div class="col-12 col-md-4 mb-3 @MissingClass("entry")">
+                <label class="field-label" for="mvEntry">Entry Number</label>
+                <input type="text" class="form-control mt-1" id="mvEntry" name="EntryNumbersCsv" value="@Model.EntryNumbersCsv" />
             </div>
         </div>
+    </div>
 
-        <div class="col-12 col-xl-6 d-flex flex-column gap-3">
-            <div class="card p-4 d-flex flex-column" id="mvViewer" data-doc-viewer>
+    <div class="card p-4 mb-4">
+        <h6 class="text-muted text-uppercase small fw-semibold mb-3">Title Record(s)</h6>
+        <div class="table-responsive table-frame">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th style="width: 2.5rem;">#</th>
+                        <th style="min-width: 150px;">Title Number</th>
+                        <th style="min-width: 110px;">Title Type</th>
+                        <th style="min-width: 150px;">Plan Number</th>
+                        <th style="min-width: 110px;">Block Number</th>
+                        <th style="min-width: 100px;">Lot Number</th>
+                        <th style="min-width: 150px;">Title Sequence</th>
+                        <th style="min-width: 180px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- The current data model returns exactly one Title Record per Manual
+                         Validation request (Title/TitleType/Plan/Block/Lot/TitleSequence are
+                         singular columns, not a collection) - this table renders that one record
+                         as a row; it is not a user-editable list, so there is no Add Title
+                         Record affordance. -->
+                    <tr>
+                        <td class="small text-muted">1</td>
+                        <td class="mb-3 @MissingClass("title")">
+                            <input type="text" class="form-control form-control-sm" id="mvTitle" name="Title" value="@Model.Title" aria-label="Title Number" />
+                        </td>
+                        <td class="mb-3 @MissingClass("titleType")">
+                            <select class="form-select form-select-sm" id="mvTitleType" name="TitleType" aria-label="Title Type">
+                                <option value="">Select</option>
+                                <option value="TCT" selected="@(Model.TitleType == "TCT")">TCT</option>
+                                <option value="OCT" selected="@(Model.TitleType == "OCT")">OCT</option>
+                            </select>
+                        </td>
+                        <td class="mb-3 @MissingClass("plan")">
+                            <input type="text" class="form-control form-control-sm" id="mvPlan" name="Plan" placeholder="Required" value="@Model.Plan" aria-label="Plan Number" />
+                        </td>
+                        <td class="mb-3 @MissingClass("block")">
+                            <input type="text" class="form-control form-control-sm" id="mvBlock" name="Block" placeholder="Required" value="@Model.Block" aria-label="Block Number" />
+                        </td>
+                        <td class="mb-3 @MissingClass("lot")">
+                            <input type="text" class="form-control form-control-sm" id="mvLot" name="Lot" placeholder="Required" value="@Model.Lot" aria-label="Lot Number" />
+                        </td>
+                        <td class="mb-3 @MissingClass("titleSequence")">
+                            <input type="text" class="form-control form-control-sm bg-body-secondary font-monospace" id="mvTitleSeq" name="TitleSequence" readonly
+                                   placeholder="@(string.IsNullOrWhiteSpace(Model.TitleSequence) ? "Not yet retrieved" : "")" value="@Model.TitleSequence" aria-label="Title Sequence" />
+                        </td>
+                        <td>
+                            <button type="button" id="mvRetrieveTitleSeqBtn" class="btn btn-outline-secondary btn-sm w-100">Retrieve Title Sequence</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-muted small mt-2 mb-0">Fields outlined in gold were flagged missing during OCR extraction.</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-12 col-xl-7">
+            <div class="card p-4 d-flex flex-column h-100" id="mvViewer" data-doc-viewer>
+                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Image Viewer</h6>
                 @if (Model.Documents.Count == 0)
                 {
                     <div class="flex-1 d-flex align-items-center justify-content-center text-muted py-5">No Supporting Documents Found</div>
@@ -105,6 +128,7 @@
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="reset">Reset</button>
                         </div>
                         <div class="btn-group" role="group">
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="prev">&lsaquo; Prev</button>
@@ -122,16 +146,9 @@
                     </div>
                 }
             </div>
-
-            <div class="card p-4">
-                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Remarks History</h6>
-                <div id="mvRemarksHistory">
-                    @await Html.PartialAsync("_RemarksHistoryTable", remarksVm)
-                </div>
-            </div>
         </div>
 
-        <div class="col-12 col-xl-3">
+        <div class="col-12 col-xl-5">
             <div class="card p-4 h-100">
                 <h6 class="text-muted text-uppercase small fw-semibold mb-3">Supporting Documents</h6>
                 @if (Model.Documents.Count == 0)
@@ -164,6 +181,13 @@
                     </div>
                 }
             </div>
+        </div>
+    </div>
+
+    <div class="card p-4 mt-4">
+        <h6 class="text-muted text-uppercase small fw-semibold mb-3">Remarks History</h6>
+        <div id="mvRemarksHistory">
+            @await Html.PartialAsync("_RemarksHistoryTable", remarksVm)
         </div>
     </div>
 </form>
@@ -216,7 +240,7 @@
     <script id="mvDocumentsData" type="application/json">@Html.Raw(documentsJson)</script>
     <script id="mvRegistryOfficesData" type="application/json">@Html.Raw(registryOfficesJson)</script>
     <script id="mvDocumentTypesData" type="application/json">@Html.Raw(documentTypesJson)</script>
-    <script src="~/js/placeholder-image.js"></script>
-    <script src="~/js/doc-viewer.js"></script>
-    <script src="~/js/manual-validation-details.js"></script>
+    <script src="~/js/placeholder-image.js" asp-append-version="true"></script>
+    <script src="~/js/doc-viewer.js" asp-append-version="true"></script>
+    <script src="~/js/manual-validation-details.js" asp-append-version="true"></script>
 }

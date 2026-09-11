@@ -22,11 +22,37 @@
     var drag = { isDragging: false, startX: 0, startY: 0 };
     var pendingFitOnLoad = false;
 
+    // Rendered image size accounting for zoom and 90/270deg rotation swapping width/height -
+    // used to keep panning from ever dragging the image fully out of the frame.
+    function getRenderedSize() {
+      var iw = img.naturalWidth || img.width || 0;
+      var ih = img.naturalHeight || img.height || 0;
+      var swapped = Math.abs(state.rotation % 180) === 90;
+      return {
+        w: (swapped ? ih : iw) * state.zoom,
+        h: (swapped ? iw : ih) * state.zoom,
+      };
+    }
+
+    function clampPan() {
+      var size = getRenderedSize();
+      if (!size.w || !size.h || !frame) return;
+      var fw = frame.clientWidth;
+      var fh = frame.clientHeight;
+      var minVisible = 40;
+      var maxPanX = Math.max(0, size.w / 2 + fw / 2 - minVisible);
+      var maxPanY = Math.max(0, size.h / 2 + fh / 2 - minVisible);
+      state.panX = Math.min(maxPanX, Math.max(-maxPanX, state.panX));
+      state.panY = Math.min(maxPanY, Math.max(-maxPanY, state.panY));
+    }
+
     function applyTransform() {
       img.style.transform =
         'translate(' + state.panX + 'px, ' + state.panY + 'px) scale(' + state.zoom + ') rotate(' + state.rotation + 'deg)';
       img.style.transformOrigin = 'center center';
-      img.style.cursor = state.panMode ? 'grab' : 'default';
+      if (!drag.isDragging) {
+        img.style.cursor = state.panMode || state.zoom > 1 ? 'grab' : 'default';
+      }
     }
 
     function setPanButtonState() {
@@ -36,11 +62,13 @@
 
     function zoomIn() {
       state.zoom = Math.min(maxZoom, state.zoom + buttonZoomStep);
+      clampPan();
       applyTransform();
     }
 
     function zoomOut() {
       state.zoom = Math.max(minZoom, state.zoom - buttonZoomStep);
+      clampPan();
       applyTransform();
     }
 
@@ -54,11 +82,13 @@
 
     function rotateLeft() {
       state.rotation -= 90;
+      clampPan();
       applyTransform();
     }
 
     function rotateRight() {
       state.rotation += 90;
+      clampPan();
       applyTransform();
     }
 
@@ -85,6 +115,7 @@
         'wheel',
         function (e) {
           e.preventDefault();
+          e.stopPropagation();
           var rect = frame.getBoundingClientRect();
           var mouseX = e.clientX - rect.left;
           var mouseY = e.clientY - rect.top;
@@ -96,6 +127,7 @@
             state.panX = mouseX - worldX * newZoom;
             state.panY = mouseY - worldY * newZoom;
             state.zoom = newZoom;
+            clampPan();
             applyTransform();
           }
         },
@@ -103,10 +135,14 @@
       );
     }
 
+    // Click-and-drag works whenever Pan/Move is toggled on (existing behavior, unchanged) OR
+    // whenever the image is zoomed past 100% (an image that big is worth dragging even without
+    // explicitly enabling pan mode first) - purely additive, on top of the existing controls.
     img.addEventListener('mousedown', function (e) {
-      if (!state.panMode) return;
+      if (!state.panMode && state.zoom <= 1) return;
       e.preventDefault();
       drag.isDragging = true;
+      img.style.cursor = 'grabbing';
       drag.startX = e.clientX - state.panX;
       drag.startY = e.clientY - state.panY;
 
@@ -114,10 +150,12 @@
         if (!drag.isDragging) return;
         state.panX = ev.clientX - drag.startX;
         state.panY = ev.clientY - drag.startY;
+        clampPan();
         applyTransform();
       }
       function onUp() {
         drag.isDragging = false;
+        applyTransform();
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
       }
@@ -142,6 +180,12 @@
         else if (action === 'rotateLeft') rotateLeft();
         else if (action === 'rotateRight') rotateRight();
         else if (action === 'togglePan') togglePan();
+        else if (action === 'reset') {
+          // Same zoom=1/rotation=0/pan=0 restore as "100%" (actualSize), plus also turning off
+          // Pan/Move if it was on - a full Reset clears every user-applied view transformation.
+          actualSize();
+          if (state.panMode) togglePan();
+        }
         else if (action === 'prev') container.dispatchEvent(new CustomEvent('docviewer:prev'));
         else if (action === 'next') container.dispatchEvent(new CustomEvent('docviewer:next'));
       });
