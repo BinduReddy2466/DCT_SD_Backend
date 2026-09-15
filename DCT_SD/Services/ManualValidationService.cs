@@ -71,19 +71,39 @@ public class ManualValidationService : IManualValidationService
             query = query.Where(r => r.ExtractionDate <= request.DateTo.Value);
         }
 
+        // Every filter above still runs server-side exactly as before; only the grouping/paging
+        // step below happens in memory, over the already-filtered set. Manual Validation is a
+        // human review queue (bounded, not a bulk data table), so this trades a small, predictable
+        // amount of extra memory for grouping logic that's simple to read and audit - the same
+        // pragmatic in-memory-filter approach already used elsewhere in this service (see
+        // RetrieveTitleSequenceAsync).
+        var matchingRecords = await query.ToListAsync(cancellationToken);
+
+        // Same sole grouping key as the Details page (GetGroupRecordsAsync): rows sharing the
+        // exact same non-blank EntryNumbersCsv become one UI row; a blank/whitespace
+        // EntryNumbersCsv never groups; each such row is its own group of one.
+        var groups = matchingRecords
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.EntryNumbersCsv) ? $"__row:{r.Id}" : r.EntryNumbersCsv)
+            .Select(g => g.OrderBy(r => r.Id).ToList())
+            .ToList();
+
         var pageNumber = request.PageNumber < 1 ? 1 : request.PageNumber;
         var pageSize = request.PageSize is < 1 or > 100 ? 25 : request.PageSize;
 
-        var totalCount = await query.CountAsync(cancellationToken);
-        var items = await query
-            .OrderByDescending(r => r.ExtractionDate)
+        var totalCount = groups.Count;
+        // Each group's earliest (lowest Id) row is its representative for every displayed column
+        // and for the View link's target id - the same "Title Record 1" row Details.cshtml already
+        // treats as the group's primary record, so View immediately expands back to the full group.
+        var pageItems = groups
+            .OrderByDescending(g => g[0].ExtractionDate)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
-            .ToListAsync(cancellationToken);
+            .Select(g => MapToListItem(g[0]))
+            .ToArray();
 
         return new PagedResult<ManualValidationListItemDto>
         {
-            Items = items.Select(MapToListItem).ToArray(),
+            Items = pageItems,
             TotalCount = totalCount,
             PageNumber = pageNumber,
             PageSize = pageSize,
