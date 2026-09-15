@@ -149,7 +149,8 @@ public class ManualValidationService : IManualValidationService
         record.LockedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
 
-        return MapToDetail(record);
+        var group = await GetGroupRecordsAsync(record, cancellationToken);
+        return MapToDetail(record, group);
     }
 
     public async Task<ManualValidationDetailDto> SaveAsync(int id, SaveManualValidationRequestDto request, CancellationToken cancellationToken = default)
@@ -157,53 +158,89 @@ public class ManualValidationService : IManualValidationService
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
-        // Snapshot of every user-editable field exactly as it was persisted before this Save
-        // applies anything - the audit Remarks built below always compares against this snapshot
-        // (the record's true prior state), never against already-modified in-memory/UI values.
-        var originalRdCode = record.RdCode;
-        var originalEntryNumbersCsv = record.EntryNumbersCsv;
-        var originalTitle = record.Title;
-        var originalTitleType = record.TitleType;
-        var originalPlan = record.Plan;
-        var originalBlock = record.Block;
-        var originalLot = record.Lot;
-        var originalTitleSequence = record.TitleSequence;
+        // Every row sharing this record's (pre-edit) EntryNumbersCsv - the sole grouping key.
+        // Locking stays scoped to `record` alone (EnsureNotLockedByAnotherUser above only checked
+        // that one row); group siblings are written here regardless of their own lock state, same
+        // as today's single-record Save never checked a second row's lock.
+        var group = await GetGroupRecordsAsync(record, cancellationToken);
+        var groupIds = group.Select(r => r.Id).ToHashSet();
 
-        record.RdCode = request.RdCode?.Trim();
-        record.EntryNumbersCsv = request.EntryNumbersCsv?.Trim();
-        record.Title = request.Title?.Trim();
-        record.TitleType = Enum.TryParse<TitleType>(request.TitleType, true, out var titleType) ? titleType : null;
-        record.Plan = request.Plan?.Trim();
-        record.Block = request.Block?.Trim();
-        record.Lot = request.Lot?.Trim();
-        record.TitleSequence = request.TitleSequence?.Trim();
+        var changeDescriptionsByRecordId = new Dictionary<int, List<string>>();
+        List<string> ChangesFor(int recordId) =>
+            changeDescriptionsByRecordId.TryGetValue(recordId, out var list) ? list : changeDescriptionsByRecordId[recordId] = [];
 
-        record.RdName = string.IsNullOrWhiteSpace(record.RdCode)
+        // RD Code / RD Name / Entry Number are shown once in General Information, not per Title
+        // Record, so an edit there applies to every row in the group - keeping the group coherent
+        // for the next time it's opened (all rows still share the same, now-updated, EntryNumbersCsv).
+        var newRdCode = request.RdCode?.Trim();
+        var newEntryNumbersCsv = request.EntryNumbersCsv?.Trim();
+        var newRdName = string.IsNullOrWhiteSpace(newRdCode)
             ? null
             : await _context.CodeLookups.AsNoTracking()
-                .Where(c => c.LookupType == CodeLookupTypes.RegistryOffice && c.Code == record.RdCode)
+                .Where(c => c.LookupType == CodeLookupTypes.RegistryOffice && c.Code == newRdCode)
                 .Select(c => c.Name)
                 .FirstOrDefaultAsync(cancellationToken);
 
-        record.MissingFieldsCsv = string.Join(',', ComputeMissingFields(record));
-        record.UpdatedByUserId = _currentUserService.UserId;
-        record.UpdatedByUsername = _currentUserService.Username;
-        record.UpdatedAt = DateTime.UtcNow;
+        foreach (var r in group)
+        {
+            var originalRdCode = r.RdCode;
+            var originalEntryNumbersCsv = r.EntryNumbersCsv;
 
-        // Only one Title Record exists per request today (Title/TitleType/Plan/Block/Lot/
-        // TitleSequence are single scalar columns, not a collection - see Details.cshtml's Title
-        // Record(s) table), so every Title Record field is labeled "Title Record 1" here, matching
-        // the acceptance criteria's format for disambiguating which Title Record changed once the
-        // data model ever grows to hold more than one.
-        var changeDescriptions = new List<string>();
-        AddFieldChange(changeDescriptions, "RD Code", originalRdCode, record.RdCode);
-        AddFieldChange(changeDescriptions, "Entry Number", originalEntryNumbersCsv, record.EntryNumbersCsv);
-        AddFieldChange(changeDescriptions, "Title Record 1 - Title Number", originalTitle, record.Title);
-        AddFieldChange(changeDescriptions, "Title Record 1 - Title Type", originalTitleType?.ToString(), record.TitleType?.ToString());
-        AddFieldChange(changeDescriptions, "Title Record 1 - Plan Number", originalPlan, record.Plan);
-        AddFieldChange(changeDescriptions, "Title Record 1 - Block Number", originalBlock, record.Block);
-        AddFieldChange(changeDescriptions, "Title Record 1 - Lot Number", originalLot, record.Lot);
-        AddFieldChange(changeDescriptions, "Title Record 1 - Title Sequence", originalTitleSequence, record.TitleSequence);
+            r.RdCode = newRdCode;
+            r.EntryNumbersCsv = newEntryNumbersCsv;
+            r.RdName = newRdName;
+
+            AddFieldChange(ChangesFor(r.Id), "RD Code", originalRdCode, r.RdCode);
+            AddFieldChange(ChangesFor(r.Id), "Entry Number", originalEntryNumbersCsv, r.EntryNumbersCsv);
+        }
+
+        // Each Title Record targets exactly one underlying row by RecordId - never by position/
+        // order - and only a RecordId that is actually a member of this group is honored, so a
+        // stale or tampered payload can never write Title Record fields to an unrelated record.
+        var titleRecordLabelByRecordId = group
+            .Select((r, index) => (r.Id, Label: $"Title Record {index + 1}"))
+            .ToDictionary(x => x.Id, x => x.Label);
+
+        foreach (var item in request.TitleRecords)
+        {
+            if (!groupIds.Contains(item.RecordId))
+            {
+                continue;
+            }
+
+            var r = group.First(x => x.Id == item.RecordId);
+            var label = titleRecordLabelByRecordId[r.Id];
+
+            var originalTitle = r.Title;
+            var originalTitleType = r.TitleType;
+            var originalPlan = r.Plan;
+            var originalBlock = r.Block;
+            var originalLot = r.Lot;
+            var originalTitleSequence = r.TitleSequence;
+
+            r.Title = item.Title?.Trim();
+            r.TitleType = Enum.TryParse<TitleType>(item.TitleType, true, out var titleType) ? titleType : null;
+            r.Plan = item.Plan?.Trim();
+            r.Block = item.Block?.Trim();
+            r.Lot = item.Lot?.Trim();
+            r.TitleSequence = item.TitleSequence?.Trim();
+
+            var changes = ChangesFor(r.Id);
+            AddFieldChange(changes, $"{label} - Title Number", originalTitle, r.Title);
+            AddFieldChange(changes, $"{label} - Title Type", originalTitleType?.ToString(), r.TitleType?.ToString());
+            AddFieldChange(changes, $"{label} - Plan Number", originalPlan, r.Plan);
+            AddFieldChange(changes, $"{label} - Block Number", originalBlock, r.Block);
+            AddFieldChange(changes, $"{label} - Lot Number", originalLot, r.Lot);
+            AddFieldChange(changes, $"{label} - Title Sequence", originalTitleSequence, r.TitleSequence);
+        }
+
+        foreach (var r in group)
+        {
+            r.MissingFieldsCsv = string.Join(',', ComputeMissingFields(r));
+            r.UpdatedByUserId = _currentUserService.UserId;
+            r.UpdatedByUsername = _currentUserService.Username;
+            r.UpdatedAt = DateTime.UtcNow;
+        }
 
         // Others -> real Document Type correction(s): the physical file(s) are renamed (never the
         // containing folder) and DocumentsJson updated only here, as part of Save itself - never
@@ -215,6 +252,7 @@ public class ManualValidationService : IManualValidationService
         // and if the database save then fails for some other reason every rename applied in this
         // Save is undone too - the file(s), DocumentsJson, and imagePath(s) stay consistent either way.
         var renamesToRollBack = new List<(string NewPath, string OriginalPath)>();
+        var touchedRecordIds = new HashSet<int>();
         try
         {
             if (!string.IsNullOrWhiteSpace(request.DocumentChangesJson))
@@ -225,24 +263,37 @@ public class ManualValidationService : IManualValidationService
 
                 if (documentChanges.Count > 0)
                 {
-                    ApplyDocumentTypeChanges(record, documentChanges, renamesToRollBack, changeDescriptions);
+                    ApplyDocumentTypeChanges(group, documentChanges, renamesToRollBack, changeDescriptionsByRecordId, touchedRecordIds);
                 }
             }
 
             // Built last, once every scalar and Supporting Document change has been recorded -
             // never the old generic message when real changes exist, and never a fabricated
-            // change description when nothing actually changed.
-            _context.RecordHistory.Add(new RecordHistory
+            // change description when nothing actually changed. The opened record (`record`)
+            // always gets a RecordHistory row even with zero changes, matching the single-record
+            // behavior this replaces; a group sibling only gets one when something on that
+            // specific row actually changed, so Saving one Title Record doesn't spam history onto
+            // every other related row.
+            foreach (var r in group)
             {
-                TableName = RecordHistoryTables.ManualValidationRequests,
-                RecordId = record.Id,
-                RefNo = record.RequestNumber,
-                Action = RemarkAction.Saved.ToString(),
-                Remarks = BuildChangeRemarks(changeDescriptions),
-                ByUserId = _currentUserService.UserId,
-                ByUsername = _currentUserService.Username ?? "system",
-                CreatedAt = DateTime.UtcNow,
-            });
+                var changes = changeDescriptionsByRecordId.TryGetValue(r.Id, out var list) ? list : [];
+                if (r.Id != record.Id && changes.Count == 0 && !touchedRecordIds.Contains(r.Id))
+                {
+                    continue;
+                }
+
+                _context.RecordHistory.Add(new RecordHistory
+                {
+                    TableName = RecordHistoryTables.ManualValidationRequests,
+                    RecordId = r.Id,
+                    RefNo = r.RequestNumber,
+                    Action = RemarkAction.Saved.ToString(),
+                    Remarks = BuildChangeRemarks(changes),
+                    ByUserId = _currentUserService.UserId,
+                    ByUsername = _currentUserService.Username ?? "system",
+                    CreatedAt = DateTime.UtcNow,
+                });
+            }
 
             await _context.SaveChangesAsync(cancellationToken);
         }
@@ -259,7 +310,7 @@ public class ManualValidationService : IManualValidationService
             throw;
         }
 
-        return MapToDetail(record);
+        return MapToDetail(record, group);
     }
 
     // Appends "<label>: Previous = '<before>', Current = '<after>'" to `changes` - but only when
@@ -302,30 +353,39 @@ public class ManualValidationService : IManualValidationService
     }
 
     // Applies one or more pending Others -> real Document Type corrections in a single Save.
-    // Every change's target document is resolved up front, against ONE pre-change sorted
-    // snapshot of DocumentsJson (the same sort - by DocumentName then RenamedFileName - that
-    // assigned each document's client-facing Id) - because renaming a document changes its
-    // DocumentName, which is the sort key, resolving each change's index one at a time as it's
-    // applied would let an earlier rename in this same batch shift the sort order and cause a
-    // later change to silently target the wrong document. rollbacks is populated in place as each
-    // rename succeeds - if a later change in this same call throws, the caller still has every
-    // rollback recorded so far. changeDescriptions gets one "Supporting Document '<original file
-    // name>' - Document Type: Previous = '...', Current = '...'" line per document actually
-    // reclassified, for the same RecordHistory.Remarks audit trail as the scalar field changes.
-    private static void ApplyDocumentTypeChanges(ManualValidationRequest record, List<DocumentChangeItemDto> changes, List<(string NewPath, string OriginalPath)> rollbacks, List<string> changeDescriptions)
+    // Every change's target document is resolved up front, against ONE pre-change merged/sorted
+    // snapshot of the WHOLE group's DocumentsJson (see BuildCombinedSortedDocuments - the same
+    // merge/dedup/sort that assigned each document's client-facing Id) - because renaming a
+    // document changes its DocumentName, which is the sort key, resolving each change's index one
+    // at a time as it's applied would let an earlier rename in this same batch shift the sort
+    // order and cause a later change to silently target the wrong document. rollbacks is
+    // populated in place as each rename succeeds - if a later change in this same call throws,
+    // the caller still has every rollback recorded so far. changeDescriptions gets one "Supporting
+    // Document '<original file name>' - Document Type: Previous = '...', Current = '...'" line,
+    // recorded against whichever underlying row actually owns that document, for the same
+    // RecordHistory.Remarks audit trail as the scalar field changes.
+    private static void ApplyDocumentTypeChanges(
+        List<ManualValidationRequest> group,
+        List<DocumentChangeItemDto> changes,
+        List<(string NewPath, string OriginalPath)> rollbacks,
+        Dictionary<int, List<string>> changeDescriptionsByRecordId,
+        HashSet<int> touchedRecordIds)
     {
-        var items = ParseAndSortDocumentItems(record.DocumentsJson);
+        var perRecordItems = group.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
+        var combined = BuildCombinedSortedDocuments(perRecordItems);
+        var allItemsFlat = perRecordItems.SelectMany(x => x.Items).ToList();
 
-        var targets = new List<(DocumentJsonItem Target, DocumentChangeItemDto Change)>();
+        var targets = new List<(int RecordId, DocumentJsonItem Target, DocumentChangeItemDto Change)>();
         foreach (var change in changes)
         {
-            if (change.Index - 1 < items.Count)
+            if (change.Index - 1 < combined.Count)
             {
-                targets.Add((items[change.Index - 1], change));
+                var (recordId, item) = combined[change.Index - 1];
+                targets.Add((recordId, item, change));
             }
         }
 
-        foreach (var (target, change) in targets)
+        foreach (var (recordId, target, change) in targets)
         {
             // Captured before ApplyDocumentTypeChange mutates `target` in place, so the audit
             // line below always identifies the document by its ORIGINAL file name and shows its
@@ -333,7 +393,10 @@ public class ManualValidationService : IManualValidationService
             var originalFileName = target.RenamedFileName;
             var originalDocumentName = target.DocumentName;
 
-            var rollback = ApplyDocumentTypeChange(items, target, change.Code.Trim(), change.Name.Trim());
+            // Sequence numbers are scanned across every document in the group (allItemsFlat), not
+            // just this document's own owning row, so two sibling rows reclassifying documents to
+            // the same Document Type in one Save never collide on the same sequence number.
+            var rollback = ApplyDocumentTypeChange(allItemsFlat, target, change.Code.Trim(), change.Name.Trim());
             if (rollback is { } r)
             {
                 rollbacks.Add(r);
@@ -344,12 +407,25 @@ public class ManualValidationService : IManualValidationService
             // is the simplest way to only record documents that were actually reclassified.
             if (!string.Equals(target.DocumentName, originalDocumentName, StringComparison.Ordinal))
             {
-                changeDescriptions.Add(
+                touchedRecordIds.Add(recordId);
+                var descriptions = changeDescriptionsByRecordId.TryGetValue(recordId, out var list) ? list : changeDescriptionsByRecordId[recordId] = [];
+                descriptions.Add(
                     $"Supporting Document '{originalFileName}' - Document Type: Previous = '{FormatValueForHistory(originalDocumentName)}', Current = '{target.DocumentName}'");
             }
         }
 
-        record.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
+        // Only the owning row's own DocumentsJson is re-serialized/written back - a document that
+        // was never targeted, or belongs to a row nothing here touched, is left completely alone.
+        foreach (var (recordId, items) in perRecordItems)
+        {
+            if (!touchedRecordIds.Contains(recordId))
+            {
+                continue;
+            }
+
+            var owner = group.First(r => r.Id == recordId);
+            owner.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
+        }
     }
 
     // Renames one document's physical image file to
@@ -631,6 +707,33 @@ public class ManualValidationService : IManualValidationService
             .FirstOrDefaultAsync(r => r.Id == id && r.MigratedAt == null, cancellationToken)
             ?? throw new NotFoundException("Manual validation record", id);
 
+    // Every active ManualValidationRequest sharing `primary`'s exact EntryNumbersCsv, in
+    // ascending Id order (so "Title Record 1" is always the earliest-created row) - this is the
+    // sole grouping key, never RequestNumber or Id. A blank/whitespace EntryNumbersCsv never
+    // groups: a record with no Entry Number always forms a group of one (itself), so records
+    // that simply haven't had an Entry Number entered yet are never lumped together by accident.
+    // Returns tracked entities (so SaveAsync can mutate and persist group siblings directly).
+    private async Task<List<ManualValidationRequest>> GetGroupRecordsAsync(ManualValidationRequest primary, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(primary.EntryNumbersCsv))
+        {
+            return [primary];
+        }
+
+        var entryNumbersCsv = primary.EntryNumbersCsv;
+        var group = await _context.ManualValidationRequests
+            .Where(r => r.MigratedAt == null && r.EntryNumbersCsv == entryNumbersCsv)
+            .OrderBy(r => r.Id)
+            .ToListAsync(cancellationToken);
+
+        if (!group.Any(r => r.Id == primary.Id))
+        {
+            group.Insert(0, primary);
+        }
+
+        return group;
+    }
+
     private void EnsureNotLockedByAnotherUser(ManualValidationRequest record)
     {
         var lockedByAnotherUser = record.LockedByUserId.HasValue
@@ -659,70 +762,127 @@ public class ManualValidationService : IManualValidationService
         return missing.ToArray();
     }
 
-    private static ManualValidationDetailDto MapToDetail(ManualValidationRequest r) => new()
+    private static ManualValidationDetailDto MapToDetail(ManualValidationRequest primary, List<ManualValidationRequest> group)
     {
-        Id = r.Id,
-        RequestNumber = r.RequestNumber,
-        RdCode = r.RdCode,
-        RdName = r.RdName,
-        EntryNumbersCsv = r.EntryNumbersCsv,
-        Title = r.Title,
-        TitleType = r.TitleType?.ToString(),
-        Plan = r.Plan,
-        Block = r.Block,
-        Lot = r.Lot,
-        TitleSequence = r.TitleSequence,
-        Status = r.Status.ToString(),
-        // Computed live from the record's actual field values (same rule the Save path already
-        // uses) rather than trusting the stored MissingFieldsCsv - that column is populated by
-        // the external OCR pipeline at record-creation time and doesn't reliably reflect which
-        // Title Record fields are actually blank (e.g. leaves plan/block unflagged even when
-        // empty, and carries unrelated keys like "documentClassification").
-        MissingFields = ComputeMissingFields(r),
-        Documents = ParseDocuments(r.DocumentsJson),
-    };
+        var perRecordItems = group.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
+        var combinedDocuments = BuildCombinedSortedDocuments(perRecordItems);
 
-    // ManualValidationRequests.DocumentsJson holds a JSON array of {documentId, documentTypeCode,
-    // documentName, originalFileName, renamedFileName, imagePath} - no per-item id in storage,
-    // so one is synthesized from (sorted) position for the API/UI. Sorted by Document Name then
-    // Image File Name (renamedFileName) so the Supporting Documents list and the image viewer's
-    // Prev/Next order match. This is the single place DocumentsJson gets parsed and sorted -
-    // ParseDocuments (the client-facing list) and GetDocumentImagePathAsync (the image lookup)
-    // both build on it, so a document's position/Id means the same thing in both.
-    private static List<DocumentJsonItem> ParseAndSortDocumentItems(string? documentsJson)
+        return new ManualValidationDetailDto
+        {
+            Id = primary.Id,
+            RequestNumber = primary.RequestNumber,
+            RdCode = primary.RdCode,
+            RdName = primary.RdName,
+            EntryNumbersCsv = primary.EntryNumbersCsv,
+            Title = primary.Title,
+            TitleType = primary.TitleType?.ToString(),
+            Plan = primary.Plan,
+            Block = primary.Block,
+            Lot = primary.Lot,
+            TitleSequence = primary.TitleSequence,
+            Status = primary.Status.ToString(),
+            // Computed live from the record's actual field values (same rule the Save path already
+            // uses) rather than trusting the stored MissingFieldsCsv - that column is populated by
+            // the external OCR pipeline at record-creation time and doesn't reliably reflect which
+            // Title Record fields are actually blank (e.g. leaves plan/block unflagged even when
+            // empty, and carries unrelated keys like "documentClassification").
+            MissingFields = ComputeMissingFields(primary),
+            TitleRecords = group.Select(r => new ManualValidationTitleRecordDto
+            {
+                RecordId = r.Id,
+                Title = r.Title,
+                TitleType = r.TitleType?.ToString(),
+                Plan = r.Plan,
+                Block = r.Block,
+                Lot = r.Lot,
+                TitleSequence = r.TitleSequence,
+                MissingFields = ComputeMissingFields(r)
+                    .Where(f => f is "title" or "titleType" or "plan" or "block" or "lot" or "titleSequence")
+                    .ToArray(),
+            }).ToArray(),
+            Documents = combinedDocuments.Select((d, index) => new ManualValidationDocumentDto
+            {
+                Id = index + 1,
+                DocumentId = d.Item.DocumentId,
+                DocumentName = d.Item.DocumentName,
+                RenamedFileName = d.Item.RenamedFileName,
+            }).ToArray(),
+        };
+    }
+
+    // Raw parse of one row's own DocumentsJson - {documentId, documentTypeCode, documentName,
+    // originalFileName, renamedFileName, imagePath} per item - in storage order, unsorted.
+    private static List<DocumentJsonItem> ParseDocumentItems(string? documentsJson)
     {
         if (string.IsNullOrWhiteSpace(documentsJson))
         {
             return [];
         }
 
-        var items = JsonSerializer.Deserialize<List<DocumentJsonItem>>(documentsJson, JsonOptions) ?? [];
-        return items
-            .OrderBy(d => d.DocumentName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(d => d.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+        return JsonSerializer.Deserialize<List<DocumentJsonItem>>(documentsJson, JsonOptions) ?? [];
+    }
+
+    // Merges every row's own DocumentsJson items into one Supporting Documents list for the
+    // group, removes duplicates, and sorts the result - this is the single place that happens, so
+    // GetDocumentImagePathAsync (image lookup), MapToDetail (client-facing list) and
+    // ApplyDocumentTypeChanges (Save) all agree on what a given 1-based position means.
+    //
+    // Duplicate identity is the physical image file - ImagePath (falling back to RenamedFileName
+    // only on the rare row where ImagePath is blank) - never DocumentId+DocumentName. Two
+    // documents filed under the exact same Document ID and Document Name but pointing at two
+    // different image files (e.g. "..._1.jpg" and "..._2.jpg") are two different images and both
+    // survive; two rows that happen to reference the literal same imagePath collapse to one entry,
+    // keeping the first occurrence (the earliest/lowest-Id row - "Title Record 1").
+    //
+    // Sorted by Document Name then Image File Name (renamedFileName), exactly like the original
+    // single-record ordering, so the Supporting Documents list and the image viewer's Prev/Next
+    // order are unaffected for a record with no group siblings.
+    private static List<(int RecordId, DocumentJsonItem Item)> BuildCombinedSortedDocuments(
+        IEnumerable<(int RecordId, List<DocumentJsonItem> Items)> perRecordItems)
+    {
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var combined = new List<(int RecordId, DocumentJsonItem Item)>();
+
+        foreach (var (recordId, items) in perRecordItems)
+        {
+            foreach (var item in items)
+            {
+                var key = !string.IsNullOrWhiteSpace(item.ImagePath) ? item.ImagePath!.Trim() : item.RenamedFileName;
+                if (string.IsNullOrWhiteSpace(key) || seenKeys.Add(key))
+                {
+                    combined.Add((recordId, item));
+                }
+            }
+        }
+
+        return combined
+            .OrderBy(x => x.Item.DocumentName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.Item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    private static ManualValidationDocumentDto[] ParseDocuments(string? documentsJson) =>
-        ParseAndSortDocumentItems(documentsJson)
-            .Select((d, index) => new ManualValidationDocumentDto
-            {
-                Id = index + 1,
-                DocumentId = d.DocumentId,
-                DocumentName = d.DocumentName,
-                RenamedFileName = d.RenamedFileName,
-            }).ToArray();
-
     public async Task<string?> GetDocumentImagePathAsync(int id, int documentId, CancellationToken cancellationToken = default)
     {
-        var documentsJson = await _context.ManualValidationRequests.AsNoTracking()
+        var record = await _context.ManualValidationRequests.AsNoTracking()
             .Where(r => r.Id == id && r.MigratedAt == null)
-            .Select(r => r.DocumentsJson)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var items = ParseAndSortDocumentItems(documentsJson);
+        if (record is null)
+        {
+            return null;
+        }
+
+        var group = string.IsNullOrWhiteSpace(record.EntryNumbersCsv)
+            ? [record]
+            : await _context.ManualValidationRequests.AsNoTracking()
+                .Where(r => r.MigratedAt == null && r.EntryNumbersCsv == record.EntryNumbersCsv)
+                .OrderBy(r => r.Id)
+                .ToListAsync(cancellationToken);
+
+        var perRecordItems = group.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
+        var combined = BuildCombinedSortedDocuments(perRecordItems);
         var index = documentId - 1;
-        return index >= 0 && index < items.Count ? items[index].ImagePath : null;
+        return index >= 0 && index < combined.Count ? combined[index].Item.ImagePath : null;
     }
 
     private class DocumentJsonItem

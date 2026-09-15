@@ -113,8 +113,10 @@ public class ManualValidationController : Controller
             var detail = await _manualValidationService.SaveAsync(id, model, cancellationToken);
             // Renaming a document's file changes its DocumentName, which the Supporting
             // Documents list/viewer are sorted by - so the full, freshly re-sorted list is
-            // returned here too, not just on the initial page load.
-            return Json(new { success = true, message = "Saved Successfully.", rdName = detail.RdName ?? "", missingFields = detail.MissingFields, documents = detail.Documents });
+            // returned here too, not just on the initial page load. titleRecords is likewise
+            // returned so a re-save immediately reflects each row's own freshly computed missing
+            // fields, without a full page reload.
+            return Json(new { success = true, message = "Saved Successfully.", rdName = detail.RdName ?? "", missingFields = detail.MissingFields, titleRecords = detail.TitleRecords, documents = detail.Documents });
         }
         catch (Exception ex) when (ex is NotFoundException or ForbiddenAppException or BusinessValidationException)
         {

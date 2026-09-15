@@ -61,40 +61,48 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <!-- The current data model returns exactly one Title Record per Manual
-                         Validation request (Title/TitleType/Plan/Block/Lot/TitleSequence are
-                         singular columns, not a collection) - this table renders that one record
-                         as a row; it is not a user-editable list, so there is no Add Title
-                         Record affordance. -->
-                    <tr>
-                        <td class="small text-muted">1</td>
-                        <td class="mb-3 @MissingClass("title")">
-                            <input type="text" class="form-control form-control-sm" id="mvTitle" name="Title" value="@Model.Title" aria-label="Title Number" />
-                        </td>
-                        <td class="mb-3 @MissingClass("titleType")">
-                            <select class="form-select form-select-sm" id="mvTitleType" name="TitleType" aria-label="Title Type">
-                                <option value="">Select</option>
-                                <option value="TCT" selected="@(Model.TitleType == "TCT")">TCT</option>
-                                <option value="OCT" selected="@(Model.TitleType == "OCT")">OCT</option>
-                            </select>
-                        </td>
-                        <td class="mb-3 @MissingClass("plan")">
-                            <input type="text" class="form-control form-control-sm" id="mvPlan" name="Plan" placeholder="Required" value="@Model.Plan" aria-label="Plan Number" />
-                        </td>
-                        <td class="mb-3 @MissingClass("block")">
-                            <input type="text" class="form-control form-control-sm" id="mvBlock" name="Block" placeholder="Required" value="@Model.Block" aria-label="Block Number" />
-                        </td>
-                        <td class="mb-3 @MissingClass("lot")">
-                            <input type="text" class="form-control form-control-sm" id="mvLot" name="Lot" placeholder="Required" value="@Model.Lot" aria-label="Lot Number" />
-                        </td>
-                        <td class="mb-3 @MissingClass("titleSequence")">
-                            <input type="text" class="form-control form-control-sm bg-body-secondary font-monospace" id="mvTitleSeq" name="TitleSequence" readonly
-                                   placeholder="@(string.IsNullOrWhiteSpace(Model.TitleSequence) ? "Not yet retrieved" : "")" value="@Model.TitleSequence" aria-label="Title Sequence" />
-                        </td>
-                        <td>
-                            <button type="button" id="mvRetrieveTitleSeqBtn" class="btn btn-outline-secondary btn-sm w-100">Retrieve Title Sequence</button>
-                        </td>
-                    </tr>
+                    <!-- One row per ManualValidationRequests row sharing this record's exact
+                         EntryNumbersCsv (see ManualValidationService.GetGroupRecordsAsync) - always
+                         at least 1 (the opened record itself). Each row's RecordId travels as a
+                         hidden field so Save can write its Title/TitleType/Plan/Block/Lot/
+                         TitleSequence back to the correct underlying row, never guessed by
+                         position. Not a user-editable list - rows come solely from the group, so
+                         there is no Add/Remove Title Record affordance. -->
+                    @for (var i = 0; i < Model.TitleRecords.Count; i++)
+                    {
+                        var titleRecord = Model.TitleRecords[i];
+                        var trMissing = new HashSet<string>(titleRecord.MissingFields);
+                        <tr data-title-record-row data-title-record-index="@i">
+                            <td class="small text-muted">@(i + 1)</td>
+                            <td class="mb-3 @(trMissing.Contains("title") ? "missing-field" : "")">
+                                <input type="hidden" name="TitleRecords[@i].RecordId" value="@titleRecord.RecordId" />
+                                <input type="text" class="form-control form-control-sm" id="mvTitle_@i" name="TitleRecords[@i].Title" value="@titleRecord.Title" aria-label="Title Number" />
+                            </td>
+                            <td class="mb-3 @(trMissing.Contains("titleType") ? "missing-field" : "")">
+                                <select class="form-select form-select-sm" id="mvTitleType_@i" name="TitleRecords[@i].TitleType" aria-label="Title Type">
+                                    <option value="">Select</option>
+                                    <option value="TCT" selected="@(titleRecord.TitleType == "TCT")">TCT</option>
+                                    <option value="OCT" selected="@(titleRecord.TitleType == "OCT")">OCT</option>
+                                </select>
+                            </td>
+                            <td class="mb-3 @(trMissing.Contains("plan") ? "missing-field" : "")">
+                                <input type="text" class="form-control form-control-sm" id="mvPlan_@i" name="TitleRecords[@i].Plan" placeholder="Required" value="@titleRecord.Plan" aria-label="Plan Number" />
+                            </td>
+                            <td class="mb-3 @(trMissing.Contains("block") ? "missing-field" : "")">
+                                <input type="text" class="form-control form-control-sm" id="mvBlock_@i" name="TitleRecords[@i].Block" placeholder="Required" value="@titleRecord.Block" aria-label="Block Number" />
+                            </td>
+                            <td class="mb-3 @(trMissing.Contains("lot") ? "missing-field" : "")">
+                                <input type="text" class="form-control form-control-sm" id="mvLot_@i" name="TitleRecords[@i].Lot" placeholder="Required" value="@titleRecord.Lot" aria-label="Lot Number" />
+                            </td>
+                            <td class="mb-3 @(trMissing.Contains("titleSequence") ? "missing-field" : "")">
+                                <input type="text" class="form-control form-control-sm bg-body-secondary font-monospace" id="mvTitleSeq_@i" name="TitleRecords[@i].TitleSequence" readonly
+                                       placeholder="@(string.IsNullOrWhiteSpace(titleRecord.TitleSequence) ? "Not yet retrieved" : "")" value="@titleRecord.TitleSequence" aria-label="Title Sequence" />
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-outline-secondary btn-sm w-100" data-mv-retrieve-title-seq data-title-record-index="@i">Retrieve Title Sequence</button>
+                            </td>
+                        </tr>
+                    }
                 </tbody>
             </table>
         </div>

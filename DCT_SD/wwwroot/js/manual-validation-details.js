@@ -17,8 +17,20 @@
     var documents = JSON.parse((document.getElementById('mvDocumentsData') || {}).textContent || '[]');
     var documentTypes = JSON.parse((document.getElementById('mvDocumentTypesData') || {}).textContent || '[]');
 
-    var fieldIds = ['mvRdCode', 'mvEntry', 'mvTitle', 'mvTitleType', 'mvPlan', 'mvBlock', 'mvLot', 'mvTitleSeq', 'mvRdName',
-      'mvDocumentChangesJson'];
+    // One or more Title Record rows (see Details.cshtml's Title Record(s) table) - every row
+    // sharing the opened record's exact EntryNumbersCsv, combined server-side into this one
+    // Details view. Always at least 1 (the opened record itself when it has no group siblings),
+    // so a record with no grouping siblings behaves exactly as it always has.
+    var titleRecordRows = Array.prototype.slice.call(document.querySelectorAll('[data-title-record-row]'));
+    var titleRecordFieldSuffixes = ['Title', 'TitleType', 'Plan', 'Block', 'Lot', 'TitleSeq'];
+    var titleRecordFieldIds = [];
+    titleRecordRows.forEach(function (row, i) {
+      titleRecordFieldSuffixes.forEach(function (suffix) {
+        titleRecordFieldIds.push('mv' + suffix + '_' + i);
+      });
+    });
+
+    var fieldIds = ['mvRdCode', 'mvEntry', 'mvRdName', 'mvDocumentChangesJson'].concat(titleRecordFieldIds);
     var fieldEls = {};
     fieldIds.forEach(function (id) {
       fieldEls[id] = document.getElementById(id);
@@ -61,15 +73,16 @@
       });
     }
 
-    // Editing Title/TitleType/Plan/Block/Lot invalidates any previously retrieved sequence.
-    ['mvTitle', 'mvTitleType', 'mvPlan', 'mvBlock', 'mvLot'].forEach(function (id) {
-      var el = fieldEls[id];
-      if (!el) return;
-      el.addEventListener('input', function () {
-        fieldEls.mvTitleSeq.value = '';
-      });
-      el.addEventListener('change', function () {
-        fieldEls.mvTitleSeq.value = '';
+    // Editing Title/TitleType/Plan/Block/Lot invalidates any previously retrieved sequence - for
+    // its own Title Record row only, not the whole group.
+    titleRecordRows.forEach(function (row, i) {
+      var seqEl = document.getElementById('mvTitleSeq_' + i);
+      if (!seqEl) return;
+      ['Title', 'TitleType', 'Plan', 'Block', 'Lot'].forEach(function (suffix) {
+        var el = document.getElementById('mv' + suffix + '_' + i);
+        if (!el) return;
+        el.addEventListener('input', function () { seqEl.value = ''; });
+        el.addEventListener('change', function () { seqEl.value = ''; });
       });
     });
 
@@ -77,14 +90,15 @@
     // Matching is staged server-side: RD Code + Title Number + Title Type first; if that's
     // still ambiguous, Plan/Block/Lot narrow it further; if it's *still* ambiguous (a genuinely
     // Repeating Title Number), the server returns every remaining candidate instead of guessing,
-    // and this shows them in the shared #ajaxModal for manual selection.
-    var retrieveBtn = document.getElementById('mvRetrieveTitleSeqBtn');
-    if (retrieveBtn) {
+    // and this shows them in the shared #ajaxModal for manual selection. One button per Title
+    // Record row, all sharing the one modal (only one can be open at a time anyway) and the one
+    // General Information RD Code field.
+    if (titleRecordRows.length > 0) {
       var rtnModalEl = document.getElementById('ajaxModal');
       var rtnModalContentEl = document.getElementById('ajaxModalContent');
       var rtnModal = rtnModalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(rtnModalEl) : null;
 
-      function showRepeatingTitleNumberModal(candidates) {
+      var showRepeatingTitleNumberModal = function (candidates, onSelect) {
         if (!rtnModalContentEl || !rtnModal) return;
 
         rtnModalContentEl.innerHTML =
@@ -114,7 +128,7 @@
           selectBtn.className = 'btn btn-outline-secondary btn-sm';
           selectBtn.textContent = 'Select';
           selectBtn.addEventListener('click', function () {
-            fieldEls.mvTitleSeq.value = c.sequence;
+            onSelect(c.sequence);
             rtnModal.hide();
             toast('Title Sequence retrieved successfully.', 'success');
           });
@@ -124,37 +138,49 @@
         });
 
         rtnModal.show();
-      }
+      };
 
-      retrieveBtn.addEventListener('click', function () {
-        var rdCode = fieldEls.mvRdCode.value.trim();
-        var title = fieldEls.mvTitle.value.trim();
-        var titleType = fieldEls.mvTitleType.value.trim();
-        var plan = fieldEls.mvPlan.value.trim();
-        var block = fieldEls.mvBlock.value.trim();
-        var lot = fieldEls.mvLot.value.trim();
+      titleRecordRows.forEach(function (row, i) {
+        var retrieveBtn = document.querySelector('[data-mv-retrieve-title-seq][data-title-record-index="' + i + '"]');
+        if (!retrieveBtn) return;
 
-        if (!title || !titleType) {
-          fieldEls.mvTitleSeq.value = '';
-          toast('No Title Sequence record was found.');
-          return;
-        }
+        var titleEl = document.getElementById('mvTitle_' + i);
+        var titleTypeEl = document.getElementById('mvTitleType_' + i);
+        var planEl = document.getElementById('mvPlan_' + i);
+        var blockEl = document.getElementById('mvBlock_' + i);
+        var lotEl = document.getElementById('mvLot_' + i);
+        var seqEl = document.getElementById('mvTitleSeq_' + i);
 
-        var body = new URLSearchParams({ RdCode: rdCode, Title: title, TitleType: titleType, Plan: plan, Block: block, Lot: lot, __RequestVerificationToken: token });
-        fetch('/ManualValidation/RetrieveTitleSequence', { method: 'POST', body: body })
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data.success) {
-              fieldEls.mvTitleSeq.value = data.sequence;
-              toast('Title Sequence retrieved successfully.', 'success');
-            } else if (data.ambiguous) {
-              fieldEls.mvTitleSeq.value = '';
-              showRepeatingTitleNumberModal(data.candidates || []);
-            } else {
-              fieldEls.mvTitleSeq.value = '';
-              toast(data.message || 'No Title Sequence record was found.');
-            }
-          });
+        retrieveBtn.addEventListener('click', function () {
+          var rdCode = fieldEls.mvRdCode.value.trim();
+          var title = titleEl.value.trim();
+          var titleType = titleTypeEl.value.trim();
+          var plan = planEl.value.trim();
+          var block = blockEl.value.trim();
+          var lot = lotEl.value.trim();
+
+          if (!title || !titleType) {
+            seqEl.value = '';
+            toast('No Title Sequence record was found.');
+            return;
+          }
+
+          var body = new URLSearchParams({ RdCode: rdCode, Title: title, TitleType: titleType, Plan: plan, Block: block, Lot: lot, __RequestVerificationToken: token });
+          fetch('/ManualValidation/RetrieveTitleSequence', { method: 'POST', body: body })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (data.success) {
+                seqEl.value = data.sequence;
+                toast('Title Sequence retrieved successfully.', 'success');
+              } else if (data.ambiguous) {
+                seqEl.value = '';
+                showRepeatingTitleNumberModal(data.candidates || [], function (sequence) { seqEl.value = sequence; });
+              } else {
+                seqEl.value = '';
+                toast(data.message || 'No Title Sequence record was found.');
+              }
+            });
+        });
       });
     }
 
@@ -448,14 +474,17 @@
           if (typeof applySavedDocuments === 'function') applySavedDocuments(data.documents);
           snapshot = currentValues();
           applyMissingFields(data.missingFields || []);
+          applyTitleRecordMissingFields(data.titleRecords || []);
           if (!silent) toast('Saved Successfully.', 'success');
           loadRemarks(1);
           return true;
         });
     }
 
+    // General Information fields only (rdCode/rdName/entry) - shown once, shared by the whole
+    // group, so they're outside the per-Title-Record loop below.
     function applyMissingFields(missing) {
-      var map = { rdCode: 'mvRdCode', rdName: 'mvRdName', entry: 'mvEntry', title: 'mvTitle', titleType: 'mvTitleType', plan: 'mvPlan', block: 'mvBlock', lot: 'mvLot' };
+      var map = { rdCode: 'mvRdCode', rdName: 'mvRdName', entry: 'mvEntry' };
       var missingSet = {};
       missing.forEach(function (k) { missingSet[k] = true; });
       Object.keys(map).forEach(function (key) {
@@ -464,8 +493,23 @@
         var wrapper = el.closest('.mb-3');
         if (wrapper) wrapper.classList.toggle('missing-field', !!missingSet[key]);
       });
-      var titleSeqWrapper = fieldEls.mvTitleSeq.closest('.mb-3');
-      if (titleSeqWrapper) titleSeqWrapper.classList.toggle('missing-field', !!(missingSet.titleSequence || missingSet.titleSeq));
+    }
+
+    // titleRecords is the server's freshly computed per-row missing-field list (same order as
+    // the rendered rows - both are the group in ascending Id order), applied row by row so
+    // Saving one Title Record's fields doesn't disturb another row's gold outline.
+    function applyTitleRecordMissingFields(titleRecords) {
+      var map = { title: 'mvTitle', titleType: 'mvTitleType', plan: 'mvPlan', block: 'mvBlock', lot: 'mvLot', titleSequence: 'mvTitleSeq' };
+      titleRecords.forEach(function (tr, i) {
+        var missingSet = {};
+        (tr.missingFields || []).forEach(function (k) { missingSet[k] = true; });
+        Object.keys(map).forEach(function (key) {
+          var el = document.getElementById(map[key] + '_' + i);
+          if (!el) return;
+          var wrapper = el.closest('.mb-3');
+          if (wrapper) wrapper.classList.toggle('missing-field', !!missingSet[key]);
+        });
+      });
     }
 
     document.getElementById('mvSaveBtn').addEventListener('click', function () {
