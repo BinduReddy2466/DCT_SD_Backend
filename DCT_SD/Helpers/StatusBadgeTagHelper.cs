@@ -24,6 +24,7 @@ public class StatusBadgeTagHelper : TagHelper
         ["Fully Extracted"] = "ok",
         ["Partially Extracted"] = "warn",
         ["Empty Entry Folder"] = "neutral",
+        ["Empty RD Folder"] = "neutral",
         ["Migrated"] = "ok",
         ["Duplicate SD"] = "err",
         ["Overwritten"] = "info",

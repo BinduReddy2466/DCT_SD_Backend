@@ -19,7 +19,7 @@ public class EmptyFoldersController : Controller
     [HttpGet]
     public async Task<IActionResult> Index([FromQuery] EmptyFolderSearchRequestDto request, CancellationToken cancellationToken)
     {
-        ViewData["Title"] = "Empty Entry Folders";
+        ViewData["Title"] = "Empty Folders";
         ViewData["ActiveMenu"] = MenuKeys.EmptyFolders;
 
         var result = await _emptyFolderService.SearchAsync(request, cancellationToken);

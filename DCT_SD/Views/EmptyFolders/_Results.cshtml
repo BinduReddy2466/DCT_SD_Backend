@@ -4,29 +4,28 @@
     <table class="table table-hover align-middle">
         <thead>
             <tr>
-                <th>Fetch Date/Time</th>
-                <th>RD Code</th>
-                <th>RD Name</th>
+                <th>Fetch Date and Time</th>
+                <th>Registry of Deeds (RD)</th>
                 <th>Folder Name</th>
                 <th>Folder Path</th>
-                <th>Status</th>
+                <th>Extraction Status</th>
             </tr>
         </thead>
         <tbody>
             @if (Model.Items.Count == 0)
             {
                 <tr>
-                    <td colspan="6" class="text-center text-muted py-4">No records found.</td>
+                    <td colspan="5" class="text-center text-muted py-4">No records found.</td>
                 </tr>
             }
             else
             {
                 @foreach (var item in Model.Items)
                 {
+                    var rd = string.Join(" - ", new[] { item.RdCode, item.RdName }.Where(v => !string.IsNullOrWhiteSpace(v)));
                     <tr>
                         <td class="font-monospace small">@item.FetchDateTime.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
-                        <td>@(item.RdCode ?? "—")</td>
-                        <td>@(item.RdName ?? "—")</td>
+                        <td>@(string.IsNullOrEmpty(rd) ? "—" : rd)</td>
                         <td>@item.FolderName</td>
                         <td class="font-monospace small">@item.FolderPath</td>
                         <td><status-badge status="@item.Status"></status-badge></td>
@@ -37,4 +36,7 @@
     </table>
 </div>
 
-@await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })
+@if (Model.Items.Count > 0)
+{
+    @await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })
+}
