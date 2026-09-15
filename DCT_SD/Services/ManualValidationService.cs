@@ -157,6 +157,18 @@ public class ManualValidationService : IManualValidationService
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
+        // Snapshot of every user-editable field exactly as it was persisted before this Save
+        // applies anything - the audit Remarks built below always compares against this snapshot
+        // (the record's true prior state), never against already-modified in-memory/UI values.
+        var originalRdCode = record.RdCode;
+        var originalEntryNumbersCsv = record.EntryNumbersCsv;
+        var originalTitle = record.Title;
+        var originalTitleType = record.TitleType;
+        var originalPlan = record.Plan;
+        var originalBlock = record.Block;
+        var originalLot = record.Lot;
+        var originalTitleSequence = record.TitleSequence;
+
         record.RdCode = request.RdCode?.Trim();
         record.EntryNumbersCsv = request.EntryNumbersCsv?.Trim();
         record.Title = request.Title?.Trim();
@@ -178,17 +190,20 @@ public class ManualValidationService : IManualValidationService
         record.UpdatedByUsername = _currentUserService.Username;
         record.UpdatedAt = DateTime.UtcNow;
 
-        _context.RecordHistory.Add(new RecordHistory
-        {
-            TableName = RecordHistoryTables.ManualValidationRequests,
-            RecordId = record.Id,
-            RefNo = record.RequestNumber,
-            Action = RemarkAction.Saved.ToString(),
-            Remarks = "Record details updated during manual validation.",
-            ByUserId = _currentUserService.UserId,
-            ByUsername = _currentUserService.Username ?? "system",
-            CreatedAt = DateTime.UtcNow,
-        });
+        // Only one Title Record exists per request today (Title/TitleType/Plan/Block/Lot/
+        // TitleSequence are single scalar columns, not a collection - see Details.cshtml's Title
+        // Record(s) table), so every Title Record field is labeled "Title Record 1" here, matching
+        // the acceptance criteria's format for disambiguating which Title Record changed once the
+        // data model ever grows to hold more than one.
+        var changeDescriptions = new List<string>();
+        AddFieldChange(changeDescriptions, "RD Code", originalRdCode, record.RdCode);
+        AddFieldChange(changeDescriptions, "Entry Number", originalEntryNumbersCsv, record.EntryNumbersCsv);
+        AddFieldChange(changeDescriptions, "Title Record 1 - Title Number", originalTitle, record.Title);
+        AddFieldChange(changeDescriptions, "Title Record 1 - Title Type", originalTitleType?.ToString(), record.TitleType?.ToString());
+        AddFieldChange(changeDescriptions, "Title Record 1 - Plan Number", originalPlan, record.Plan);
+        AddFieldChange(changeDescriptions, "Title Record 1 - Block Number", originalBlock, record.Block);
+        AddFieldChange(changeDescriptions, "Title Record 1 - Lot Number", originalLot, record.Lot);
+        AddFieldChange(changeDescriptions, "Title Record 1 - Title Sequence", originalTitleSequence, record.TitleSequence);
 
         // Others -> real Document Type correction(s): the physical file(s) are renamed (never the
         // containing folder) and DocumentsJson updated only here, as part of Save itself - never
@@ -204,15 +219,30 @@ public class ManualValidationService : IManualValidationService
         {
             if (!string.IsNullOrWhiteSpace(request.DocumentChangesJson))
             {
-                var changes = (JsonSerializer.Deserialize<List<DocumentChangeItemDto>>(request.DocumentChangesJson, JsonOptions) ?? [])
+                var documentChanges = (JsonSerializer.Deserialize<List<DocumentChangeItemDto>>(request.DocumentChangesJson, JsonOptions) ?? [])
                     .Where(c => c.Index > 0 && !string.IsNullOrWhiteSpace(c.Code) && !string.IsNullOrWhiteSpace(c.Name))
                     .ToList();
 
-                if (changes.Count > 0)
+                if (documentChanges.Count > 0)
                 {
-                    ApplyDocumentTypeChanges(record, changes, renamesToRollBack);
+                    ApplyDocumentTypeChanges(record, documentChanges, renamesToRollBack, changeDescriptions);
                 }
             }
+
+            // Built last, once every scalar and Supporting Document change has been recorded -
+            // never the old generic message when real changes exist, and never a fabricated
+            // change description when nothing actually changed.
+            _context.RecordHistory.Add(new RecordHistory
+            {
+                TableName = RecordHistoryTables.ManualValidationRequests,
+                RecordId = record.Id,
+                RefNo = record.RequestNumber,
+                Action = RemarkAction.Saved.ToString(),
+                Remarks = BuildChangeRemarks(changeDescriptions),
+                ByUserId = _currentUserService.UserId,
+                ByUsername = _currentUserService.Username ?? "system",
+                CreatedAt = DateTime.UtcNow,
+            });
 
             await _context.SaveChangesAsync(cancellationToken);
         }
@@ -232,6 +262,45 @@ public class ManualValidationService : IManualValidationService
         return MapToDetail(record);
     }
 
+    // Appends "<label>: Previous = '<before>', Current = '<after>'" to `changes` - but only when
+    // the value actually changed, per the acceptance criteria ("do not record fields that did not
+    // change"). Null/blank values are shown as "Empty" so the history entry never looks like it's
+    // missing data.
+    private static void AddFieldChange(List<string> changes, string label, string? before, string? after)
+    {
+        if (string.Equals(before, after, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        changes.Add($"{label}: Previous = '{FormatValueForHistory(before)}', Current = '{FormatValueForHistory(after)}'");
+    }
+
+    private static string FormatValueForHistory(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "Empty" : value;
+
+    // RecordHistory.Remarks is capped at 500 characters (see RecordHistoryConfiguration) - a Save
+    // touching many fields/documents could otherwise generate a message long enough to make the
+    // audit log itself the reason a legitimate Save fails, so this always fits within that limit.
+    private const int RemarksMaxLength = 500;
+
+    private static string BuildChangeRemarks(List<string> changeDescriptions)
+    {
+        if (changeDescriptions.Count == 0)
+        {
+            return "No changes were made during manual validation.";
+        }
+
+        var combined = string.Join('\n', changeDescriptions);
+        if (combined.Length <= RemarksMaxLength)
+        {
+            return combined;
+        }
+
+        const string suffix = "...";
+        return combined[..(RemarksMaxLength - suffix.Length)] + suffix;
+    }
+
     // Applies one or more pending Others -> real Document Type corrections in a single Save.
     // Every change's target document is resolved up front, against ONE pre-change sorted
     // snapshot of DocumentsJson (the same sort - by DocumentName then RenamedFileName - that
@@ -240,8 +309,10 @@ public class ManualValidationService : IManualValidationService
     // applied would let an earlier rename in this same batch shift the sort order and cause a
     // later change to silently target the wrong document. rollbacks is populated in place as each
     // rename succeeds - if a later change in this same call throws, the caller still has every
-    // rollback recorded so far.
-    private static void ApplyDocumentTypeChanges(ManualValidationRequest record, List<DocumentChangeItemDto> changes, List<(string NewPath, string OriginalPath)> rollbacks)
+    // rollback recorded so far. changeDescriptions gets one "Supporting Document '<original file
+    // name>' - Document Type: Previous = '...', Current = '...'" line per document actually
+    // reclassified, for the same RecordHistory.Remarks audit trail as the scalar field changes.
+    private static void ApplyDocumentTypeChanges(ManualValidationRequest record, List<DocumentChangeItemDto> changes, List<(string NewPath, string OriginalPath)> rollbacks, List<string> changeDescriptions)
     {
         var items = ParseAndSortDocumentItems(record.DocumentsJson);
 
@@ -256,10 +327,25 @@ public class ManualValidationService : IManualValidationService
 
         foreach (var (target, change) in targets)
         {
+            // Captured before ApplyDocumentTypeChange mutates `target` in place, so the audit
+            // line below always identifies the document by its ORIGINAL file name and shows its
+            // ORIGINAL classification - never the values already being changed to.
+            var originalFileName = target.RenamedFileName;
+            var originalDocumentName = target.DocumentName;
+
             var rollback = ApplyDocumentTypeChange(items, target, change.Code.Trim(), change.Name.Trim());
             if (rollback is { } r)
             {
                 rollbacks.Add(r);
+            }
+
+            // ApplyDocumentTypeChange leaves `target` untouched (documentName included) when
+            // there was nothing to apply (e.g. a missing ImagePath) - comparing before/after here
+            // is the simplest way to only record documents that were actually reclassified.
+            if (!string.Equals(target.DocumentName, originalDocumentName, StringComparison.Ordinal))
+            {
+                changeDescriptions.Add(
+                    $"Supporting Document '{originalFileName}' - Document Type: Previous = '{FormatValueForHistory(originalDocumentName)}', Current = '{target.DocumentName}'");
             }
         }
 
@@ -385,6 +471,35 @@ public class ManualValidationService : IManualValidationService
             ByUsername = _currentUserService.Username ?? "system",
             CreatedAt = DateTime.UtcNow,
         });
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    // Releases every Manual Validation review lock currently held by this user, regardless of
+    // which record it's on - called from AccountController.Logout so a user who logs out without
+    // explicitly clicking Close doesn't leave records reported as locked to them for the rest of
+    // the LockTimeout window. Uses the exact same LockedByUserId/LockedByUsername/LockedAt fields
+    // CloseAsync already clears - no new locking mechanism, just the existing one applied at a
+    // different point in the flow. A record already past LockTimeout is naturally already
+    // unlocked from EnsureNotLockedByAnotherUser's perspective, but clearing it here too keeps the
+    // stored state honest rather than leaving stale values around until someone else opens it.
+    public async Task ReleaseLocksForUserAsync(int userId, CancellationToken cancellationToken = default)
+    {
+        var lockedRecords = await _context.ManualValidationRequests
+            .Where(r => r.LockedByUserId == userId && r.MigratedAt == null)
+            .ToListAsync(cancellationToken);
+
+        if (lockedRecords.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var record in lockedRecords)
+        {
+            record.LockedByUserId = null;
+            record.LockedByUsername = null;
+            record.LockedAt = null;
+        }
 
         await _context.SaveChangesAsync(cancellationToken);
     }

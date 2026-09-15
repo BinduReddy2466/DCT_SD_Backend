@@ -12,12 +12,21 @@ public class AccountController : Controller
     private readonly IAuthService _authService;
     private readonly ITokenService _tokenService;
     private readonly ISettingsService _settingsService;
+    private readonly IManualValidationService _manualValidationService;
+    private readonly ICurrentUserService _currentUserService;
 
-    public AccountController(IAuthService authService, ITokenService tokenService, ISettingsService settingsService)
+    public AccountController(
+        IAuthService authService,
+        ITokenService tokenService,
+        ISettingsService settingsService,
+        IManualValidationService manualValidationService,
+        ICurrentUserService currentUserService)
     {
         _authService = authService;
         _tokenService = tokenService;
         _settingsService = settingsService;
+        _manualValidationService = manualValidationService;
+        _currentUserService = currentUserService;
     }
 
     [HttpGet]
@@ -77,6 +86,14 @@ public class AccountController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Logout(CancellationToken cancellationToken)
     {
+        // Release any Manual Validation review locks this user is holding - otherwise logging out
+        // without first clicking Close leaves those records reported as locked to them until the
+        // 15-minute LockTimeout elapses, blocking other users from opening them in the meantime.
+        if (_currentUserService.UserId is { } userId)
+        {
+            await _manualValidationService.ReleaseLocksForUserAsync(userId, cancellationToken);
+        }
+
         var refreshToken = Request.Cookies[AuthCookieHelper.RefreshTokenCookieName];
         if (!string.IsNullOrEmpty(refreshToken))
         {
