@@ -24,4 +24,18 @@ public interface IRdFetchApiClient
     /// GET /fetch/{fetchRunId}. Returns null on a 404 (no such run on the external service) so
     /// callers can show a "Fetch run not found" message instead of an error.
     Task<FetchRunDetailDto?> GetFetchRunDetailsAsync(int fetchRunId, CancellationToken cancellationToken = default);
+
+    /// The Failed Extraction page's Reprocess action (POST /failed-extractions/reprocess) -
+    /// re-runs OCR extraction for exactly the one Entry Folder at folderPath (must match an
+    /// existing failed record's FolderPath exactly - never hardcoded here). executedByUserId is
+    /// the logged-in user who clicked Reprocess, sent as "Executed_By_UserID" per that endpoint's
+    /// own OpenAPI spec. On success the external service creates real
+    /// OcrExtractionRecords/ManualValidationRequests rows and clears the folder from its OWN
+    /// internal failure tracking (confirmed via that service's own GET /failed-extractions), but -
+    /// despite what its OpenAPI description claims - it does NOT go back and remove this app's
+    /// already-written stale Failed OcrExtractionRecords row for the same folder, so the caller
+    /// must do that itself (see FailedExtractionController.Reprocess) using the response's own
+    /// records_created/manual_validation_created counts as the success signal, not the free-text
+    /// "status" field and not merely the absence of an HTTP error.
+    Task<ExternalFailedExtractionReprocessResponse> ReprocessFailedExtractionAsync(string folderPath, int? executedByUserId, CancellationToken cancellationToken = default);
 }

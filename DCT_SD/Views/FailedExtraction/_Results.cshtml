@@ -13,12 +13,13 @@
                 <th>Entry Folder Name</th>
                 <th>Folder Path</th>
                 <th>Failure Reason</th>
+                <th>Reprocess</th>
             </tr>
         </thead>
         <tbody>
             @if (items.Count == 0)
             {
-                <tr><td colspan="5" class="text-center text-muted py-4">@emptyMessage</td></tr>
+                <tr><td colspan="6" class="text-center text-muted py-4">@emptyMessage</td></tr>
             }
             else
             {
@@ -30,6 +31,9 @@
                         <td>@item.FolderName</td>
                         <td class="font-monospace small">@item.FolderPath</td>
                         <td>@(string.IsNullOrWhiteSpace(item.FailureReason) ? "—" : item.FailureReason)</td>
+                        <td>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-reprocess-btn data-id="@item.Id">Reprocess</button>
+                        </td>
                     </tr>
                 }
             }

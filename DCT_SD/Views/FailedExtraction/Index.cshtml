@@ -5,6 +5,11 @@
     var registryOffices = (IReadOnlyList<RegistryOfficeDto>)ViewData["RegistryOffices"]!;
 }
 
+@* Outside the #failed-extraction-results container (which gets swapped wholesale on every
+   search/pagination/Reprocess refresh) so failed-extraction.js can read this token once and
+   keep using it across refreshes instead of it going stale. *@
+@Html.AntiForgeryToken()
+
 <div class="card p-4 mb-4">
     <form data-list-page-form="failed-extraction-results" data-list-page-page-url="@Url.Action("Index")" action="@Url.Action("Results")" method="get" class="filter-grid" id="failedExtractionFilterForm">
         <div>

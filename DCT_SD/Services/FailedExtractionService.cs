@@ -116,6 +116,88 @@ public class FailedExtractionService : IFailedExtractionService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<FailedExtractionListItemDto?> GetByIdAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var record = await _context.OcrExtractionRecords.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id && r.ExtractionStatus == OcrExtractionStatus.Failed, cancellationToken);
+        if (record is null)
+        {
+            return null;
+        }
+
+        var reasonsById = await GetLatestFailureReasonsAsync([record.Id], cancellationToken);
+        return MapToListItem(record, reasonsById.GetValueOrDefault(record.Id, string.Empty));
+    }
+
+    public async Task<FailedExtractionListItemDto?> GetActiveFailedRecordByFolderPathAsync(string folderPath, CancellationToken cancellationToken = default)
+    {
+        var record = await _context.OcrExtractionRecords.AsNoTracking()
+            .Where(r => r.ExtractionStatus == OcrExtractionStatus.Failed && r.FolderPath == folderPath)
+            .OrderByDescending(r => r.ExtractionDateTime)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (record is null)
+        {
+            return null;
+        }
+
+        var reasonsById = await GetLatestFailureReasonsAsync([record.Id], cancellationToken);
+        return MapToListItem(record, reasonsById.GetValueOrDefault(record.Id, string.Empty));
+    }
+
+    public async Task UpdateFailureAsync(int id, string failureReason, DateTime extractionDateTime, CancellationToken cancellationToken = default)
+    {
+        var record = await _context.OcrExtractionRecords
+            .FirstOrDefaultAsync(r => r.Id == id && r.ExtractionStatus == OcrExtractionStatus.Failed, cancellationToken);
+        if (record is null)
+        {
+            return;
+        }
+
+        record.ExtractionDateTime = extractionDateTime;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        _context.RecordHistory.Add(new RecordHistory
+        {
+            TableName = RecordHistoryTableName,
+            RecordId = record.Id,
+            RefNo = record.RequestNumber,
+            Action = "ExtractionFailed",
+            Remarks = failureReason,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    // Removes a resolved Failed Extraction record: the external reprocess service confirms
+    // success in its own response (records_created/manual_validation_created > 0) and clears the
+    // folder from its own internal failure tracking, but - confirmed by directly querying that
+    // service's own GET /failed-extractions right after a real success - it does not go back and
+    // update/remove this app's already-written OcrExtractionRecords row for the same folder, so
+    // this app removes it itself once the response proves the retry actually succeeded. Deletes
+    // the row (not just its status) since a real, separate OcrExtractionRecords row was already
+    // created for the successful attempt - keeping the old Failed one around would be a stale
+    // duplicate of the same folder, one Failed and one not.
+    public async Task RemoveFailedRecordAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var record = await _context.OcrExtractionRecords
+            .FirstOrDefaultAsync(r => r.Id == id && r.ExtractionStatus == OcrExtractionStatus.Failed, cancellationToken);
+        if (record is null)
+        {
+            return;
+        }
+
+        var historyEntries = await _context.RecordHistory
+            .Where(h => h.TableName == RecordHistoryTableName && h.RecordId == id)
+            .ToListAsync(cancellationToken);
+        _context.RecordHistory.RemoveRange(historyEntries);
+        _context.OcrExtractionRecords.Remove(record);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    public Task<bool> HasSuccessfulRecordForFolderAsync(string folderPath, CancellationToken cancellationToken = default) =>
+        _context.OcrExtractionRecords.AsNoTracking()
+            .AnyAsync(r => r.FolderPath == folderPath && r.ExtractionStatus != OcrExtractionStatus.Failed, cancellationToken);
+
     private async Task<Dictionary<int, string>> GetLatestFailureReasonsAsync(IEnumerable<int> recordIds, CancellationToken cancellationToken)
     {
         var ids = recordIds.ToArray();

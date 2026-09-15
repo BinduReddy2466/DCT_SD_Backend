@@ -22,6 +22,12 @@ public class RdFetchApiClient : IRdFetchApiClient
         return await PostAsync<ExternalUpdateRootPathRequest, ExternalUpdateRootPathResponse>("/rd-config", request, cancellationToken);
     }
 
+    public async Task<ExternalFailedExtractionReprocessResponse> ReprocessFailedExtractionAsync(string folderPath, int? executedByUserId, CancellationToken cancellationToken = default)
+    {
+        var request = new ExternalFailedExtractionReprocessRequest { FolderPath = folderPath, ExecutedByUserId = executedByUserId };
+        return await PostAsync<ExternalFailedExtractionReprocessRequest, ExternalFailedExtractionReprocessResponse>("/failed-extractions/reprocess", request, cancellationToken);
+    }
+
     private static readonly JsonSerializerOptions DetailsJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public async Task<HttpResponseMessage> StartFetchStreamAsync(string rootPath, int executedByUserId, CancellationToken cancellationToken = default)

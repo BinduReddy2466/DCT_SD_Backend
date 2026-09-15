@@ -42,6 +42,39 @@ public class ExternalStartFetchRequest
     public bool ApplyFileMoves { get; set; }
 }
 
+// POST /failed-extractions/reprocess request/response shapes - FailedExtractionReprocessRequest
+// and FailedExtractionReprocessResult per the deployed service's own OpenAPI spec
+// (http://172.16.1.68:8123/openapi.json), confirmed directly against that spec rather than
+// guessed. Note Executed_By_UserID keeps the same non-snake_case casing as the other two
+// endpoints' request DTOs above - the spec defines it that way for this endpoint too, not
+// "executed_by_user_id".
+public class ExternalFailedExtractionReprocessRequest
+{
+    [JsonPropertyName("folder_path")]
+    public string FolderPath { get; set; } = string.Empty;
+
+    [JsonPropertyName("Executed_By_UserID")]
+    public int? ExecutedByUserId { get; set; }
+}
+
+public class ExternalFailedExtractionReprocessResponse
+{
+    // Free-text per the spec (just `"type": "string"`, no enum) - callers must not pattern-match
+    // specific values out of this; see FailedExtractionController.Reprocess for how success vs.
+    // failure is actually determined (by re-checking whether the record is still Failed).
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("records_created")]
+    public int? RecordsCreated { get; set; }
+
+    [JsonPropertyName("manual_validation_created")]
+    public int? ManualValidationCreated { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+}
+
 // GET /fetch/{fetch_run_id} response shape - the FetchRunSummary schema per the deployed
 // service's own OpenAPI spec (http://172.16.1.68:8123/openapi.json). PropertyNameCaseInsensitive
 // is set at the deserialization call site as a light safety net, but these names/shapes are
