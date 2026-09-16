@@ -376,10 +376,10 @@ public class ManualValidationService : IManualValidationService
     // Every change's target document is resolved up front, against ONE pre-change merged/sorted
     // snapshot of the WHOLE group's DocumentsJson (see BuildCombinedSortedDocuments - the same
     // merge/dedup/sort that assigned each document's client-facing Id) - because renaming a
-    // document changes its DocumentName, which is the sort key, resolving each change's index one
-    // at a time as it's applied would let an earlier rename in this same batch shift the sort
-    // order and cause a later change to silently target the wrong document. rollbacks is
-    // populated in place as each rename succeeds - if a later change in this same call throws,
+    // document changes its RenamedFileName (Image File Name), which is the sort key, resolving
+    // each change's index one at a time as it's applied would let an earlier rename in this same
+    // batch shift the sort order and cause a later change to silently target the wrong document.
+    // rollbacks is populated in place as each rename succeeds - if a later change in this same call throws,
     // the caller still has every rollback recorded so far. changeDescriptions gets one "Supporting
     // Document '<original file name>' - Document Type: Previous = '...', Current = '...'" line,
     // recorded against whichever underlying row actually owns that document, for the same
@@ -854,9 +854,10 @@ public class ManualValidationService : IManualValidationService
     // survive; two rows that happen to reference the literal same imagePath collapse to one entry,
     // keeping the first occurrence (the earliest/lowest-Id row - "Title Record 1").
     //
-    // Sorted by Document Name then Image File Name (renamedFileName), exactly like the original
-    // single-record ordering, so the Supporting Documents list and the image viewer's Prev/Next
-    // order are unaffected for a record with no group siblings.
+    // Sorted ascending by Image File Name (renamedFileName) - the sole sort key, per the
+    // acceptance criteria ("sort the supporting document images in ascending order by Image File
+    // Name") - so the Supporting Documents list and the image viewer's Prev/Next order both
+    // follow it, for a record with or without group siblings.
     private static List<(int RecordId, DocumentJsonItem Item)> BuildCombinedSortedDocuments(
         IEnumerable<(int RecordId, List<DocumentJsonItem> Items)> perRecordItems)
     {
@@ -876,8 +877,7 @@ public class ManualValidationService : IManualValidationService
         }
 
         return combined
-            .OrderBy(x => x.Item.DocumentName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(x => x.Item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x.Item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 

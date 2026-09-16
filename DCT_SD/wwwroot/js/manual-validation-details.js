@@ -282,7 +282,7 @@
 
       // Rebuilds the Supporting Documents table (never raw HTML from doc data - built via
       // textContent) so a pending correction's preview name, and any Save-time reshuffle from
-      // renaming (the list is sorted by Document Name), are both reflected without a page reload.
+      // renaming (the list is sorted by Image File Name), are both reflected without a page reload.
       function renderDocumentList() {
         if (!listEl) return;
         listEl.innerHTML = '';
