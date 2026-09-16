@@ -10,10 +10,12 @@ namespace DCT_SD.Controllers;
 public class EmptyFoldersController : Controller
 {
     private readonly IEmptyFolderService _emptyFolderService;
+    private readonly IRegistryOfficeService _registryOfficeService;
 
-    public EmptyFoldersController(IEmptyFolderService emptyFolderService)
+    public EmptyFoldersController(IEmptyFolderService emptyFolderService, IRegistryOfficeService registryOfficeService)
     {
         _emptyFolderService = emptyFolderService;
+        _registryOfficeService = registryOfficeService;
     }
 
     [HttpGet]
@@ -21,6 +23,7 @@ public class EmptyFoldersController : Controller
     {
         ViewData["Title"] = "Empty Folders";
         ViewData["ActiveMenu"] = MenuKeys.EmptyFolders;
+        ViewData["RegistryOffices"] = await _registryOfficeService.GetAllActiveAsync(cancellationToken);
 
         var result = await _emptyFolderService.SearchAsync(request, cancellationToken);
         return View(result);

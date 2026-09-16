@@ -1,13 +1,21 @@
+@using DCT_SD.Models.Dtos.RdConfig
 @model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.EmptyFolders.EmptyFolderListItemDto>
 @{
     var q = Context.Request.Query;
+    var registryOffices = (IReadOnlyList<RegistryOfficeDto>)ViewData["RegistryOffices"]!;
 }
 
 <div class="card p-4 mb-4">
     <form data-list-page-form="empty-folders-results" data-list-page-page-url="@Url.Action("Index")" action="@Url.Action("Results")" method="get" class="filter-grid">
         <div>
-            <label class="form-label field-label" for="RdCode">Registry of Deeds Code</label>
-            <input type="text" class="form-control" id="RdCode" name="RdCode" value="@q["RdCode"]" />
+            <label class="form-label field-label" for="RdCode">Registry of Deeds (RD)</label>
+            <select class="form-select" id="RdCode" name="RdCode">
+                <option value="">Select</option>
+                @foreach (var o in registryOffices)
+                {
+                    <option value="@o.Code" selected="@(q["RdCode"] == o.Code)">@o.Name</option>
+                }
+            </select>
         </div>
         <div>
             <label class="form-label field-label" for="FolderName">Folder Name</label>
