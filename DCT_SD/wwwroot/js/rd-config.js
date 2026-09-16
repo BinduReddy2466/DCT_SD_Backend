@@ -404,6 +404,7 @@
 
     var pendingConfirmHandler = null;
     var confirmBtn = document.getElementById('confirmDialogConfirmBtn');
+    var confirmCancelBtn = document.getElementById('confirmDialogCancelBtn');
 
     function clearPendingConfirm() {
       if (pendingConfirmHandler) {
@@ -426,7 +427,8 @@
       if (confirmModal && confirmBtn) {
         document.getElementById('confirmDialogMessage').textContent = 'Are you sure you want to start the fetching process?';
         confirmBtn.className = 'btn btn-navy';
-        confirmBtn.textContent = 'Start Fetching';
+        confirmBtn.textContent = 'Yes';
+        if (confirmCancelBtn) confirmCancelBtn.textContent = 'No';
         clearPendingConfirm();
         pendingConfirmHandler = function () {
           confirmModal.hide();
