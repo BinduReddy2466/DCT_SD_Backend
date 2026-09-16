@@ -22,13 +22,13 @@
         </div>
         <div>
             <label class="form-label field-label" for="Rd">RD</label>
-            <input type="text" class="form-control" id="Rd" name="Rd" value="@q["Rd"]" list="rdOptionsList" placeholder="Select" autocomplete="off" />
-            <datalist id="rdOptionsList">
+            <select class="form-select" id="Rd" name="Rd">
+                <option value="">Select</option>
                 @foreach (var o in registryOffices)
                 {
-                    <option value="@o.Name"></option>
+                    <option value="@o.Name" selected="@(q["Rd"] == o.Name)">@o.Name</option>
                 }
-            </datalist>
+            </select>
         </div>
         <div>
             <label class="form-label field-label" for="FolderName">Entry Folder Name</label>
