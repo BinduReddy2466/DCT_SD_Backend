@@ -139,14 +139,16 @@ public class ManualValidationController : Controller
         }
     }
 
+    // Replaces the old "Migrate" action - only flags the record Status as Ready for Migration and
+    // records it in Action History; never starts an actual migration.
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Migrate(int id, CancellationToken cancellationToken)
+    public async Task<IActionResult> ReadyForMigration(int id, CancellationToken cancellationToken)
     {
         try
         {
-            await _manualValidationService.MigrateAsync(id, cancellationToken);
-            return Json(new { success = true, message = "Record validated and migrated to PHILARIS-RD." });
+            await _manualValidationService.MarkReadyForMigrationAsync(id, cancellationToken);
+            return Json(new { success = true, message = "Record marked as Ready for Migration." });
         }
         catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException)
         {

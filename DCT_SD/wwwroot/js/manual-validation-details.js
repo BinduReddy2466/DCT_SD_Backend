@@ -1,6 +1,6 @@
 // Wires the Manual Validation Details page: document viewer navigation, the RD Code -> RD
-// Name live lookup, Retrieve Title Sequence, and the Save / Close (with remarks) / Migrate
-// flows with unsaved-changes tracking. Mirrors the React frontend's
+// Name live lookup, Retrieve Title Sequence, and the Save / Close (with remarks) / Ready for
+// Migration flows with unsaved-changes tracking. Mirrors the React frontend's
 // ManualValidationDetailsPage.tsx behavior on top of the new server-rendered form.
 (function () {
   'use strict';
@@ -517,23 +517,60 @@
       doSave(false);
     });
 
-    // --- Migrate ---
-    document.getElementById('mvMigrateBtn').addEventListener('click', function () {
-      doSave(true).then(function (saved) {
-        if (!saved) return;
-        var body = new URLSearchParams({ __RequestVerificationToken: token });
-        fetch('/ManualValidation/Migrate/' + recordId, { method: 'POST', body: body })
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (!data.success) {
-              toast(data.message || 'Please complete all mandatory fields before proceeding with migration.', 'error');
-              return;
-            }
-            toast(data.message, 'success');
-            setTimeout(function () { window.location.href = '/ManualValidation'; }, 900);
+    // --- Ready for Migration ---
+    // Replaces the old direct-click Migrate action with an explicit confirmation, reusing the
+    // one shared #confirmDialog modal (same one rd-config.js's Start Fetching uses) rather than
+    // adding a page-specific modal. Confirm still silently saves any pending edits first (doSave)
+    // before marking the record ready, matching the old Migrate flow's behavior; Cancel performs
+    // no server call at all - the record's Status is left exactly as it was.
+    var readyForMigrationBtn = document.getElementById('mvReadyForMigrationBtn');
+    if (readyForMigrationBtn) {
+      var rfmModalEl = document.getElementById('confirmDialog');
+      var rfmModal = rfmModalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(rfmModalEl) : null;
+      var rfmConfirmBtn = document.getElementById('confirmDialogConfirmBtn');
+      var rfmCancelBtn = document.getElementById('confirmDialogCancelBtn');
+      var rfmPendingHandler = null;
+
+      function clearPendingRfmConfirm() {
+        if (rfmPendingHandler) {
+          rfmConfirmBtn.removeEventListener('click', rfmPendingHandler);
+          rfmPendingHandler = null;
+        }
+      }
+
+      if (rfmModalEl) {
+        rfmModalEl.addEventListener('hidden.bs.modal', clearPendingRfmConfirm);
+      }
+
+      readyForMigrationBtn.addEventListener('click', function () {
+        if (!rfmModal || !rfmConfirmBtn) return;
+
+        document.getElementById('confirmDialogMessage').textContent = 'Are you sure you want to mark this Entry Record as Ready for Migration?';
+        rfmConfirmBtn.className = 'btn btn-navy';
+        rfmConfirmBtn.textContent = 'Confirm';
+        if (rfmCancelBtn) rfmCancelBtn.textContent = 'Cancel';
+        clearPendingRfmConfirm();
+        rfmPendingHandler = function () {
+          rfmModal.hide();
+          doSave(true).then(function (saved) {
+            if (!saved) return;
+            var body = new URLSearchParams({ __RequestVerificationToken: token });
+            fetch('/ManualValidation/ReadyForMigration/' + recordId, { method: 'POST', body: body })
+              .then(function (r) { return r.json(); })
+              .then(function (data) {
+                if (!data.success) {
+                  toast(data.message || 'Unable to mark this record as Ready for Migration.', 'error');
+                  return;
+                }
+                toast(data.message, 'success');
+                setTimeout(function () { window.location.href = '/ManualValidation'; }, 900);
+              });
           });
+        };
+        rfmConfirmBtn.addEventListener('click', rfmPendingHandler);
+        rfmModal.show();
       });
-    });
+    }
 
     // --- Close (with remarks) / unsaved-changes flow ---
     var closeModalEl = document.getElementById('mvCloseModal');

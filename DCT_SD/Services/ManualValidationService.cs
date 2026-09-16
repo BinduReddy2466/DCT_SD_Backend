@@ -637,17 +637,46 @@ public class ManualValidationService : IManualValidationService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task MigrateAsync(int id, CancellationToken cancellationToken = default)
+    // Replaces the old "Migrate" action. This only flags the record as ready - it deliberately
+    // never sets MigratedAt (that would remove it from the Manual Validation list/queries, the
+    // same way the old Migrate action used to) and never touches MigrationRecords/Migration
+    // Monitoring, which this app has no existing write path into at all (that table is populated
+    // entirely by an external process). The actual migration mechanism is expected to pick up
+    // ReadyForMigration records on its own, outside this app.
+    public async Task MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
     {
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
+        // Same mandatory-fields gate the old Migrate action used - reused as-is, since a record
+        // that isn't fully validated still shouldn't be flagged ready for the next stage.
         if (ComputeMissingFields(record).Length > 0)
         {
-            throw new BusinessValidationException("Please complete all mandatory fields before proceeding with migration.");
+            throw new BusinessValidationException("Please complete all mandatory fields before marking this record as Ready for Migration.");
         }
 
-        record.MigratedAt = DateTime.UtcNow;
+        var originalStatus = record.Status;
+        record.Status = ManualValidationStatus.ReadyForMigration;
+        record.UpdatedByUserId = _currentUserService.UserId;
+        record.UpdatedByUsername = _currentUserService.Username;
+        record.UpdatedAt = DateTime.UtcNow;
+
+        // Action History entry via the existing RecordHistory mechanism - no new table/column.
+        // Action is stored as the literal display string (not an enum .ToString()) because,
+        // unlike Saved/Closed, "Ready for Migration" has spaces that a plain enum name can't
+        // produce; the same string is what <status-badge> renders for this action.
+        _context.RecordHistory.Add(new RecordHistory
+        {
+            TableName = RecordHistoryTables.ManualValidationRequests,
+            RecordId = record.Id,
+            RefNo = record.RequestNumber,
+            Action = "Ready for Migration",
+            Remarks = $"Status: Previous = '{FormatValueForHistory(StatusDisplay.ManualValidationStatusToDisplay(originalStatus.ToString()))}', Current = 'Ready for Migration'",
+            ByUserId = _currentUserService.UserId,
+            ByUsername = _currentUserService.Username ?? "system",
+            CreatedAt = DateTime.UtcNow,
+        });
+
         await _context.SaveChangesAsync(cancellationToken);
     }
 

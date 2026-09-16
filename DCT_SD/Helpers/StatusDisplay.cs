@@ -22,6 +22,7 @@ public static class StatusDisplay
     {
         ["IncompleteExtraction"] = "Incomplete Extraction",
         ["TargetRdNotIdentified"] = "Target RD Not Identified",
+        ["ReadyForMigration"] = "Ready for Migration",
     };
 
     private static readonly Dictionary<string, string> MigrationDocStatusMap = new()

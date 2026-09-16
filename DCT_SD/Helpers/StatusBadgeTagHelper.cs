@@ -21,6 +21,7 @@ public class StatusBadgeTagHelper : TagHelper
         ["All Supporting Documents are Duplicate SD"] = "err",
         ["Incomplete Extraction."] = "warn",
         ["Target RD Not Identified"] = "err",
+        ["Ready for Migration"] = "ok",
         ["Fully Extracted"] = "ok",
         ["Partially Extracted"] = "warn",
         ["Empty Entry Folder"] = "neutral",

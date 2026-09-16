@@ -11,7 +11,13 @@ public interface IManualValidationService
     Task<ManualValidationDetailDto> SaveAsync(int id, SaveManualValidationRequestDto request, CancellationToken cancellationToken = default);
     Task CloseAsync(int id, string remarks, CancellationToken cancellationToken = default);
     Task ReleaseLocksForUserAsync(int userId, CancellationToken cancellationToken = default);
-    Task MigrateAsync(int id, CancellationToken cancellationToken = default);
+
+    // Replaces the old "Migrate" action: only marks the record Status as ReadyForMigration and
+    // records it in Action History - it never sets MigratedAt itself and never talks to
+    // MigrationRecords/Migration Monitoring, which stay entirely unaffected. The record remains
+    // fully visible/editable in Manual Validation afterward; the actual migration mechanism
+    // (external to this app) is expected to pick up ReadyForMigration records on its own.
+    Task MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default);
     Task<TitleSequenceDto> RetrieveTitleSequenceAsync(RetrieveTitleSequenceRequestDto request, CancellationToken cancellationToken = default);
 
     /// Looks up the imagePath stored in DocumentsJson for the document at the given 1-based
