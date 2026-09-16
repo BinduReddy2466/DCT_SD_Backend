@@ -1,6 +1,6 @@
 @model RemarksHistoryViewModel
 <div class="modal-header">
-    <h5 class="modal-title font-display">Remarks History</h5>
+    <h5 class="modal-title font-display">Action History</h5>
     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
 </div>
 <div class="modal-body">
@@ -20,7 +20,7 @@
             <tbody>
                 @if (Model.Remarks.Items.Count == 0)
                 {
-                    <tr><td colspan="5" class="text-center text-muted py-4">No remarks history found.</td></tr>
+                    <tr><td colspan="5" class="text-center text-muted py-4">No action history found.</td></tr>
                 }
                 else
                 {

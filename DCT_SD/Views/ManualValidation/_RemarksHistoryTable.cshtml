@@ -5,16 +5,16 @@
         <thead>
             <tr>
                 <th style="width: 2rem;">#</th>
-                <th>Updated Date and Time</th>
-                <th>Updated By</th>
+                <th>Date and Time</th>
+                <th>Performed By</th>
                 <th>Remarks</th>
-                <th>Action Performed</th>
+                <th>Action Taken</th>
             </tr>
         </thead>
         <tbody>
             @if (Model.Remarks.Items.Count == 0)
             {
-                <tr><td colspan="5" class="text-center text-muted py-4">No remarks history found.</td></tr>
+                <tr><td colspan="5" class="text-center text-muted py-4">No action history found.</td></tr>
             }
             else
             {
