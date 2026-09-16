@@ -168,7 +168,7 @@
                         <table class="table table-hover align-middle mb-0" style="table-layout: fixed;">
                             <thead>
                                 <tr>
-                                    <th style="width: 2.25rem;">#</th>
+                                    <th style="width: 3rem; white-space: nowrap; text-align: center;">#</th>
                                     <th>Image File Name</th>
                                     <th>Document Type</th>
                                 </tr>
@@ -178,7 +178,7 @@
                                 {
                                     var doc = Model.Documents[i];
                                     <tr role="button" data-doc-index="@i" class="@(i == 0 ? "table-active" : "")" style="cursor: pointer;">
-                                        <td class="small text-muted">@(i + 1)</td>
+                                        <td class="small text-muted text-center" style="white-space: nowrap;">@(i + 1)</td>
                                         <td class="small font-monospace text-break">@doc.RenamedFileName</td>
                                         <td class="small fw-medium text-break">@doc.DocumentName</td>
                                     </tr>

@@ -294,7 +294,8 @@
           row.classList.toggle('table-active', index === activeIndex);
 
           var idxTd = document.createElement('td');
-          idxTd.className = 'small';
+          idxTd.className = 'small text-center';
+          idxTd.style.whiteSpace = 'nowrap';
           idxTd.textContent = String(index + 1);
 
           var fileTd = document.createElement('td');
