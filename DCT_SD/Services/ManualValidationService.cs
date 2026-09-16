@@ -409,9 +409,14 @@ public class ManualValidationService : IManualValidationService
         {
             // Captured before ApplyDocumentTypeChange mutates `target` in place, so the audit
             // line below always identifies the document by its ORIGINAL file name and shows its
-            // ORIGINAL classification - never the values already being changed to.
+            // ORIGINAL classification - never the values already being changed to. originalImagePath
+            // is what identifies OTHER rows that reference this exact same physical file (see
+            // sibling-sync below) - a shared "Others" bucket file is common between sibling Title
+            // Records under the same Entry Number, since the OCR pipeline organizes files by RD
+            // Code + Entry Number, not per Title Record.
             var originalFileName = target.RenamedFileName;
             var originalDocumentName = target.DocumentName;
+            var originalImagePath = target.ImagePath;
 
             // Sequence numbers are scanned across every document in the group (allItemsFlat), not
             // just this document's own owning row, so two sibling rows reclassifying documents to
@@ -431,6 +436,38 @@ public class ManualValidationService : IManualValidationService
                 var descriptions = changeDescriptionsByRecordId.TryGetValue(recordId, out var list) ? list : changeDescriptionsByRecordId[recordId] = [];
                 descriptions.Add(
                     $"Supporting Document '{originalFileName}' - Document Type: Previous = '{FormatValueForHistory(originalDocumentName)}', Current = '{target.DocumentName}'");
+
+                // Propagate the same rename to every OTHER item across the group that referenced
+                // the exact same original ImagePath - i.e. a sibling Title Record's row pointing
+                // at the identical shared file. Without this, that sibling's entry keeps citing
+                // the old path (which no longer exists - the file was just physically moved), so
+                // it stops colliding with the target's new path on the next merge and resurfaces
+                // as a phantom duplicate document pointing at a broken/missing file.
+                if (!string.IsNullOrWhiteSpace(originalImagePath))
+                {
+                    foreach (var (siblingRecordId, siblingItems) in perRecordItems)
+                    {
+                        foreach (var siblingItem in siblingItems)
+                        {
+                            if (ReferenceEquals(siblingItem, target)
+                                || !string.Equals(siblingItem.ImagePath, originalImagePath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
+                            var siblingOriginalName = siblingItem.DocumentName;
+                            siblingItem.DocumentId = target.DocumentId;
+                            siblingItem.DocumentName = target.DocumentName;
+                            siblingItem.RenamedFileName = target.RenamedFileName;
+                            siblingItem.ImagePath = target.ImagePath;
+                            touchedRecordIds.Add(siblingRecordId);
+
+                            var siblingDescriptions = changeDescriptionsByRecordId.TryGetValue(siblingRecordId, out var sl) ? sl : changeDescriptionsByRecordId[siblingRecordId] = [];
+                            siblingDescriptions.Add(
+                                $"Supporting Document '{originalFileName}' - Document Type: Previous = '{FormatValueForHistory(siblingOriginalName)}', Current = '{target.DocumentName}' (shared document, also reclassified via another Title Record)");
+                        }
+                    }
+                }
             }
         }
 
