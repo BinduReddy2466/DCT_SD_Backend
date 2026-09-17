@@ -1,4 +1,5 @@
 using DCT_SD.Configuration;
+using DCT_SD.Helpers;
 using DCT_SD.Models;
 using DCT_SD.Models.Dtos.EmptyFolders;
 using DCT_SD.Models.Entities;
@@ -37,7 +38,7 @@ public class EmptyFolderService : IEmptyFolderService
 
         if (request.DateTo.HasValue)
         {
-            query = query.Where(r => r.FetchDateTime <= request.DateTo.Value);
+            query = query.Where(r => r.FetchDateTime < DateRangeFilter.EndOfDayExclusive(request.DateTo.Value));
         }
 
         var pageNumber = request.PageNumber < 1 ? 1 : request.PageNumber;

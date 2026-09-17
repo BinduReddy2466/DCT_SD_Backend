@@ -1,4 +1,5 @@
 using DCT_SD.Configuration;
+using DCT_SD.Helpers;
 using DCT_SD.Models;
 using DCT_SD.Models.Dtos.FailedExtraction;
 using DCT_SD.Models.Entities;
@@ -47,7 +48,7 @@ public class FailedExtractionService : IFailedExtractionService
 
         if (request.DateTo.HasValue)
         {
-            query = query.Where(r => r.ExtractionDateTime <= request.DateTo.Value);
+            query = query.Where(r => r.ExtractionDateTime < DateRangeFilter.EndOfDayExclusive(request.DateTo.Value));
         }
 
         var pageNumber = request.PageNumber < 1 ? 1 : request.PageNumber;

@@ -1,4 +1,5 @@
 using DCT_SD.Configuration;
+using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
 using DCT_SD.Models;
 using DCT_SD.Models.Dtos.Migrations;
@@ -58,7 +59,7 @@ public class MigrationService : IMigrationService
 
         if (request.DateTo.HasValue)
         {
-            query = query.Where(r => r.MigrationDate <= request.DateTo.Value);
+            query = query.Where(r => r.MigrationDate < DateRangeFilter.EndOfDayExclusive(request.DateTo.Value));
         }
 
         var pageNumber = request.PageNumber < 1 ? 1 : request.PageNumber;

@@ -64,7 +64,7 @@ public class UserService : IUserService
 
         if (request.DateTo.HasValue)
         {
-            query = query.Where(u => u.CreatedAt <= request.DateTo.Value);
+            query = query.Where(u => u.CreatedAt < DateRangeFilter.EndOfDayExclusive(request.DateTo.Value));
         }
 
         var pageNumber = request.PageNumber < 1 ? 1 : request.PageNumber;

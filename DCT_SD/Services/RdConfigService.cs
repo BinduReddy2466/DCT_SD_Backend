@@ -1,4 +1,5 @@
 using DCT_SD.Configuration;
+using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
 using DCT_SD.Models;
 using DCT_SD.Models.Dtos.RdConfig;
@@ -64,7 +65,7 @@ public class RdConfigService : IRdConfigService
 
         if (request.DateTo.HasValue)
         {
-            query = query.Where(h => h.StartedAt <= request.DateTo.Value);
+            query = query.Where(h => h.StartedAt < DateRangeFilter.EndOfDayExclusive(request.DateTo.Value));
         }
 
         if (!string.IsNullOrWhiteSpace(request.ModifiedBy))
@@ -222,7 +223,7 @@ public class RdConfigService : IRdConfigService
 
         if (request.DateTo.HasValue)
         {
-            query = query.Where(r => r.StartedAt <= request.DateTo.Value);
+            query = query.Where(r => r.StartedAt < DateRangeFilter.EndOfDayExclusive(request.DateTo.Value));
         }
 
         if (!string.IsNullOrWhiteSpace(request.ExecutedBy))

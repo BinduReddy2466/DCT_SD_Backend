@@ -68,7 +68,7 @@ public class ManualValidationService : IManualValidationService
 
         if (request.DateTo.HasValue)
         {
-            query = query.Where(r => r.ExtractionDate <= request.DateTo.Value);
+            query = query.Where(r => r.ExtractionDate < DateRangeFilter.EndOfDayExclusive(request.DateTo.Value));
         }
 
         // Every filter above still runs server-side exactly as before; only the grouping/paging
