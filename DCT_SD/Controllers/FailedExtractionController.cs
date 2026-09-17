@@ -55,21 +55,26 @@ public class FailedExtractionController : Controller
     // OcrExtractionRecords/ManualValidationRequests rows, but it does NOT go back and remove or
     // update the stale Failed row this app already wrote earlier - so this app must remove that
     // stale row itself whenever the response proves the retry actually succeeded.
+    //
+    // id is the FailedExtractionRecords row's own Id (the row actually displayed/clicked) -
+    // resolved below to that row's exact FolderPath, so the folder sent to the external service
+    // is always the one shown on screen. Everything past that first lookup is unchanged: still
+    // keyed on the corresponding OcrExtractionRecords row (by FolderPath), exactly as before.
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Reprocess(int id, CancellationToken cancellationToken)
     {
-        var record = await _failedExtractionService.GetByIdAsync(id, cancellationToken);
-        if (record is null)
+        var folderPath = await _failedExtractionService.GetFolderPathByIdAsync(id, cancellationToken);
+        if (folderPath is null)
         {
             return Json(new { success = false, message = "This record could not be found - it may have already been reprocessed or removed." });
         }
 
         try
         {
-            var response = await _rdFetchApiClient.ReprocessFailedExtractionAsync(record.FolderPath, _currentUserService.UserId, cancellationToken);
+            var response = await _rdFetchApiClient.ReprocessFailedExtractionAsync(folderPath, _currentUserService.UserId, cancellationToken);
 
-            var stillFailed = await _failedExtractionService.GetActiveFailedRecordByFolderPathAsync(record.FolderPath, cancellationToken);
+            var stillFailed = await _failedExtractionService.GetActiveFailedRecordByFolderPathAsync(folderPath, cancellationToken);
             if (stillFailed is null)
             {
                 return Json(new { success = true, message = "The folder was reprocessed successfully." });
@@ -95,9 +100,14 @@ public class FailedExtractionController : Controller
             // reprocess attempt already succeeded (e.g. a lost/timed-out response that the user
             // then retried). If a real, successful record already exists for this folder, that's
             // what actually happened - clean up the stale row instead of reporting a false failure.
-            if (await _failedExtractionService.HasSuccessfulRecordForFolderAsync(record.FolderPath, cancellationToken))
+            if (await _failedExtractionService.HasSuccessfulRecordForFolderAsync(folderPath, cancellationToken))
             {
-                await _failedExtractionService.RemoveFailedRecordAsync(id, cancellationToken);
+                var stillFailed = await _failedExtractionService.GetActiveFailedRecordByFolderPathAsync(folderPath, cancellationToken);
+                if (stillFailed is not null)
+                {
+                    await _failedExtractionService.RemoveFailedRecordAsync(stillFailed.Id, cancellationToken);
+                }
+
                 return Json(new { success = true, message = "The folder was reprocessed successfully." });
             }
 

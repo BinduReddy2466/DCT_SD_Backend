@@ -8,11 +8,15 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DCT_SD.Services;
 
-// Failed Extraction has no dedicated table of its own - it reads OcrExtractionRecords rows
-// where ExtractionStatus == Failed, with the failure reason attached via the existing generic
-// RecordHistory table (TableName="OcrExtractionRecords"), the same way Manual Validation
-// remarks are stored. No schema change; OcrExtractionRecord has no FolderName column either,
-// so it's derived from FolderPath.
+// The Failed Extraction LIST is read directly from the existing FailedExtractionRecords table
+// (populated externally by the OCR/fetch pipeline, mirroring OcrExtractionRecords/
+// EmptyFolderRecords - see FailedExtractionRecord.cs); each row's own Id is what the Reprocess
+// button now sends. Everything AFTER that first lookup (GetFolderPathByIdAsync) is unchanged
+// Reprocess business logic, still keyed on OcrExtractionRecords + RecordHistory exactly as
+// before (GetActiveFailedRecordByFolderPathAsync, UpdateFailureAsync, RemoveFailedRecordAsync,
+// HasSuccessfulRecordForFolderAsync, RecordFailureAsync) - resolving the FolderPath from the
+// actual displayed FailedExtractionRecords row up front just makes sure the folder the external
+// service is asked to retry is exactly the one shown on screen.
 public class FailedExtractionService : IFailedExtractionService
 {
     private const string RecordHistoryTableName = "OcrExtractionRecords";
@@ -26,8 +30,7 @@ public class FailedExtractionService : IFailedExtractionService
 
     public async Task<PagedResult<FailedExtractionListItemDto>> SearchAsync(FailedExtractionSearchRequestDto request, CancellationToken cancellationToken = default)
     {
-        var query = _context.OcrExtractionRecords.AsNoTracking()
-            .Where(r => r.ExtractionStatus == OcrExtractionStatus.Failed);
+        var query = _context.FailedExtractionRecords.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.Rd))
         {
@@ -61,11 +64,9 @@ public class FailedExtractionService : IFailedExtractionService
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
-        var reasonsById = await GetLatestFailureReasonsAsync(records.Select(r => r.Id), cancellationToken);
-
         return new PagedResult<FailedExtractionListItemDto>
         {
-            Items = records.Select(r => MapToListItem(r, reasonsById.GetValueOrDefault(r.Id, string.Empty))).ToArray(),
+            Items = records.Select(MapToListItem).ToArray(),
             TotalCount = totalCount,
             PageNumber = pageNumber,
             PageSize = pageSize,
@@ -73,7 +74,13 @@ public class FailedExtractionService : IFailedExtractionService
     }
 
     public Task<bool> AnyRecordsExistAsync(CancellationToken cancellationToken = default) =>
-        _context.OcrExtractionRecords.AsNoTracking().AnyAsync(r => r.ExtractionStatus == OcrExtractionStatus.Failed, cancellationToken);
+        _context.FailedExtractionRecords.AsNoTracking().AnyAsync(cancellationToken);
+
+    public Task<string?> GetFolderPathByIdAsync(int id, CancellationToken cancellationToken = default) =>
+        _context.FailedExtractionRecords.AsNoTracking()
+            .Where(r => r.Id == id)
+            .Select(r => (string?)r.FolderPath)
+            .FirstOrDefaultAsync(cancellationToken);
 
     public async Task RecordFailureAsync(string requestNumber, string? rdCode, string? rdName, string folderPath, string failureReason, DateTime extractionDateTime, int? fetchRunId = null, CancellationToken cancellationToken = default)
     {
@@ -214,6 +221,8 @@ public class FailedExtractionService : IFailedExtractionService
             .ToDictionary(g => g.Key, g => g.First().Remarks ?? string.Empty);
     }
 
+    // Used only by GetByIdAsync/GetActiveFailedRecordByFolderPathAsync - the Reprocess-support
+    // reads that still work off OcrExtractionRecords, unchanged.
     private static FailedExtractionListItemDto MapToListItem(OcrExtractionRecord r, string failureReason) => new()
     {
         Id = r.Id,
@@ -223,6 +232,20 @@ public class FailedExtractionService : IFailedExtractionService
         FolderName = ExtractFolderName(r.FolderPath),
         FolderPath = r.FolderPath,
         FailureReason = failureReason,
+    };
+
+    // Used by SearchAsync - the list display, read directly from FailedExtractionRecords. Id is
+    // this row's own FailedExtractionRecords.Id, which the Reprocess button now sends;
+    // GetFolderPathByIdAsync resolves it back to this same row's FolderPath when clicked.
+    private static FailedExtractionListItemDto MapToListItem(FailedExtractionRecord r) => new()
+    {
+        Id = r.Id,
+        ExtractionDateTime = r.ExtractionDateTime,
+        RdCode = r.RdCode,
+        RdName = r.RdName,
+        FolderName = r.FolderName,
+        FolderPath = r.FolderPath,
+        FailureReason = r.FailureReason,
     };
 
     private static string ExtractFolderName(string folderPath)

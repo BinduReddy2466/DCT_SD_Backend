@@ -22,6 +22,13 @@ public interface IFailedExtractionService
     // Failed (e.g. already reprocessed by someone else).
     Task<FailedExtractionListItemDto?> GetByIdAsync(int id, CancellationToken cancellationToken = default);
 
+    // The FolderPath of a FailedExtractionRecords row by its own Id - this is what the Reprocess
+    // action now resolves first, since the FailedExtractionRecords row is the one actually
+    // displayed/clicked in the UI. Everything downstream of that (checking/updating/removing the
+    // corresponding OcrExtractionRecords row) still works exactly as before, keyed by the
+    // FolderPath this returns. Null if the id doesn't exist.
+    Task<string?> GetFolderPathByIdAsync(int id, CancellationToken cancellationToken = default);
+
     // The current still-Failed record (if any) for an exact FolderPath - used by the Reprocess
     // action after calling the external service to determine, from this app's own data rather
     // than the API response's free-text "status", whether that folder is still failing.

@@ -24,6 +24,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<MigrationRecord> MigrationRecords => Set<MigrationRecord>();
     public DbSet<MigrationDocument> MigrationDocuments => Set<MigrationDocument>();
     public DbSet<EmptyFolderRecord> EmptyFolderRecords => Set<EmptyFolderRecord>();
+    public DbSet<FailedExtractionRecord> FailedExtractionRecords => Set<FailedExtractionRecord>();
     public DbSet<CodeLookup> CodeLookups => Set<CodeLookup>();
     public DbSet<AppSetting> AppSettings => Set<AppSetting>();
     public DbSet<RecordHistory> RecordHistory => Set<RecordHistory>();
