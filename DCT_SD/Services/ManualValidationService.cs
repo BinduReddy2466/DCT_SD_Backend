@@ -408,65 +408,81 @@ public class ManualValidationService : IManualValidationService
 
         foreach (var (recordId, target, change) in targets)
         {
-            // Captured before ApplyDocumentTypeChange mutates `target` in place, so the audit
-            // line below always identifies the document by its ORIGINAL file name and shows its
-            // ORIGINAL classification - never the values already being changed to. originalImagePath
-            // is what identifies OTHER rows that reference this exact same physical file (see
-            // sibling-sync below) - a shared "Others" bucket file is common between sibling Title
-            // Records under the same Entry Number, since the OCR pipeline organizes files by RD
-            // Code + Entry Number, not per Title Record.
-            var originalFileName = target.RenamedFileName;
-            var originalDocumentName = target.DocumentName;
-            var originalImagePath = target.ImagePath;
+            var originalIdentityKey = DocumentIdentityKey(target);
 
-            // Sequence numbers are scanned across every document in the group (allItemsFlat), not
-            // just this document's own owning row, so two sibling rows reclassifying documents to
-            // the same Document Type in one Save never collide on the same sequence number.
-            var rollback = ApplyDocumentTypeChange(allItemsFlat, target, change.Code.Trim(), change.Name.Trim());
-            if (rollback is { } r)
+            // Every item across the WHOLE group that shares this document's identity
+            // (DocumentIdentityKey - RD Code/Entry Folder/Document Type Folder/File Name, so this
+            // also catches the same document re-extracted into a different Root Source Path
+            // folder on another fetch run, not just a byte-identical ImagePath) - always includes
+            // `target` itself. Grouped by each item's ORIGINAL absolute ImagePath (captured now,
+            // before any renames below): a physical rename only ever needs to happen ONCE per
+            // distinct physical file. Two rows from the SAME fetch run commonly cite the literal
+            // same file (e.g. a shared "Others" bucket file, which is why `target` can itself
+            // share its original path with another member) - renaming that file a second time
+            // would fail (it's already been moved by the first rename), so only ONE member per
+            // path group is actually renamed (preferring `target`'s own row when it's a member of
+            // that group, so the plain, unsuffixed audit line still lands on the row the user
+            // directly edited); every other member in that same group just gets its fields copied
+            // from whichever one was actually renamed.
+            var allMatching = perRecordItems
+                .SelectMany(x => x.Items.Select(item => (RecordId: x.RecordId, Item: item)))
+                .Where(x => ReferenceEquals(x.Item, target) || string.Equals(DocumentIdentityKey(x.Item), originalIdentityKey, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            foreach (var pathGroup in allMatching.GroupBy(x => x.Item.ImagePath ?? string.Empty, StringComparer.OrdinalIgnoreCase))
             {
-                rollbacks.Add(r);
-            }
-
-            // ApplyDocumentTypeChange leaves `target` untouched (documentName included) when
-            // there was nothing to apply (e.g. a missing ImagePath) - comparing before/after here
-            // is the simplest way to only record documents that were actually reclassified.
-            if (!string.Equals(target.DocumentName, originalDocumentName, StringComparison.Ordinal))
-            {
-                touchedRecordIds.Add(recordId);
-                var descriptions = changeDescriptionsByRecordId.TryGetValue(recordId, out var list) ? list : changeDescriptionsByRecordId[recordId] = [];
-                descriptions.Add(
-                    $"Supporting Document '{originalFileName}' - Document Type: Previous = '{FormatValueForHistory(originalDocumentName)}', Current = '{target.DocumentName}'");
-
-                // Propagate the same rename to every OTHER item across the group that referenced
-                // the exact same original ImagePath - i.e. a sibling Title Record's row pointing
-                // at the identical shared file. Without this, that sibling's entry keeps citing
-                // the old path (which no longer exists - the file was just physically moved), so
-                // it stops colliding with the target's new path on the next merge and resurfaces
-                // as a phantom duplicate document pointing at a broken/missing file.
-                if (!string.IsNullOrWhiteSpace(originalImagePath))
+                var members = pathGroup.ToList();
+                var renameIndex = members.FindIndex(x => ReferenceEquals(x.Item, target));
+                if (renameIndex < 0)
                 {
-                    foreach (var (siblingRecordId, siblingItems) in perRecordItems)
+                    renameIndex = 0;
+                }
+
+                var renamedItem = members[renameIndex].Item;
+                // Captured before ApplyDocumentTypeChange mutates `renamedItem` in place, so the
+                // audit line below always identifies the document by its ORIGINAL file name and
+                // shows its ORIGINAL classification - never the values already being changed to.
+                var groupOriginalFileName = renamedItem.RenamedFileName;
+                var groupOriginalName = renamedItem.DocumentName;
+
+                // Sequence numbers are scanned across every document in the group (allItemsFlat),
+                // not just this document's own owning row, so two genuinely different physical
+                // files reclassified to the same Document Type in one Save never collide on the
+                // same sequence number.
+                var groupRollback = ApplyDocumentTypeChange(allItemsFlat, renamedItem, change.Code.Trim(), change.Name.Trim());
+                if (groupRollback is { } gr)
+                {
+                    rollbacks.Add(gr);
+                }
+
+                // ApplyDocumentTypeChange leaves `renamedItem` untouched (documentName included)
+                // when there was nothing to apply (e.g. a missing ImagePath) - comparing
+                // before/after here is the simplest way to only record documents that were
+                // actually reclassified.
+                if (!string.Equals(renamedItem.DocumentName, groupOriginalName, StringComparison.Ordinal))
+                {
+                    for (var i = 0; i < members.Count; i++)
                     {
-                        foreach (var siblingItem in siblingItems)
+                        if (i == renameIndex)
                         {
-                            if (ReferenceEquals(siblingItem, target)
-                                || !string.Equals(siblingItem.ImagePath, originalImagePath, StringComparison.OrdinalIgnoreCase))
-                            {
-                                continue;
-                            }
-
-                            var siblingOriginalName = siblingItem.DocumentName;
-                            siblingItem.DocumentId = target.DocumentId;
-                            siblingItem.DocumentName = target.DocumentName;
-                            siblingItem.RenamedFileName = target.RenamedFileName;
-                            siblingItem.ImagePath = target.ImagePath;
-                            touchedRecordIds.Add(siblingRecordId);
-
-                            var siblingDescriptions = changeDescriptionsByRecordId.TryGetValue(siblingRecordId, out var sl) ? sl : changeDescriptionsByRecordId[siblingRecordId] = [];
-                            siblingDescriptions.Add(
-                                $"Supporting Document '{originalFileName}' - Document Type: Previous = '{FormatValueForHistory(siblingOriginalName)}', Current = '{target.DocumentName}' (shared document, also reclassified via another Title Record)");
+                            continue;
                         }
+
+                        var dupItem = members[i].Item;
+                        dupItem.DocumentId = renamedItem.DocumentId;
+                        dupItem.DocumentName = renamedItem.DocumentName;
+                        dupItem.RenamedFileName = renamedItem.RenamedFileName;
+                        dupItem.ImagePath = renamedItem.ImagePath;
+                        dupItem.DocumentTypeCode = renamedItem.DocumentTypeCode;
+                    }
+
+                    foreach (var (memberRecordId, memberItem) in members)
+                    {
+                        touchedRecordIds.Add(memberRecordId);
+                        var descriptions = changeDescriptionsByRecordId.TryGetValue(memberRecordId, out var list) ? list : changeDescriptionsByRecordId[memberRecordId] = [];
+                        var suffix = ReferenceEquals(memberItem, target) ? string.Empty : " (same document, also reclassified via another Title Record)";
+                        descriptions.Add(
+                            $"Supporting Document '{groupOriginalFileName}' - Document Type: Previous = '{FormatValueForHistory(groupOriginalName)}', Current = '{renamedItem.DocumentName}'{suffix}");
                     }
                 }
             }
@@ -509,7 +525,7 @@ public class ManualValidationService : IManualValidationService
 
         var directory = Path.GetDirectoryName(target.ImagePath)!;
         var extension = Path.GetExtension(target.ImagePath);
-        var sequence = NextDocumentSequenceNumber(items, newCode, newName);
+        var sequence = NextDocumentSequenceNumber(items, directory, newCode, newName);
         var newFileName = $"{SanitizeForFileName(newCode)}_{SanitizeForFileName(newName)}_{sequence}{extension}";
         var newPath = Path.Combine(directory, newFileName);
 
@@ -525,16 +541,45 @@ public class ManualValidationService : IManualValidationService
         target.RenamedFileName = newFileName;
         target.ImagePath = newPath;
 
+        // Permanent "this document was corrected from Others" marker, so it stays correctable
+        // through this same dropdown even after being reclassified and saved - if the user picks
+        // the wrong type, they can still fix it later without needing to go back to "Others"
+        // first (which is no longer possible once it's been renamed away from it). Reuses
+        // documentTypeCode - already part of DocumentsJson's shape but never otherwise populated
+        // or read by this app - rather than adding a new field. See IsOthersEligible.
+        target.DocumentTypeCode = "OTHERS";
+
         return rollback;
     }
 
+    // A document is correctable through the Document Type dropdown when it's still "OTHERS"
+    // (needs its first correction) or was ever corrected from "OTHERS" in the past (marked via
+    // DocumentTypeCode - see ApplyDocumentTypeChange) - never for a document that was extracted
+    // as a real type directly and has never been "OTHERS".
+    private static bool IsOthersEligible(DocumentJsonItem item) =>
+        string.Equals(item.DocumentId, "OTHERS", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(item.DocumentTypeCode, "OTHERS", StringComparison.OrdinalIgnoreCase);
+
     // Scans this record's existing supporting documents for ones already classified under the
-    // exact same Document ID + Document Name, extracts the trailing "_<number>" sequence from
-    // their renamedFileName (matching "<DocumentID>_<DocumentName>_<N>.<extension>"), and
-    // returns the highest one found, plus 1 - or 1 if none match. Gaps are preserved on purpose
-    // (existing _1 and _4 -> next is _5, not _2) since this always takes the true maximum, never
-    // the first free slot.
-    private static int NextDocumentSequenceNumber(List<DocumentJsonItem> items, string code, string name)
+    // exact same Document ID + Document Name AND actually sitting in the SAME physical folder as
+    // the file about to be renamed, extracts the trailing "_<number>" sequence from their
+    // renamedFileName (matching "<DocumentID>_<DocumentName>_<N>.<extension>"), and returns the
+    // highest one found, plus 1 - or 1 if none match. Gaps are preserved on purpose (existing _1
+    // and _4 -> next is _5, not _2) since this always takes the true maximum, never the first
+    // free slot.
+    //
+    // Deliberately scoped to `directory` rather than every document in the group: a rename can
+    // only ever collide with a file that's actually going to sit alongside it (File.Move only
+    // fails if the destination path itself is taken), and two cross-fetch-run copies of the same
+    // logical document (see DocumentIdentityKey) live in two entirely different folders, so they
+    // can never collide with each other. Scanning the whole group used to assign them different
+    // sequence numbers purely because they shared a Document ID/Name globally - which then changed
+    // their DocumentIdentityKey (the file name is part of it) so they stopped matching each other
+    // and a document that was combined into one Supporting Documents row before the rename would
+    // incorrectly split into two rows after it. Scoping to the shared folder lets two such copies
+    // both land on the same number (e.g. both "_1"), which keeps their identity keys equal and the
+    // row combined, exactly as it was before the correction.
+    private static int NextDocumentSequenceNumber(List<DocumentJsonItem> items, string directory, string code, string name)
     {
         var pattern = new Regex("^" + Regex.Escape(SanitizeForFileName(code)) + "_" + Regex.Escape(SanitizeForFileName(name)) + @"_(\d+)\.[^.]+$", RegexOptions.IgnoreCase);
         var max = 0;
@@ -542,6 +587,12 @@ public class ManualValidationService : IManualValidationService
         {
             if (!string.Equals(item.DocumentId, code, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(item.DocumentName, name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(item.ImagePath)
+                || !string.Equals(Path.GetDirectoryName(item.ImagePath), directory, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -895,6 +946,7 @@ public class ManualValidationService : IManualValidationService
                 DocumentId = d.Item.DocumentId,
                 DocumentName = d.Item.DocumentName,
                 RenamedFileName = d.Item.RenamedFileName,
+                CanChangeDocumentType = IsOthersEligible(d.Item),
             }).ToArray(),
         };
     }
@@ -916,12 +968,18 @@ public class ManualValidationService : IManualValidationService
     // GetDocumentImagePathAsync (image lookup), MapToDetail (client-facing list) and
     // ApplyDocumentTypeChanges (Save) all agree on what a given 1-based position means.
     //
-    // Duplicate identity is the physical image file - ImagePath (falling back to RenamedFileName
-    // only on the rare row where ImagePath is blank) - never DocumentId+DocumentName. Two
-    // documents filed under the exact same Document ID and Document Name but pointing at two
-    // different image files (e.g. "..._1.jpg" and "..._2.jpg") are two different images and both
-    // survive; two rows that happen to reference the literal same imagePath collapse to one entry,
-    // keeping the first occurrence (the earliest/lowest-Id row - "Title Record 1").
+    // Duplicate identity is the document's path RELATIVE to whatever the Root Source Path was at
+    // the time it was extracted - RD Code / Entry Folder / Document Type Folder / File Name (the
+    // last 4 segments of ImagePath) - not the full absolute ImagePath, and never
+    // DocumentId+DocumentName alone. The Root Source Path itself commonly changes between fetch
+    // runs (a fresh folder each time - confirmed against real data, e.g. ".../copy 22/..." vs
+    // ".../copy 33/..."), so two rows genuinely extracted from the same RD/Entry/Document Type
+    // folder in different fetch runs would otherwise never collide on the full path and would
+    // incorrectly show as two separate documents with identical-looking names. Two documents
+    // filed under the exact same Document ID and Document Name but with a different relative path
+    // (e.g. "..._1.jpg" and "..._2.jpg" in the same folder) are still two different images and
+    // both survive; two rows that share the same relative identity collapse to one entry, keeping
+    // the first occurrence (the earliest/lowest-Id row - "Title Record 1").
     //
     // Sorted ascending by Image File Name (renamedFileName) - the sole sort key, per the
     // acceptance criteria ("sort the supporting document images in ascending order by Image File
@@ -937,7 +995,7 @@ public class ManualValidationService : IManualValidationService
         {
             foreach (var item in items)
             {
-                var key = !string.IsNullOrWhiteSpace(item.ImagePath) ? item.ImagePath!.Trim() : item.RenamedFileName;
+                var key = DocumentIdentityKey(item);
                 if (string.IsNullOrWhiteSpace(key) || seenKeys.Add(key))
                 {
                     combined.Add((recordId, item));
@@ -948,6 +1006,21 @@ public class ManualValidationService : IManualValidationService
         return combined
             .OrderBy(x => x.Item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    // The last 4 path segments of ImagePath (RD Code / Entry Folder / Document Type Folder /
+    // File Name) - stable across a re-fetch into a new Root Source Path folder, unlike the full
+    // absolute path. Falls back to the full ImagePath, then RenamedFileName, when there aren't at
+    // least 4 segments to work with (kept safe rather than throwing on an unexpected shape).
+    private static string DocumentIdentityKey(DocumentJsonItem item)
+    {
+        if (string.IsNullOrWhiteSpace(item.ImagePath))
+        {
+            return item.RenamedFileName ?? string.Empty;
+        }
+
+        var segments = item.ImagePath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length >= 4 ? string.Join('/', segments[^4..]) : item.ImagePath.Trim();
     }
 
     public async Task<string?> GetDocumentImagePathAsync(int id, int documentId, CancellationToken cancellationToken = default)

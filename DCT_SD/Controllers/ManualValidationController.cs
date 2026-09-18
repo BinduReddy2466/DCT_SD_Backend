@@ -15,12 +15,14 @@ public class ManualValidationController : Controller
     private readonly IManualValidationService _manualValidationService;
     private readonly IRegistryOfficeService _registryOfficeService;
     private readonly IDocumentTypeService _documentTypeService;
+    private readonly ILogger<ManualValidationController> _logger;
 
-    public ManualValidationController(IManualValidationService manualValidationService, IRegistryOfficeService registryOfficeService, IDocumentTypeService documentTypeService)
+    public ManualValidationController(IManualValidationService manualValidationService, IRegistryOfficeService registryOfficeService, IDocumentTypeService documentTypeService, ILogger<ManualValidationController> logger)
     {
         _manualValidationService = manualValidationService;
         _registryOfficeService = registryOfficeService;
         _documentTypeService = documentTypeService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -121,6 +123,20 @@ public class ManualValidationController : Controller
         catch (Exception ex) when (ex is NotFoundException or ForbiddenAppException or BusinessValidationException)
         {
             return Json(new { success = false, message = ex.Message });
+        }
+        // A Document Type correction renames a physical file on disk (see
+        // ManualValidationService.ApplyDocumentTypeChange) - unlike the exceptions above, a file
+        // system failure here (e.g. the destination file already exists, or the file is locked/
+        // permission-denied) isn't a BusinessValidationException, so without this it would fall
+        // through to the app's generic HTML error page instead of JSON, which the client's
+        // fetch(...).then(r => r.json()) can't parse - the Save silently appears to do nothing at
+        // all in the browser, with no toast and no indication of what happened. Caught here so the
+        // user always gets an explicit error message instead of silence, while the full exception
+        // is still logged for diagnosis.
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(ex, "Manual Validation Save failed for record {RecordId} due to a file system error.", id);
+            return Json(new { success = false, message = "Unable to save changes because a supporting document file could not be renamed on disk. Please try again, and contact support if this keeps happening." });
         }
     }
 

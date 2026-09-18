@@ -192,7 +192,6 @@
       var filenameEl = container.querySelector('[data-viewer-filename]');
       var listEl = document.getElementById('mvDocumentList');
       var docTypeText = document.getElementById('mvDocTypeText');
-      var docTypeSelect = document.getElementById('mvDocTypeSelect');
       var activeIndex = 0;
 
       // Zero or more pending "Others" -> real Document Type corrections, keyed by doc.id (one at
@@ -200,16 +199,6 @@
       // choice). Never sent to the server except as part of Save itself; cleared entirely on a
       // successful save or on discard. { [docId]: { code, name } }
       var pendingChanges = {};
-
-      if (docTypeSelect) {
-        documentTypes.forEach(function (t) {
-          var opt = document.createElement('option');
-          opt.value = t.code;
-          opt.textContent = t.name;
-          opt.setAttribute('data-name', t.name);
-          docTypeSelect.appendChild(opt);
-        });
-      }
 
       function effectiveDocumentName(doc) {
         var p = pendingChanges[doc.id];
@@ -281,8 +270,16 @@
       }
 
       // Rebuilds the Supporting Documents table (never raw HTML from doc data - built via
-      // textContent) so a pending correction's preview name, and any Save-time reshuffle from
-      // renaming (the list is sorted by Image File Name), are both reflected without a page reload.
+      // textContent/DOM APIs) so a pending correction's preview name, and any Save-time reshuffle
+      // from renaming (the list is sorted by Image File Name), are both reflected without a page
+      // reload. The Document Type cell is the CodeLookups-backed dropdown itself, inline, when the
+      // SERVER says this document can still have its Document Type changed
+      // (canChangeDocumentType - true for a document that's still "Others" needing its first
+      // correction, or one that was ever corrected from "Others" in the past, so a wrong pick can
+      // still be fixed later, even after Save) - plain read-only text otherwise. The dropdown
+      // defaults to this document's actual current type (doc.documentId) so its real value stays
+      // visible at a glance, unless a pending change is already selected for it, or it's still
+      // "OTHERS" and has never had a real type - both cases fall back to the "Select" placeholder.
       function renderDocumentList() {
         if (!listEl) return;
         listEl.innerHTML = '';
@@ -304,7 +301,52 @@
 
           var nameTd = document.createElement('td');
           nameTd.className = 'small fw-medium';
-          nameTd.textContent = effectiveDocumentName(doc);
+          if (doc.canChangeDocumentType) {
+            var wrapper = document.createElement('div');
+            wrapper.className = 'd-flex align-items-center gap-1 flex-wrap';
+
+            var select = document.createElement('select');
+            select.className = 'form-select form-select-sm';
+            select.style.maxWidth = '220px';
+            select.setAttribute('data-doc-type-select', '');
+            select.setAttribute('data-doc-index', String(index));
+
+            var placeholderOpt = document.createElement('option');
+            placeholderOpt.value = '';
+            placeholderOpt.textContent = 'Select';
+            select.appendChild(placeholderOpt);
+
+            documentTypes.forEach(function (t) {
+              var opt = document.createElement('option');
+              opt.value = t.code;
+              opt.textContent = t.name;
+              opt.setAttribute('data-name', t.name);
+              select.appendChild(opt);
+            });
+
+            var pending = pendingChanges[doc.id];
+            var currentCode = doc.documentId && doc.documentId.toUpperCase() !== 'OTHERS' ? doc.documentId : '';
+            select.value = pending ? pending.code : currentCode;
+            wrapper.appendChild(select);
+
+            // Marks WHICH row is the editable one, independent of what type name it currently
+            // shows - without this, a document that was corrected from "Others" to a real type
+            // that another, unrelated document already has natively is visually indistinguishable
+            // from that unrelated document except for the dropdown itself, which reads as "the
+            // dropdown is showing on the wrong row" rather than "this specific document is still
+            // correctable because it was once Others."
+            var badge = document.createElement('span');
+            badge.className = 'badge rounded-pill text-bg-secondary';
+            badge.style.fontSize = '0.65rem';
+            badge.style.fontWeight = '500';
+            badge.textContent = 'Was Others';
+            badge.title = 'This document was originally classified as "Others". It can still have its Document Type corrected here, even after being reclassified - other documents of the same type are not affected.';
+            wrapper.appendChild(badge);
+
+            nameTd.appendChild(wrapper);
+          } else {
+            nameTd.textContent = effectiveDocumentName(doc);
+          }
 
           row.appendChild(idxTd);
           row.appendChild(fileTd);
@@ -313,24 +355,13 @@
         });
       }
 
-      // Shows the read-only Document Type text for anything already classified, or the
-      // CodeLookups-backed dropdown when the document's ORIGINAL (persisted) Document Type is
-      // "Others" - per the acceptance criteria, only Others documents are ever correctable.
-      // Deliberately checks doc.documentId, not the pending selection: once the user picks a
-      // type, that pick must stay changeable (re-pick as many times as they like) right up until
-      // Save, rather than locking the dropdown the moment a non-Others type is chosen.
+      // The Image Viewer's own Document Type label just mirrors whichever document is currently
+      // shown - always read-only there now that the editable control lives inline in the
+      // Supporting Documents table (see renderDocumentList).
       function updateDocTypeControls() {
         var doc = documents[activeIndex];
-        var isOthers = (doc.documentId || '').toUpperCase() === 'OTHERS';
-
         if (docTypeText) {
           docTypeText.textContent = effectiveDocumentName(doc);
-          docTypeText.classList.toggle('d-none', isOthers);
-        }
-        if (docTypeSelect) {
-          docTypeSelect.classList.toggle('d-none', !isOthers);
-          var p = pendingChanges[doc.id];
-          docTypeSelect.value = p ? p.code : '';
         }
       }
 
@@ -344,25 +375,6 @@
           return { index: id, code: p.code, name: p.name };
         });
         document.getElementById('mvDocumentChangesJson').value = arr.length ? JSON.stringify(arr) : '';
-      }
-
-      if (docTypeSelect) {
-        docTypeSelect.addEventListener('change', function () {
-          var doc = documents[activeIndex];
-          var code = docTypeSelect.value;
-          if (!code) {
-            delete pendingChanges[doc.id];
-          } else {
-            var opt = docTypeSelect.options[docTypeSelect.selectedIndex];
-            pendingChanges[doc.id] = { code: code, name: opt.getAttribute('data-name') || opt.textContent };
-          }
-          syncPendingChangesField();
-          renderDocumentList();
-          updateDocTypeControls();
-          // Update just the filename label - not a full viewer.load(), which would reset
-          // zoom/rotation/pan for no reason since the image itself hasn't changed.
-          if (filenameEl) filenameEl.textContent = effectiveFileName(documents[activeIndex]);
-        });
       }
 
       function renderDoc() {
@@ -427,11 +439,40 @@
           if (!item) return;
           selectDoc(Number(item.getAttribute('data-doc-index')));
         });
+
+        // Inline Document Type dropdown, one per eligible row (see renderDocumentList) - handled
+        // via delegation since the row/select elements are rebuilt on every render. The click
+        // handler above still also fires for a click landing on the select (selecting that row's
+        // document into the Image Viewer), which is harmless and lets the user see the image
+        // they're reclassifying without an extra click.
+        listEl.addEventListener('change', function (e) {
+          var select = e.target.closest('[data-doc-type-select]');
+          if (!select) return;
+
+          var index = Number(select.getAttribute('data-doc-index'));
+          var doc = documents[index];
+          var code = select.value;
+          if (!code) {
+            delete pendingChanges[doc.id];
+          } else {
+            var opt = select.options[select.selectedIndex];
+            pendingChanges[doc.id] = { code: code, name: opt.getAttribute('data-name') || opt.textContent };
+          }
+          syncPendingChangesField();
+          renderDocumentList();
+          if (index === activeIndex) {
+            updateDocTypeControls();
+            // Update just the filename label - not a full viewer.load(), which would reset
+            // zoom/rotation/pan for no reason since the image itself hasn't changed.
+            if (filenameEl) filenameEl.textContent = effectiveFileName(documents[activeIndex]);
+          }
+        });
       }
 
       container.addEventListener('docviewer:prev', function () { selectDoc(activeIndex - 1); });
       container.addEventListener('docviewer:next', function () { selectDoc(activeIndex + 1); });
 
+      renderDocumentList();
       renderDoc();
     }
 
@@ -461,7 +502,18 @@
 
       var formData = new FormData(form);
       return fetch('/ManualValidation/Save/' + recordId, { method: 'POST', body: formData })
-        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          // The server only ever returns JSON from this endpoint for the outcomes it expects
+          // (success, or a recognized business/file-system failure - see ManualValidationController.
+          // Save); anything else (an unhandled exception, a network-level failure) falls back to
+          // the app's generic HTML error page or an empty body, which r.json() can't parse - without
+          // checking r.ok/content-type first, that parse failure used to reject this promise with no
+          // .catch() anywhere in the chain, so Save would silently do nothing at all in the browser.
+          if (!r.ok) {
+            throw new Error('Save request failed with status ' + r.status);
+          }
+          return r.json();
+        })
         .then(function (data) {
           if (!data.success) {
             toast(data.message || 'Unable to save changes.', 'error');
@@ -479,6 +531,12 @@
           if (!silent) toast('Saved Successfully.', 'success');
           loadRemarks(1);
           return true;
+        })
+        .catch(function (err) {
+          toast('Unable to save changes. Please try again.', 'error');
+          if (typeof revertPendingDocumentChange === 'function') revertPendingDocumentChange();
+          if (window.console) console.error('Manual Validation Save failed', err);
+          return false;
         });
     }
 
