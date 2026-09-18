@@ -254,11 +254,12 @@ public class ManualValidationService : IManualValidationService
             AddFieldChange(changes, $"{label} - Title Sequence", originalTitleSequence, r.TitleSequence);
         }
 
+        var displayName = await _currentUserService.GetDisplayNameAsync(cancellationToken);
         foreach (var r in group)
         {
             r.MissingFieldsCsv = string.Join(',', ComputeMissingFields(r));
             r.UpdatedByUserId = _currentUserService.UserId;
-            r.UpdatedByUsername = _currentUserService.Username;
+            r.UpdatedByUsername = displayName;
             r.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -310,7 +311,7 @@ public class ManualValidationService : IManualValidationService
                     Action = RemarkAction.Saved.ToString(),
                     Remarks = BuildChangeRemarks(changes),
                     ByUserId = _currentUserService.UserId,
-                    ByUsername = _currentUserService.Username ?? "system",
+                    ByUsername = displayName ?? "system",
                     CreatedAt = DateTime.UtcNow,
                 });
             }
@@ -581,8 +582,9 @@ public class ManualValidationService : IManualValidationService
         // must update Updated By/Date the same way SaveAsync does - otherwise a record closed
         // without ever going through the separate Save button keeps showing whatever (possibly
         // stale, possibly never-set) values it had before.
+        var displayName = await _currentUserService.GetDisplayNameAsync(cancellationToken);
         record.UpdatedByUserId = _currentUserService.UserId;
-        record.UpdatedByUsername = _currentUserService.Username;
+        record.UpdatedByUsername = displayName;
         record.UpdatedAt = DateTime.UtcNow;
 
         // Closing releases the "opened for edit" lock (OpenForEditAsync sets it on every Details
@@ -601,7 +603,7 @@ public class ManualValidationService : IManualValidationService
             Action = RemarkAction.Closed.ToString(),
             Remarks = remarks.Trim(),
             ByUserId = _currentUserService.UserId,
-            ByUsername = _currentUserService.Username ?? "system",
+            ByUsername = displayName ?? "system",
             CreatedAt = DateTime.UtcNow,
         });
 
@@ -657,8 +659,9 @@ public class ManualValidationService : IManualValidationService
 
         var originalStatus = record.Status;
         record.Status = ManualValidationStatus.ReadyForMigration;
+        var displayName = await _currentUserService.GetDisplayNameAsync(cancellationToken);
         record.UpdatedByUserId = _currentUserService.UserId;
-        record.UpdatedByUsername = _currentUserService.Username;
+        record.UpdatedByUsername = displayName;
         record.UpdatedAt = DateTime.UtcNow;
 
         // Action History entry via the existing RecordHistory mechanism - no new table/column.
@@ -673,7 +676,7 @@ public class ManualValidationService : IManualValidationService
             Action = "Ready for Migration",
             Remarks = $"Status: Previous = '{FormatValueForHistory(StatusDisplay.ManualValidationStatusToDisplay(originalStatus.ToString()))}', Current = 'Ready for Migration'",
             ByUserId = _currentUserService.UserId,
-            ByUsername = _currentUserService.Username ?? "system",
+            ByUsername = displayName ?? "system",
             CreatedAt = DateTime.UtcNow,
         });
 
