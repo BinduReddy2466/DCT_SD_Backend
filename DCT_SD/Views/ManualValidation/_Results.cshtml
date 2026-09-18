@@ -7,7 +7,7 @@
             <tr>
                 <th>RD Code</th>
                 <th>RD Name</th>
-                <th>Entry Number</th>
+                <th class="cell-wrap">Entry Number</th>
                 <th>Extraction Status</th>
                 <th>Extraction Date and Time</th>
                 <th>Updated By</th>
@@ -27,7 +27,7 @@
                     <tr>
                         <td class="font-monospace small">@(item.RdCode ?? "—")</td>
                         <td>@(item.RdName ?? "—")</td>
-                        <td>@(item.EntryNumbersCsv ?? "—")</td>
+                        <td class="cell-wrap">@(item.EntryNumbersCsv ?? "—")</td>
                         @* Acceptance criteria requires the Extraction Status cell to read exactly
                            "Incomplete Extraction." (trailing period) - applied here, display-only.
                            The shared StatusDisplay map is intentionally left unchanged: it also

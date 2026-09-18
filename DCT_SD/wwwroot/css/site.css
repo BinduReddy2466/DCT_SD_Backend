@@ -256,6 +256,19 @@ body {
   background: #FAFBFD;
 }
 
+/* Wraps a long, unbroken value (e.g. a comma-separated Entry Number with no spaces) onto
+   multiple lines within its cell instead of stretching the column or overflowing - default
+   white-space: normal only breaks at whitespace, which a value like "8976,6975,..." has none
+   of, so it needs overflow-wrap to break at any point once it no longer fits. max-width keeps
+   the column itself from stretching to fit a single long value; row height grows naturally
+   since nothing here constrains it. */
+.cell-wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 220px;
+}
+
 /* Status badges */
 .badge-ok { background: var(--color-ok-bg); color: var(--color-ok-text); }
 .badge-warn { background: var(--color-warn-bg); color: var(--color-warn-text); }
