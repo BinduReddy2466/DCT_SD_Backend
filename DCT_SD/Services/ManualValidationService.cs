@@ -284,7 +284,7 @@ public class ManualValidationService : IManualValidationService
 
                 if (documentChanges.Count > 0)
                 {
-                    ApplyDocumentTypeChanges(group, documentChanges, renamesToRollBack, changeDescriptionsByRecordId, touchedRecordIds);
+                    ApplyDocumentTypeChanges(record, group, documentChanges, renamesToRollBack, changeDescriptionsByRecordId, touchedRecordIds);
                 }
             }
 
@@ -374,18 +374,20 @@ public class ManualValidationService : IManualValidationService
     }
 
     // Applies one or more pending Others -> real Document Type corrections in a single Save.
-    // Every change's target document is resolved up front, against ONE pre-change merged/sorted
-    // snapshot of the WHOLE group's DocumentsJson (see BuildCombinedSortedDocuments - the same
-    // merge/dedup/sort that assigned each document's client-facing Id) - because renaming a
-    // document changes its RenamedFileName (Image File Name), which is the sort key, resolving
-    // each change's index one at a time as it's applied would let an earlier rename in this same
-    // batch shift the sort order and cause a later change to silently target the wrong document.
+    // Every change's target document is resolved up front, against ONE pre-change sorted snapshot
+    // of the OPENED record's OWN DocumentsJson (see MapToDetail - the exact same source/sort that
+    // assigned each document's client-facing Id, since display no longer merges across the
+    // group) - because renaming a document changes its RenamedFileName (Image File Name), which is
+    // the sort key, resolving each change's index one at a time as it's applied would let an
+    // earlier rename in this same batch shift the sort order and cause a later change to silently
+    // target the wrong document.
     // rollbacks is populated in place as each rename succeeds - if a later change in this same call throws,
     // the caller still has every rollback recorded so far. changeDescriptions gets one "Supporting
     // Document '<original file name>' - Document Type: Previous = '...', Current = '...'" line,
     // recorded against whichever underlying row actually owns that document, for the same
     // RecordHistory.Remarks audit trail as the scalar field changes.
     private static void ApplyDocumentTypeChanges(
+        ManualValidationRequest primary,
         List<ManualValidationRequest> group,
         List<DocumentChangeItemDto> changes,
         List<(string NewPath, string OriginalPath)> rollbacks,
@@ -393,20 +395,22 @@ public class ManualValidationService : IManualValidationService
         HashSet<int> touchedRecordIds)
     {
         var perRecordItems = group.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
-        var combined = BuildCombinedSortedDocuments(perRecordItems);
         var allItemsFlat = perRecordItems.SelectMany(x => x.Items).ToList();
 
-        var targets = new List<(int RecordId, DocumentJsonItem Target, DocumentChangeItemDto Change)>();
+        var primarySorted = perRecordItems.First(x => x.RecordId == primary.Id).Items
+            .OrderBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var targets = new List<(DocumentJsonItem Target, DocumentChangeItemDto Change)>();
         foreach (var change in changes)
         {
-            if (change.Index - 1 < combined.Count)
+            if (change.Index - 1 < primarySorted.Count)
             {
-                var (recordId, item) = combined[change.Index - 1];
-                targets.Add((recordId, item, change));
+                targets.Add((primarySorted[change.Index - 1], change));
             }
         }
 
-        foreach (var (recordId, target, change) in targets)
+        foreach (var (target, change) in targets)
         {
             var originalIdentityKey = DocumentIdentityKey(target);
 
@@ -525,7 +529,7 @@ public class ManualValidationService : IManualValidationService
 
         var directory = Path.GetDirectoryName(target.ImagePath)!;
         var extension = Path.GetExtension(target.ImagePath);
-        var sequence = NextDocumentSequenceNumber(items, directory, newCode, newName);
+        var sequence = NextDocumentSequenceNumber(items, newCode, newName);
         var newFileName = $"{SanitizeForFileName(newCode)}_{SanitizeForFileName(newName)}_{sequence}{extension}";
         var newPath = Path.Combine(directory, newFileName);
 
@@ -560,26 +564,24 @@ public class ManualValidationService : IManualValidationService
         string.Equals(item.DocumentId, "OTHERS", StringComparison.OrdinalIgnoreCase)
         || string.Equals(item.DocumentTypeCode, "OTHERS", StringComparison.OrdinalIgnoreCase);
 
-    // Scans this record's existing supporting documents for ones already classified under the
-    // exact same Document ID + Document Name AND actually sitting in the SAME physical folder as
-    // the file about to be renamed, extracts the trailing "_<number>" sequence from their
-    // renamedFileName (matching "<DocumentID>_<DocumentName>_<N>.<extension>"), and returns the
-    // highest one found, plus 1 - or 1 if none match. Gaps are preserved on purpose (existing _1
-    // and _4 -> next is _5, not _2) since this always takes the true maximum, never the first
-    // free slot.
+    // Scans every supporting document across the WHOLE group (every Title Record sharing this
+    // EntryNumbersCsv - see ApplyDocumentTypeChanges's `allItemsFlat`) for ones already classified
+    // under the exact same Document ID + Document Name, extracts the trailing "_<number>" sequence
+    // from their renamedFileName (matching "<DocumentID>_<DocumentName>_<N>.<extension>"), and
+    // returns the highest one found, plus 1 - or 1 if none match. Gaps are preserved on purpose
+    // (existing _1 and _4 -> next is _5, not _2) since this always takes the true maximum, never
+    // the first free slot.
     //
-    // Deliberately scoped to `directory` rather than every document in the group: a rename can
-    // only ever collide with a file that's actually going to sit alongside it (File.Move only
-    // fails if the destination path itself is taken), and two cross-fetch-run copies of the same
-    // logical document (see DocumentIdentityKey) live in two entirely different folders, so they
-    // can never collide with each other. Scanning the whole group used to assign them different
-    // sequence numbers purely because they shared a Document ID/Name globally - which then changed
-    // their DocumentIdentityKey (the file name is part of it) so they stopped matching each other
-    // and a document that was combined into one Supporting Documents row before the rename would
-    // incorrectly split into two rows after it. Scoping to the shared folder lets two such copies
-    // both land on the same number (e.g. both "_1"), which keeps their identity keys equal and the
-    // row combined, exactly as it was before the correction.
-    private static int NextDocumentSequenceNumber(List<DocumentJsonItem> items, string directory, string code, string name)
+    // Deliberately scans the whole group, not just the file's own folder: a document being
+    // corrected from Others always renames within the "Others" bucket folder, which is a
+    // different folder than a genuine document of the same real type that was extracted directly
+    // (each Document Type gets its own folder) - scoping the scan to one folder would miss that
+    // existing document entirely and could generate a filename that already exists elsewhere,
+    // which is exactly the wrong-sequence-number/visible-collision bug this must avoid. Display no
+    // longer merges documents across Title Records (see MapToDetail), so scanning the whole group
+    // here does not risk re-introducing the older "combined into one row, then split after a
+    // rename" problem that a narrower, folder-only scan was once used to work around.
+    private static int NextDocumentSequenceNumber(List<DocumentJsonItem> items, string code, string name)
     {
         var pattern = new Regex("^" + Regex.Escape(SanitizeForFileName(code)) + "_" + Regex.Escape(SanitizeForFileName(name)) + @"_(\d+)\.[^.]+$", RegexOptions.IgnoreCase);
         var max = 0;
@@ -587,12 +589,6 @@ public class ManualValidationService : IManualValidationService
         {
             if (!string.Equals(item.DocumentId, code, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(item.DocumentName, name, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(item.ImagePath)
-                || !string.Equals(Path.GetDirectoryName(item.ImagePath), directory, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -904,8 +900,18 @@ public class ManualValidationService : IManualValidationService
 
     private static ManualValidationDetailDto MapToDetail(ManualValidationRequest primary, List<ManualValidationRequest> group)
     {
-        var perRecordItems = group.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
-        var combinedDocuments = BuildCombinedSortedDocuments(perRecordItems);
+        // Supporting Documents are read from the OPENED record's own DocumentsJson only - never
+        // merged/concatenated across its group siblings. Every Title Record sharing this
+        // EntryNumbersCsv describes the same physical document set (see SaveAsync's sync step
+        // below), so there is nothing to merge; doing so previously caused the same document to
+        // occasionally render as two rows (or, after a correction, to collide in display with an
+        // unrelated document of the same resulting name from a sibling's own folder - see
+        // NextDocumentSequenceNumber). Sorted ascending by Image File Name (renamedFileName) - the
+        // sole sort key, per the acceptance criteria - so the list and the image viewer's
+        // Prev/Next order agree.
+        var displayDocuments = ParseDocumentItems(primary.DocumentsJson)
+            .OrderBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         return new ManualValidationDetailDto
         {
@@ -940,13 +946,13 @@ public class ManualValidationService : IManualValidationService
                     .Where(f => f is "title" or "titleType" or "plan" or "block" or "lot" or "titleSequence")
                     .ToArray(),
             }).ToArray(),
-            Documents = combinedDocuments.Select((d, index) => new ManualValidationDocumentDto
+            Documents = displayDocuments.Select((item, index) => new ManualValidationDocumentDto
             {
                 Id = index + 1,
-                DocumentId = d.Item.DocumentId,
-                DocumentName = d.Item.DocumentName,
-                RenamedFileName = d.Item.RenamedFileName,
-                CanChangeDocumentType = IsOthersEligible(d.Item),
+                DocumentId = item.DocumentId,
+                DocumentName = item.DocumentName,
+                RenamedFileName = item.RenamedFileName,
+                CanChangeDocumentType = IsOthersEligible(item),
             }).ToArray(),
         };
     }
@@ -963,55 +969,15 @@ public class ManualValidationService : IManualValidationService
         return JsonSerializer.Deserialize<List<DocumentJsonItem>>(documentsJson, JsonOptions) ?? [];
     }
 
-    // Merges every row's own DocumentsJson items into one Supporting Documents list for the
-    // group, removes duplicates, and sorts the result - this is the single place that happens, so
-    // GetDocumentImagePathAsync (image lookup), MapToDetail (client-facing list) and
-    // ApplyDocumentTypeChanges (Save) all agree on what a given 1-based position means.
-    //
-    // Duplicate identity is the document's path RELATIVE to whatever the Root Source Path was at
-    // the time it was extracted - RD Code / Entry Folder / Document Type Folder / File Name (the
-    // last 4 segments of ImagePath) - not the full absolute ImagePath, and never
-    // DocumentId+DocumentName alone. The Root Source Path itself commonly changes between fetch
-    // runs (a fresh folder each time - confirmed against real data, e.g. ".../copy 22/..." vs
-    // ".../copy 33/..."), so two rows genuinely extracted from the same RD/Entry/Document Type
-    // folder in different fetch runs would otherwise never collide on the full path and would
-    // incorrectly show as two separate documents with identical-looking names. Two documents
-    // filed under the exact same Document ID and Document Name but with a different relative path
-    // (e.g. "..._1.jpg" and "..._2.jpg" in the same folder) are still two different images and
-    // both survive; two rows that share the same relative identity collapse to one entry, keeping
-    // the first occurrence (the earliest/lowest-Id row - "Title Record 1").
-    //
-    // Sorted ascending by Image File Name (renamedFileName) - the sole sort key, per the
-    // acceptance criteria ("sort the supporting document images in ascending order by Image File
-    // Name") - so the Supporting Documents list and the image viewer's Prev/Next order both
-    // follow it, for a record with or without group siblings.
-    private static List<(int RecordId, DocumentJsonItem Item)> BuildCombinedSortedDocuments(
-        IEnumerable<(int RecordId, List<DocumentJsonItem> Items)> perRecordItems)
-    {
-        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var combined = new List<(int RecordId, DocumentJsonItem Item)>();
-
-        foreach (var (recordId, items) in perRecordItems)
-        {
-            foreach (var item in items)
-            {
-                var key = DocumentIdentityKey(item);
-                if (string.IsNullOrWhiteSpace(key) || seenKeys.Add(key))
-                {
-                    combined.Add((recordId, item));
-                }
-            }
-        }
-
-        return combined
-            .OrderBy(x => x.Item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
     // The last 4 path segments of ImagePath (RD Code / Entry Folder / Document Type Folder /
     // File Name) - stable across a re-fetch into a new Root Source Path folder, unlike the full
     // absolute path. Falls back to the full ImagePath, then RenamedFileName, when there aren't at
     // least 4 segments to work with (kept safe rather than throwing on an unexpected shape).
+    //
+    // Used solely to find every OTHER Title Record's own copy of the document a Document Type
+    // change targets (see ApplyDocumentTypeChanges's `allMatching`), so the same correction can be
+    // synchronized into all of them on Save - never for display (Supporting Documents display
+    // reads only the opened record's own DocumentsJson; see MapToDetail).
     private static string DocumentIdentityKey(DocumentJsonItem item)
     {
         if (string.IsNullOrWhiteSpace(item.ImagePath))
@@ -1034,17 +1000,15 @@ public class ManualValidationService : IManualValidationService
             return null;
         }
 
-        var group = string.IsNullOrWhiteSpace(record.EntryNumbersCsv)
-            ? [record]
-            : await _context.ManualValidationRequests.AsNoTracking()
-                .Where(r => r.MigratedAt == null && r.EntryNumbersCsv == record.EntryNumbersCsv)
-                .OrderBy(r => r.Id)
-                .ToListAsync(cancellationToken);
+        // Same source and same sort as MapToDetail (the opened record's own DocumentsJson only,
+        // never merged across group siblings), so a given documentId always resolves to the exact
+        // document shown at that position on screen - no separate group lookup needed here at all.
+        var sorted = ParseDocumentItems(record.DocumentsJson)
+            .OrderBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        var perRecordItems = group.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
-        var combined = BuildCombinedSortedDocuments(perRecordItems);
         var index = documentId - 1;
-        return index >= 0 && index < combined.Count ? combined[index].Item.ImagePath : null;
+        return index >= 0 && index < sorted.Count ? sorted[index].ImagePath : null;
     }
 
     private class DocumentJsonItem
