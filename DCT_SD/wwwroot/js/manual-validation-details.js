@@ -473,20 +473,10 @@
             wrapper.appendChild(wireDocTypeCombobox(select));
             wrapper.appendChild(select);
 
-            // Marks WHICH row is the editable one, independent of what type name it currently
-            // shows - without this, a document that was corrected from "Others" to a real type
-            // that another, unrelated document already has natively is visually indistinguishable
-            // from that unrelated document except for the dropdown itself, which reads as "the
-            // dropdown is showing on the wrong row" rather than "this specific document is still
-            // correctable because it was once Others."
-            var badge = document.createElement('span');
-            badge.className = 'badge rounded-pill text-bg-secondary';
-            badge.style.fontSize = '0.65rem';
-            badge.style.fontWeight = '500';
-            badge.textContent = 'Was Others';
-            badge.title = 'This document was originally classified as "Others". It can still have its Document Type corrected here, even after being reclassified - other documents of the same type are not affected.';
-            wrapper.appendChild(badge);
-
+            // No visible "Was Others" indicator, per request - CanChangeDocumentType (and the
+            // underlying documentTypeCode marker it's based on) still fully drives whether this
+            // row gets the dropdown at all, and still persists exactly as before; it's just no
+            // longer surfaced as a badge in the UI.
             nameTd.appendChild(wrapper);
           } else {
             nameTd.textContent = effectiveDocumentName(doc);
