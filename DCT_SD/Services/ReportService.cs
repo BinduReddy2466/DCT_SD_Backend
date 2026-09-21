@@ -47,16 +47,36 @@ public class ReportService : IReportService
         // Migration Monitoring and Manual Validation's Registry of Deeds filter is a live
         // dropdown (see their own Index views), unlike the static option lists below.
         ReportFilterFieldDto? registryOfficeField = null;
-        if (reportType is ReportTypes.MigrationMonitoring or ReportTypes.ManualValidation)
+        // Same live dropdown/data source as the actual Empty Folders page (EmptyFoldersController.
+        // Index / Views/EmptyFolders/Index.cshtml), including its exact "Registry of Deeds (RD)"
+        // label - kept as its own field (rather than reusing registryOfficeField as-is) purely so
+        // Migration Monitoring/Manual Validation's own "Registry of Deeds" label is never touched.
+        ReportFilterFieldDto? emptyFoldersRegistryOfficeField = null;
+        if (reportType is ReportTypes.MigrationMonitoring or ReportTypes.ManualValidation or ReportTypes.EmptyEntryFolders)
         {
             var offices = await _registryOfficeService.GetAllActiveAsync(cancellationToken);
-            registryOfficeField = new ReportFilterFieldDto
+            var officeOptions = offices.Select(o => new ReportFilterOptionDto { Value = o.Code, Label = o.Name }).ToArray();
+
+            if (reportType is ReportTypes.MigrationMonitoring or ReportTypes.ManualValidation)
             {
-                Key = "RdCode",
-                Label = "Registry of Deeds",
-                Type = "select",
-                Options = offices.Select(o => new ReportFilterOptionDto { Value = o.Code, Label = o.Name }).ToArray(),
-            };
+                registryOfficeField = new ReportFilterFieldDto
+                {
+                    Key = "RdCode",
+                    Label = "Registry of Deeds",
+                    Type = "select",
+                    Options = officeOptions,
+                };
+            }
+            else
+            {
+                emptyFoldersRegistryOfficeField = new ReportFilterFieldDto
+                {
+                    Key = "RdCode",
+                    Label = "Registry of Deeds (RD)",
+                    Type = "select",
+                    Options = officeOptions,
+                };
+            }
         }
 
         IReadOnlyList<ReportFilterFieldDto> fields = reportType switch
@@ -111,7 +131,7 @@ public class ReportService : IReportService
             ],
             ReportTypes.EmptyEntryFolders =>
             [
-                new() { Key = "RdCode", Label = "Registry of Deeds Code", Type = "text" },
+                emptyFoldersRegistryOfficeField!,
                 new() { Key = "FolderName", Label = "Folder Name", Type = "text" },
                 new() { Key = "DateFrom", Label = "Date From", Type = "date" },
                 new() { Key = "DateTo", Label = "Date To", Type = "date" },

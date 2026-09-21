@@ -21,7 +21,13 @@ public class ReportsController : Controller
     {
         ViewData["Title"] = "Reports";
         ViewData["ActiveMenu"] = MenuKeys.Reports;
-        ViewData["ReportTypes"] = ReportTypes.Labels;
+        // Display-only override for the Report Type dropdown: "Empty Entry Folders" reads as
+        // "Empty Folders" here, while ReportTypes.Labels itself is untouched, so every other
+        // consumer - the generated report's file name in ReportService.GenerateAsync, and the
+        // reportType validation in Filters/Results/Generate below - keeps the original label.
+        ViewData["ReportTypes"] = ReportTypes.Labels.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Key == ReportTypes.EmptyEntryFolders ? "Empty Folders" : kv.Value);
         return View();
     }
 
