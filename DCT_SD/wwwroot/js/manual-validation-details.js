@@ -269,6 +269,144 @@
         return p ? generatedFileName(doc, p.code, p.name) : doc.renamedFileName;
       }
 
+      // Builds the searchable Document Type combobox around one already-populated, already-valued
+      // <select> (see renderDocumentList) - a visible text input the user can either click to
+      // browse every option (native dropdown behavior) or type into to filter by name, plus the
+      // filtered list itself. The <select> stays hidden but present and fully functional: every
+      // selection - by mouse or keyboard - sets select.value and dispatches a real 'change' event
+      // on it, so the existing delegated change handler (pendingChanges, Save, DocumentsJson,
+      // filename sequencing, etc.) drives off the exact same element/event it always has, entirely
+      // unaware this UI exists. Returns the wrapper element to place next to the <select> in the DOM.
+      function wireDocTypeCombobox(select) {
+        var container = document.createElement('div');
+        container.className = 'position-relative';
+        container.style.minWidth = '200px';
+        container.style.maxWidth = '260px';
+
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'form-control form-control-sm';
+        input.setAttribute('autocomplete', 'off');
+        input.placeholder = 'Select';
+
+        var menu = document.createElement('div');
+        menu.className = 'dropdown-menu p-0';
+        menu.style.maxHeight = '220px';
+        menu.style.overflowY = 'auto';
+        menu.style.width = '100%';
+
+        var activeIndex = -1;
+        var currentMatches = [];
+
+        function nameForCode(code) {
+          if (!code) return '';
+          var match = documentTypes.filter(function (t) { return t.code === code; })[0];
+          return match ? match.name : '';
+        }
+
+        function closeMenu() {
+          menu.classList.remove('show');
+          menu.innerHTML = '';
+          activeIndex = -1;
+          currentMatches = [];
+        }
+
+        function highlight(index) {
+          var items = menu.querySelectorAll('[data-doc-type-option]');
+          Array.prototype.forEach.call(items, function (el, i) {
+            el.classList.toggle('active', i === index);
+          });
+          if (items[index]) items[index].scrollIntoView({ block: 'nearest' });
+        }
+
+        function choose(type) {
+          select.value = type.code;
+          input.value = type.name;
+          closeMenu();
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        function openMenu(filterText) {
+          var term = (filterText || '').trim().toLowerCase();
+          currentMatches = documentTypes.filter(function (t) {
+            return !term || t.name.toLowerCase().indexOf(term) !== -1;
+          });
+
+          menu.innerHTML = '';
+          if (currentMatches.length === 0) {
+            var empty = document.createElement('span');
+            empty.className = 'dropdown-item-text text-muted small px-2 py-1 d-block';
+            empty.textContent = 'No matching Document Type';
+            menu.appendChild(empty);
+          } else {
+            currentMatches.forEach(function (t) {
+              var item = document.createElement('button');
+              item.type = 'button';
+              item.className = 'dropdown-item small';
+              item.textContent = t.name;
+              item.setAttribute('data-doc-type-option', '');
+              // mousedown (not click), with preventDefault, fires and completes before the
+              // input's own blur handler - so choosing an option never races with (or gets
+              // pre-empted by) the blur-triggered close/snap-back below.
+              item.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                choose(t);
+              });
+              menu.appendChild(item);
+            });
+          }
+
+          activeIndex = -1;
+          menu.classList.add('show');
+        }
+
+        input.addEventListener('focus', function () {
+          openMenu('');
+          input.select();
+        });
+
+        input.addEventListener('input', function () {
+          openMenu(input.value);
+        });
+
+        input.addEventListener('keydown', function (e) {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (!menu.classList.contains('show')) { openMenu(input.value); return; }
+            if (currentMatches.length === 0) return;
+            activeIndex = (activeIndex + 1) % currentMatches.length;
+            highlight(activeIndex);
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (currentMatches.length === 0) return;
+            activeIndex = (activeIndex - 1 + currentMatches.length) % currentMatches.length;
+            highlight(activeIndex);
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (activeIndex >= 0 && currentMatches[activeIndex]) {
+              choose(currentMatches[activeIndex]);
+            }
+          } else if (e.key === 'Escape') {
+            closeMenu();
+            input.blur();
+          }
+        });
+
+        // Leaving the field without picking an option (typed free text, or just clicked away)
+        // never counts as a selection - snap the visible text back to whatever is actually
+        // selected, exactly like a native <select> never changes value until something is
+        // explicitly chosen.
+        input.addEventListener('blur', function () {
+          closeMenu();
+          input.value = nameForCode(select.value);
+        });
+
+        input.value = nameForCode(select.value);
+        container.appendChild(input);
+        container.appendChild(menu);
+        return container;
+      }
+
       // Rebuilds the Supporting Documents table (never raw HTML from doc data - built via
       // textContent/DOM APIs) so a pending correction's preview name, and any Save-time reshuffle
       // from renaming (the list is sorted by Image File Name), are both reflected without a page
@@ -305,9 +443,14 @@
             var wrapper = document.createElement('div');
             wrapper.className = 'd-flex align-items-center gap-1 flex-wrap';
 
+            // The real, hidden <select> stays the single source of truth for the value and the
+            // 'change' event - the searchable text input built around it (see
+            // wireDocTypeCombobox) only ever drives IT, then dispatches a native 'change' on it,
+            // so the existing delegated change handler below (pendingChanges, syncPendingChangesField,
+            // Save, etc.) needs no changes at all: it still just reads select.value/selectedIndex
+            // exactly as before.
             var select = document.createElement('select');
-            select.className = 'form-select form-select-sm';
-            select.style.maxWidth = '220px';
+            select.className = 'form-select form-select-sm d-none';
             select.setAttribute('data-doc-type-select', '');
             select.setAttribute('data-doc-index', String(index));
 
@@ -327,6 +470,7 @@
             var pending = pendingChanges[doc.id];
             var currentCode = doc.documentId && doc.documentId.toUpperCase() !== 'OTHERS' ? doc.documentId : '';
             select.value = pending ? pending.code : currentCode;
+            wrapper.appendChild(wireDocTypeCombobox(select));
             wrapper.appendChild(select);
 
             // Marks WHICH row is the editable one, independent of what type name it currently
