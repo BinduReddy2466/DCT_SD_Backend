@@ -772,18 +772,28 @@
     var closeRemarksText = document.getElementById('mvCloseRemarksText');
     var closeRemarksError = document.getElementById('mvCloseRemarksError');
 
-    function openCloseFlow() {
+    // Close simply navigates back to the Manual Validation list - no remarks step. With no
+    // unsaved changes it happens immediately; with unsaved changes, mvUnsavedModal ("You have
+    // unsaved changes. Do you want to save your changes before closing?") gates it first, exactly
+    // per the acceptance criteria. The older remarks-required Close (mvCloseModal/CloseAsync)
+    // stays fully implemented below but is no longer wired to this button - see the note there.
+    function closePage() {
+      window.location.href = '/ManualValidation';
+    }
+
+    document.getElementById('mvCloseBtn').addEventListener('click', function () {
       if (isDirty()) {
         unsavedModal.show();
         return;
       }
-      closeRemarksText.value = '';
-      closeRemarksError.classList.add('d-none');
-      closeModal.show();
-    }
+      closePage();
+    });
 
-    document.getElementById('mvCloseBtn').addEventListener('click', openCloseFlow);
-
+    // Kept intact but no longer reachable from the Close button (see closePage above) or from
+    // Save and Close / Close Without Saving below - the acceptance criteria for the unsaved-
+    // changes flow defines Close purely as "navigate back to the list," with no remarks step in
+    // any of its outcomes. CloseAsync/mvCloseModal/this handler are left fully working exactly as
+    // they were built, only unwired, so nothing here is deleted or altered.
     document.getElementById('mvCloseConfirmBtn').addEventListener('click', function () {
       var val = closeRemarksText.value.trim();
       if (!val) {
@@ -804,22 +814,33 @@
         });
     });
 
+    // Save and Close reuses doSave() exactly as the plain Save button does - same endpoint, same
+    // DocumentsJson/imagePath/physical-rename/cross-Title-Number sync, same single Action History
+    // "Saved" entry (doSave doesn't call anything twice, so there's no duplicate entry to guard
+    // against). silent=true only suppresses the "Saved Successfully." toast, since the page is
+    // navigating away immediately after; a failure still shows doSave's own error toast and
+    // leaves every unsaved field/pending change exactly as it was (doSave only ever resets
+    // `snapshot` or reverts pending changes on its own success/failure paths), so the user stays
+    // on the page with their changes intact and can retry or Cancel - closePage() only runs when
+    // doSave resolves true.
     document.getElementById('mvSaveAndCloseBtn').addEventListener('click', function () {
       unsavedModal.hide();
       doSave(true).then(function (saved) {
-        if (saved) openCloseFlow();
+        if (saved) closePage();
       });
     });
 
+    // Close Without Saving discards every pending change purely client-side (reset the tracked
+    // fields back to the load-time snapshot, drop any pending Document Type correction) and never
+    // calls the server at all - no Save request, so DocumentsJson/imagePath/the physical file/the
+    // database are never touched and no Action History entry is written.
     document.getElementById('mvDiscardAndCloseBtn').addEventListener('click', function () {
       unsavedModal.hide();
       fieldIds.forEach(function (id) {
         fieldEls[id].value = snapshot[id];
       });
       if (typeof revertPendingDocumentChange === 'function') revertPendingDocumentChange();
-      closeRemarksText.value = '';
-      closeRemarksError.classList.add('d-none');
-      closeModal.show();
+      closePage();
     });
   });
 })();
