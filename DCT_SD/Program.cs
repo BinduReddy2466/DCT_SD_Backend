@@ -6,6 +6,7 @@ using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
 using DCT_SD.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 
@@ -22,6 +23,18 @@ Console.WriteLine($"Logging this run to: {fileLoggerProvider.LogFilePath}");
 
 builder.Services.AddDctServices(builder.Configuration);
 builder.Services.AddControllersWithViews();
+
+// Without this, ASP.NET Core generates a fresh, in-memory Data Protection key ring on every
+// process start - which is what antiforgery tokens (the hidden __RequestVerificationToken field
+// every [ValidateAntiForgeryToken] POST, e.g. /Account/Login, requires) are encrypted with. A
+// page rendered by the OLD process (with its own key ring) submitted after a restart fails
+// antiforgery validation against the NEW process's different key ring, surfacing as a bare
+// HTTP 400 with no exception detail - exactly the "400 right after a restart" symptom seen
+// repeatedly during iterative dev restarts. Persisting keys to disk here means they survive a
+// restart, so a page loaded before one is still valid after it.
+builder.Services.AddDataProtection()
+    .SetApplicationName("DCT_SD")
+    .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(builder.Environment.ContentRootPath, "DataProtectionKeys")));
 
 var jwtSigningKey = builder.Configuration["Jwt:SigningKey"]
     ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");

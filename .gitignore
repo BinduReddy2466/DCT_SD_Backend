@@ -367,3 +367,7 @@ FodyWeavers.xsd
 
 # Ignore Startup.cs
 Startup.cs
+
+# ASP.NET Core Data Protection keys (persisted so antiforgery/auth survive a restart) - never
+# commit these, they'd let anyone holding them forge antiforgery tokens/protected cookies.
+DataProtectionKeys/
