@@ -45,6 +45,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@(ViewData["Title"] != null ? ViewData["Title"] + " - DCT" : "DCT")</title>
+    <!-- Applies the saved theme (default Light - see app-shell.js) before the stylesheets/body
+         render, so a returning Dark-theme user never sees a flash of the Light theme first.
+         Kept inline/synchronous for exactly that reason - an external script would load too late. -->
+    <script>
+        (function () {
+            var theme = 'light';
+            try {
+                if (localStorage.getItem('dct-theme') === 'dark') theme = 'dark';
+            } catch (e) { /* storage unavailable (private mode, etc.) - Light stays the default */ }
+            document.documentElement.setAttribute('data-bs-theme', theme);
+        })();
+    </script>
     <link rel="stylesheet" href="~/lib/bootstrap/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
@@ -116,9 +128,16 @@
                         </button>
                         <h1 class="font-display fs-5 fw-semibold mb-0">@ViewData["Title"]</h1>
                     </div>
-                    <div class="d-flex align-items-center gap-2 text-muted small">
-                        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                        <span id="clock"></span>
+                    <div class="d-flex align-items-center gap-3 text-muted small">
+                        <div class="d-flex align-items-center gap-2">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span id="clock"></span>
+                        </div>
+                        <div class="form-check form-switch mb-0 d-flex align-items-center gap-1" title="Switch between Light and Dark theme">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path stroke-linecap="round" d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" /></svg>
+                            <input class="form-check-input" type="checkbox" role="switch" id="themeSwitch" style="cursor: pointer;" aria-label="Toggle Dark theme">
+                            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
+                        </div>
                     </div>
                 </header>
                 <main class="p-4">
@@ -200,7 +219,7 @@
     <script src="~/js/toast.js"></script>
     <script src="~/js/reports.js"></script>
     <script src="~/js/failed-extraction.js" asp-append-version="true"></script>
-    <script src="~/js/app-shell.js"></script>
+    <script src="~/js/app-shell.js" asp-append-version="true"></script>
     @if (TempData["ToastMessage"] is string toastMessage)
     {
         <script>
