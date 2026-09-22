@@ -176,6 +176,23 @@ public class FailedExtractionService : IFailedExtractionService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    // Updates the FailureReason column on the FailedExtractionRecords row itself - the row the
+    // list page/grid is actually built from (see SearchAsync/MapToListItem) - as opposed to
+    // UpdateFailureAsync, which only touches the separate OcrExtractionRecords+RecordHistory
+    // bookkeeping the Reprocess action's own success/failure logic uses internally. Both are kept
+    // in sync from the Reprocess action so the grid reflects the latest attempt's outcome.
+    public async Task UpdateFailedExtractionRecordReasonAsync(int id, string? failureReason, CancellationToken cancellationToken = default)
+    {
+        var record = await _context.FailedExtractionRecords.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        if (record is null)
+        {
+            return;
+        }
+
+        record.FailureReason = failureReason ?? string.Empty;
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     // Removes a resolved Failed Extraction record: the external reprocess service confirms
     // success in its own response (records_created/manual_validation_created > 0) and clears the
     // folder from its own internal failure tracking, but - confirmed by directly querying that

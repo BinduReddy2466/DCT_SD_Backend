@@ -42,6 +42,14 @@ public interface IFailedExtractionService
     // same table/columns RecordFailureAsync already writes (no schema change, no duplicate row).
     Task UpdateFailureAsync(int id, string failureReason, DateTime extractionDateTime, CancellationToken cancellationToken = default);
 
+    // Updates the FailureReason column on the actual FailedExtractionRecords row (by its own Id -
+    // the same one the list/grid is built from, see SearchAsync/MapToListItem) rather than the
+    // separate OcrExtractionRecords+RecordHistory bookkeeping UpdateFailureAsync writes to.
+    // Without this, a Reprocess attempt's outcome message never reaches the grid at all: that
+    // column is otherwise only ever populated by the external pipeline at ingestion time. No
+    // schema change - just writing a fresh value into the column that already exists.
+    Task UpdateFailedExtractionRecordReasonAsync(int id, string? failureReason, CancellationToken cancellationToken = default);
+
     // Removes a Failed Extraction record whose reprocess attempt actually succeeded (confirmed
     // via the external service's own response, not merely an HTTP 200) - the external service
     // does not retroactively clean up this app's already-written row itself, so this app must.

@@ -87,9 +87,26 @@ public class FailedExtractionController : Controller
                 return Json(new { success = true, message = "The folder was reprocessed successfully." });
             }
 
-            var reason = !string.IsNullOrWhiteSpace(response.Reason) ? response.Reason : stillFailed.FailureReason;
+            // The response's own "message" (confirmed present in the real service's response
+            // shape via its OpenAPI spec, previously not even deserialized - see
+            // ExternalFailedExtractionReprocessResponse) is preferred over "reason": whatever the
+            // service actually says about why this attempt didn't succeed, used exactly as
+            // returned, never a hardcoded string. Falls back to "reason" (kept for compatibility
+            // in case a given response only populates one or the other), then to whatever
+            // FailureReason this record already had, so a response with neither field never wipes
+            // out an existing reason.
+            var reason = !string.IsNullOrWhiteSpace(response.Message)
+                ? response.Message
+                : !string.IsNullOrWhiteSpace(response.Reason)
+                    ? response.Reason
+                    : stillFailed.FailureReason;
             var extractionDateTime = DateTime.UtcNow;
             await _failedExtractionService.UpdateFailureAsync(stillFailed.Id, reason, extractionDateTime, cancellationToken);
+            // id (not stillFailed.Id, a different row's id in a different table) is the
+            // FailedExtractionRecords row actually displayed/clicked - its own FailureReason
+            // column is what the grid renders, so it must be updated too for this attempt's
+            // message to actually show up on screen.
+            await _failedExtractionService.UpdateFailedExtractionRecordReasonAsync(id, reason, cancellationToken);
 
             return Json(new { success = false, message = string.IsNullOrWhiteSpace(reason) ? "Reprocessing failed." : $"Reprocessing failed: {reason}" });
         }

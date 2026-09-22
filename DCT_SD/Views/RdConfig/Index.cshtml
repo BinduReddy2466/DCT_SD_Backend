@@ -54,7 +54,7 @@
                non-disabled wrapper around it instead. *@
             <span id="startFetchTooltipWrapper" title="@(hasRootPath ? null : startFetchDisabledTitle)"
                   data-bs-toggle="@(hasRootPath ? null : "tooltip")" data-bs-custom-class="@(hasRootPath ? null : "start-fetch-tooltip")">
-                <button type="button" id="startFetchBtn" class="btn btn-gold" data-current-username="@User.Identity!.Name"
+                <button type="button" id="startFetchBtn" class="btn btn-gold" data-current-username="@Model.CurrentUserDisplayName"
                         disabled="@(!hasRootPath)">Start Fetching</button>
             </span>
         </div>

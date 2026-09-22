@@ -19,17 +19,20 @@ public class RdConfigController : Controller
     private readonly IRdConfigService _rdConfigService;
     private readonly IRdFetchApiClient _rdFetchApiClient;
     private readonly IFailedExtractionService _failedExtractionService;
+    private readonly ICurrentUserService _currentUserService;
     private readonly ILogger<RdConfigController> _logger;
 
     public RdConfigController(
         IRdConfigService rdConfigService,
         IRdFetchApiClient rdFetchApiClient,
         IFailedExtractionService failedExtractionService,
+        ICurrentUserService currentUserService,
         ILogger<RdConfigController> logger)
     {
         _rdConfigService = rdConfigService;
         _rdFetchApiClient = rdFetchApiClient;
         _failedExtractionService = failedExtractionService;
+        _currentUserService = currentUserService;
         _logger = logger;
     }
 
@@ -49,6 +52,15 @@ public class RdConfigController : Controller
         var rootHistory = await _rdConfigService.SearchRootPathHistoryAsync(new RootPathHistorySearchRequestDto { PageNumber = 1, PageSize = 25 }, cancellationToken);
         var fetchHistory = await _rdConfigService.SearchFetchHistoryAsync(new FetchHistorySearchRequestDto { PageNumber = 1, PageSize = 25 }, cancellationToken);
 
+        // Same "FirstName_LastName" display name already used for Modified By/Executed By
+        // elsewhere (see ManualValidationService), so the live/streaming row's Executed By -
+        // built client-side in rd-config.js from this value, since the real persisted row and
+        // its own Executed By don't exist yet while the fetch is still running - matches the
+        // completed row's formatting instead of falling back to the raw login username.
+        var currentUserDisplayName = await _currentUserService.GetDisplayNameAsync(cancellationToken)
+            ?? _currentUserService.Username
+            ?? string.Empty;
+
         return new RdConfigIndexViewModel
         {
             CurrentPath = rootPath.CurrentPath,
@@ -56,6 +68,7 @@ public class RdConfigController : Controller
             FetchHistory = fetchHistory,
             RootHistory = rootHistory,
             RootPathForm = new RootPathFormViewModel { RootPath = rootPath.CurrentPath ?? string.Empty },
+            CurrentUserDisplayName = currentUserDisplayName,
         };
     }
 

@@ -73,6 +73,12 @@ public class ExternalFailedExtractionReprocessResponse
 
     [JsonPropertyName("reason")]
     public string? Reason { get; set; }
+
+    // Present in the real response per the deployed service's own OpenAPI spec (the
+    // FailedExtractionReprocessResult schema) but previously never mapped here, which is why it
+    // never reached the UI - see FailedExtractionController.Reprocess for where it's now used.
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
 }
 
 // GET /fetch/{fetch_run_id} response shape - the FetchRunSummary schema per the deployed
