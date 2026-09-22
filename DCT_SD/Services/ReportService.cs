@@ -85,13 +85,13 @@ public class ReportService : IReportService
             [
                 new() { Key = "DateFrom", Label = "Modified Date From", Type = "date" },
                 new() { Key = "DateTo", Label = "Modified Date To", Type = "date" },
-                new() { Key = "ModifiedBy", Label = "Modified By", Type = "text", Placeholder = "User ID" },
+                new() { Key = "ModifiedBy", Label = "Modified By", Type = "text", Placeholder = "User Name" },
             ],
             ReportTypes.FetchHistory =>
             [
                 new() { Key = "DateFrom", Label = "Fetch Date From", Type = "date" },
                 new() { Key = "DateTo", Label = "Fetch Date To", Type = "date" },
-                new() { Key = "ExecutedBy", Label = "Executed By", Type = "text", Placeholder = "User ID" },
+                new() { Key = "ExecutedBy", Label = "Executed By", Type = "text", Placeholder = "User Name" },
             ],
             ReportTypes.MigrationMonitoring =>
             [
