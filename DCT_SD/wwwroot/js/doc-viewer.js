@@ -9,6 +9,10 @@
 
   function createViewer(container) {
     var enableWheelZoom = container.dataset.enableWheelZoom === 'true';
+    // Distinct from enableWheelZoom (Migrations' viewers, unaffected) - here plain wheel scroll
+    // moves the image content up/down (and left/right) within the frame, exactly like scrolling
+    // a normal page, rather than zooming. Manual Validation's viewer opts into this instead.
+    var enableWheelPan = container.dataset.enableWheelPan === 'true';
     var minZoom = 0.2;
     var maxZoom = 5;
     var buttonZoomStep = 0.2;
@@ -130,6 +134,28 @@
             clampPan();
             applyTransform();
           }
+        },
+        { passive: false }
+      );
+    }
+
+    // Plain wheel scroll pans the image content, using the exact same panX/panY state and
+    // clampPan() boundary logic the Zoom In/Out buttons and click-drag already use - never a
+    // separate implementation. e.deltaY/e.deltaX are applied directly (not a fixed step) for
+    // smooth, proportional scrolling that tracks the actual wheel/trackpad input; the sign
+    // follows normal scroll convention (scrolling down reveals content further down the image).
+    // Applies at any zoom level, same as drag-panning - clampPan() already limits how far the
+    // image can move regardless of whether it currently overflows the frame.
+    if (enableWheelPan) {
+      frame.addEventListener(
+        'wheel',
+        function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          state.panY -= e.deltaY;
+          state.panX -= e.deltaX;
+          clampPan();
+          applyTransform();
         },
         { passive: false }
       );
