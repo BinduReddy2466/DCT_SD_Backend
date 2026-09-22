@@ -127,8 +127,17 @@ public class RdConfigService : IRdConfigService
 
     public async Task CompleteFetchRunAsync(int localFetchRunId, FetchRunDetailDto details, string? failureReason = null, CancellationToken cancellationToken = default)
     {
+        // localFetchRunId is always 0 (see StartFetchAsync - this app never inserts its own
+        // FetchRuns row; the external service is the sole writer of the real one). Looking it up
+        // by that value alone would never match the actual row the external service already wrote
+        // under its own id, silently turning this whole method - including the failureReason
+        // write below - into a no-op for every real, completed run. details.Id carries that real
+        // id whenever one was assigned; only fall back to localFetchRunId (still a no-op lookup)
+        // for the genuine edge case where no external row exists at all (details.Id is 0 - e.g.
+        // "nothing new to process").
+        var lookupId = details.Id > 0 ? details.Id : localFetchRunId;
         var run = await _context.FetchRuns
-            .FirstOrDefaultAsync(r => r.Id == localFetchRunId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
+            .FirstOrDefaultAsync(r => r.Id == lookupId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
         if (run is null)
         {
             return;
@@ -169,10 +178,14 @@ public class RdConfigService : IRdConfigService
         await RecordFailureReasonAsync(run.Id, failureReason, cancellationToken);
     }
 
-    // Persists why a run failed via the existing generic RecordHistory table (same mechanism
-    // Manual Validation remarks and Failed Extraction reasons already use) - no schema change.
-    // Neither GET /fetch/{id} nor run_complete itself ever carries a reason, so without this the
-    // only place it was ever visible was the live SSE stream at the moment it happened.
+    // Persists a run's outcome detail via the existing generic RecordHistory table (same
+    // mechanism Manual Validation remarks and Failed Extraction reasons already use) - no schema
+    // change. GET /fetch/{id} never carries this, so without recording it here at the moment it's
+    // seen in the live SSE stream, it would otherwise only ever be visible while that stream was
+    // open. Despite the "RunFailed" action name (kept as-is - it's an internal bookkeeping label,
+    // never shown to the user), this also records run_complete's own per-run breakdown message on
+    // a fully successful run (see RdConfigController.StartFetchStream) - the Fetch History
+    // "Failure Reason" column is the only place that breakdown is surfaced, by design.
     private async Task RecordFailureReasonAsync(int localFetchRunId, string? failureReason, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(failureReason))

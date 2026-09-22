@@ -263,6 +263,14 @@ public class RdConfigController : Controller
             // The run has finished (successfully, or the connection dropped) as far as this
             // request is concerned. Reconcile the local mirror row with the authoritative final
             // state so the existing Fetch History table reflects it without the page reloading.
+            //
+            // A true run-level failure (connectivity_check/system_error) always takes priority as
+            // the recorded reason when one occurred; otherwise, run_complete's own "message" - its
+            // per-run breakdown of successful/failed/empty folders - is what gets recorded and
+            // shown in the Fetch History "Failure Reason" column, even when the run itself
+            // completed successfully (that column is the only place this breakdown is surfaced).
+            var reasonToRecord = runFailureReason ?? runComplete?.Message;
+
             if (runComplete is { FetchRunId: { } fetchRunId })
             {
                 try
@@ -270,19 +278,19 @@ public class RdConfigController : Controller
                     var details = await _rdFetchApiClient.GetFetchRunDetailsAsync(fetchRunId, CancellationToken.None);
                     if (details is not null)
                     {
-                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, details, runFailureReason, CancellationToken.None);
+                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, details, reasonToRecord, CancellationToken.None);
                     }
                     else
                     {
                         // GET /fetch/{id} came back 404 for an id run_complete itself just gave
                         // us - fall back to the run_complete payload's own fields rather than
                         // treating an already-known-successful run as failed.
-                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), runFailureReason, CancellationToken.None);
+                        await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), reasonToRecord, CancellationToken.None);
                     }
                 }
                 catch (BusinessValidationException)
                 {
-                    await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), runFailureReason, CancellationToken.None);
+                    await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(fetchRunId), reasonToRecord, CancellationToken.None);
                 }
             }
             else if (runComplete is not null)
@@ -290,11 +298,11 @@ public class RdConfigController : Controller
                 // run_complete arrived but without a fetch_run_id (e.g. "nothing new to
                 // process" - no run was actually created on the external side) - there's no id
                 // to query GET /fetch/{id} with, so reconcile directly from this payload.
-                await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(null), runFailureReason, CancellationToken.None);
+                await _rdConfigService.CompleteFetchRunAsync(localRun.Id, runComplete.ToDetailDto(null), reasonToRecord, CancellationToken.None);
             }
             else if (!streamedOk)
             {
-                await _rdConfigService.FailFetchRunAsync(localRun.Id, runFailureReason, CancellationToken.None);
+                await _rdConfigService.FailFetchRunAsync(localRun.Id, reasonToRecord, CancellationToken.None);
             }
         }
 
@@ -305,8 +313,13 @@ public class RdConfigController : Controller
 
     // Captured from a run_complete SSE record. FetchRunId is null when the external service
     // never assigned one for this run (e.g. it found nothing new to process) - the other fields
-    // are still meaningful in that case and are what CompleteFetchRunAsync falls back to.
-    private sealed record RunCompleteInfo(int? FetchRunId, string? Status, int? ProcessedCount, int? TotalCount)
+    // are still meaningful in that case and are what CompleteFetchRunAsync falls back to. Message
+    // is the service's own per-run breakdown (confirmed from a live run_complete event, e.g.
+    // "Successfully Extracted: 2 folders — 8976_6978, 980\nFailed: 0 folders\nMoved to Empty
+    // Entry Folders: 2 folders — 678, 990\nTotal Folders Processed: 4") - shown in the Fetch
+    // History "Failure Reason" column even on a fully successful run, per the acceptance
+    // criteria, via the same RecordFailureReasonAsync mechanism a true failure already used.
+    private sealed record RunCompleteInfo(int? FetchRunId, string? Status, int? ProcessedCount, int? TotalCount, string? Message)
     {
         public FetchRunDetailDto ToDetailDto(int? fetchRunId) => new()
         {
@@ -389,7 +402,8 @@ public class RdConfigController : Controller
                         TryGetInt(root, "fetch_run_id", "run_id", "id"),
                         TryGetString(root, "status"),
                         TryGetInt(root, "processed_count", "processedCount"),
-                        TryGetInt(root, "total_count", "totalCount"));
+                        TryGetInt(root, "total_count", "totalCount"),
+                        TryGetString(root, "message"));
                 }
 
                 if (eventName == "connectivity_check" && runFailureReason is null && TryGetBool(root, "ok") == false)
