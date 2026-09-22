@@ -23,5 +23,16 @@ public class FetchRun
     public string? FromPath { get; set; }
     public string? Remarks { get; set; }
 
+    // Both written directly by the external RD Fetch API (this app never writes RecordKind=
+    // FetchRun rows at all - see StartFetchAsync) - confirmed against live data: SummaryMessage
+    // is the exact "Successfully Extracted: X, folders\nFailed: Y, ...\nMoved to Empty Entry
+    // Folders: Z, ...\nTotal Folders Processed: N" breakdown for every completed run, whether it
+    // came from Start Fetching or a Failed Extraction Reprocess. RootPath is the actual root
+    // folder that run executed against, distinct from SourcePath (which can be a specific Entry
+    // Folder for a narrower Reprocess run) - see MapToFetchRunItem for how these are surfaced as
+    // Fetch History's Failure Reason/Source Path.
+    public string? SummaryMessage { get; set; }
+    public string? RootPath { get; set; }
+
     public ICollection<OcrExtractionRecord> OcrExtractionRecords { get; set; } = new List<OcrExtractionRecord>();
 }

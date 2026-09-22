@@ -19,6 +19,9 @@ public class FetchRunConfiguration : IEntityTypeConfiguration<FetchRun>
         builder.Property(r => r.RecordKind).HasMaxLength(20).IsRequired();
         builder.Property(r => r.FromPath).HasMaxLength(1000);
         builder.Property(r => r.Remarks).HasMaxLength(500);
+        builder.Property(r => r.RootPath).HasMaxLength(1000);
+        // SummaryMessage is nvarchar(max) in the database - no HasMaxLength call, matching how
+        // EF Core already maps a plain string property with no constraint configured.
 
         builder.HasIndex(r => new { r.RecordKind, r.StartedAt });
         builder.HasIndex(r => r.Status);

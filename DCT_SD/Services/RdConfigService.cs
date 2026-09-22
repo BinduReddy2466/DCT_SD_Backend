@@ -370,6 +370,16 @@ public class RdConfigService : IRdConfigService
         Remarks = h.Remarks,
     };
 
+    // failureReason is the RecordHistory-based fallback (a connectivity_check/system_error
+    // reason recorded live from the SSE stream - see StartFetchStream/RecordFailureReasonAsync);
+    // it only applies when the row has no SummaryMessage at all, which is the genuine edge case
+    // of a run that failed before the external service ever got far enough to write one.
+    // SummaryMessage itself - written directly by the external service for every completed run,
+    // whether from Start Fetching or a Failed Extraction Reprocess (confirmed against live data) -
+    // is the exact response message per the acceptance criteria, so it takes priority whenever
+    // present. Same reasoning for SourcePath: RootPath is the actual root folder that specific
+    // run executed against (falls back to SourcePath only for older rows from before RootPath
+    // started being populated).
     private static FetchRunItemDto MapToFetchRunItem(FetchRun r, string? failureReason = null) => new()
     {
         Id = r.Id,
@@ -380,8 +390,8 @@ public class RdConfigService : IRdConfigService
         TotalCount = r.TotalCount,
         Status = r.Status?.ToString() ?? string.Empty,
         ExecutedBy = r.ExecutedByUsername,
-        FailureReason = failureReason,
-        SourcePath = r.SourcePath,
+        FailureReason = !string.IsNullOrWhiteSpace(r.SummaryMessage) ? r.SummaryMessage : failureReason,
+        SourcePath = !string.IsNullOrWhiteSpace(r.RootPath) ? r.RootPath : r.SourcePath,
     };
 
     // HH:MM:SS per the Fetch History table's Fetch Run Time column requirement.
