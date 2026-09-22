@@ -144,12 +144,15 @@
     // separate implementation. e.deltaY/e.deltaX are applied directly (not a fixed step) for
     // smooth, proportional scrolling that tracks the actual wheel/trackpad input; the sign
     // follows normal scroll convention (scrolling down reveals content further down the image).
-    // Applies at any zoom level, same as drag-panning - clampPan() already limits how far the
-    // image can move regardless of whether it currently overflows the frame.
+    // Only engages once there's actually something to pan through - same "!panMode && zoom <= 1"
+    // gate the click-and-drag handler below already uses, so at normal/fit-to-screen size (where
+    // the whole image already fits the frame) plain wheel scroll is left alone and just scrolls
+    // the page as usual; once zoomed in (or Pan/Move is toggled on), wheel scroll pans the image.
     if (enableWheelPan) {
       frame.addEventListener(
         'wheel',
         function (e) {
+          if (!state.panMode && state.zoom <= 1) return;
           e.preventDefault();
           e.stopPropagation();
           state.panY -= e.deltaY;
