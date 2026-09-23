@@ -985,7 +985,11 @@ public class ManualValidationService : IManualValidationService
             return item.RenamedFileName ?? string.Empty;
         }
 
-        var segments = item.ImagePath.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+        // Explicit char[] (not a [...] collection expression) - some .NET 8 SDK patch versions
+        // have a known overload-resolution ambiguity between Split(char[]?, StringSplitOptions)
+        // and Split(string?, StringSplitOptions) when a collection expression is used here
+        // instead, causing CS0121 on those SDKs even though it compiles fine on newer patches.
+        var segments = item.ImagePath.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
         return segments.Length >= 4 ? string.Join('/', segments[^4..]) : item.ImagePath.Trim();
     }
 
