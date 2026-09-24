@@ -2,31 +2,73 @@
 @{
     ViewData["Title"] = "Sign In";
     var backgroundUrl = ViewData["LoginBackgroundUrl"] as string;
-    var backgroundStyle = string.IsNullOrEmpty(backgroundUrl)
-        ? "background: linear-gradient(135deg, var(--color-navy) 0%, var(--color-navy-3) 100%);"
-        : $"background: url('{backgroundUrl}') center / cover no-repeat;";
+    var heroUrl = string.IsNullOrEmpty(backgroundUrl) ? Url.Content("~/images/login-hero.png") : backgroundUrl;
 }
 
-<div class="d-flex justify-content-center align-items-center" data-bs-theme="light" style="min-height: 100vh; @backgroundStyle">
-    <form asp-controller="Account" asp-action="Login" method="post" class="login-card">
-        <h2 class="font-display fw-bold mb-3">Welcome back</h2>
+<div class="login-shell" data-bs-theme="light">
+    <div class="login-hero" style="background-image: url('@heroUrl');">
+        <div class="login-hero-scrim"></div>
+        <div class="login-hero-footer">Authorized personnel only &middot; Activity is logged and monitored</div>
+    </div>
 
-        <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small" role="alert"></div>
+    <div class="login-form-panel">
+        <form asp-controller="Account" asp-action="Login" method="post" class="login-form-card">
+            <div class="login-form-eyebrow">Sign In</div>
+            <h2 class="font-display fw-bold login-form-title">Welcome back</h2>
+            <p class="login-form-subtitle">Enter your credentials to access the portal</p>
 
-        <div class="mb-3">
-            <label asp-for="Username" class="form-label field-label"></label>
-            <input asp-for="Username" class="form-control" placeholder="you@example.com" autofocus />
-            <span asp-validation-for="Username" class="text-danger small"></span>
-        </div>
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small" role="alert"></div>
 
-        <div class="mb-3">
-            <label asp-for="Password" class="form-label field-label"></label>
-            <input asp-for="Password" class="form-control" placeholder="Enter Password" />
-            <span asp-validation-for="Password" class="text-danger small"></span>
-        </div>
+            <div class="mb-3">
+                <label asp-for="Username" class="form-label field-label"></label>
+                <div class="input-icon-group">
+                    <svg class="input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16v12H4z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 7l8 6 8-6" />
+                    </svg>
+                    <input asp-for="Username" class="form-control" placeholder="you@example.com" autofocus autocomplete="username" />
+                </div>
+                <span asp-validation-for="Username" class="text-danger small"></span>
+            </div>
 
-        <input type="hidden" asp-for="ReturnUrl" />
+            <div class="mb-3">
+                <label asp-for="Password" class="form-label field-label"></label>
+                <div class="input-icon-group">
+                    <svg class="input-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <rect x="5" y="10.5" width="14" height="9" rx="2" />
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+                    </svg>
+                    <input asp-for="Password" type="password" class="form-control" placeholder="Enter Password" autocomplete="current-password" id="loginPasswordInput" />
+                    <button type="button" class="password-toggle" id="loginPasswordToggle" aria-label="Show password" aria-pressed="false">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+                            <circle cx="12" cy="12" r="2.75" />
+                        </svg>
+                    </button>
+                </div>
+                <span asp-validation-for="Password" class="text-danger small"></span>
+            </div>
 
-        <button type="submit" class="btn btn-navy w-100 mt-2">Sign In</button>
-    </form>
+            <input type="hidden" asp-for="ReturnUrl" />
+
+            <button type="submit" class="btn btn-navy w-100 mt-2">Sign In</button>
+
+            <p class="login-form-footnote">Having trouble signing in? Contact your system administrator.</p>
+        </form>
+    </div>
 </div>
+
+<script>
+    (function () {
+        var toggle = document.getElementById('loginPasswordToggle');
+        var input = document.getElementById('loginPasswordInput');
+        if (!toggle || !input) return;
+        toggle.addEventListener('click', function () {
+            var isPassword = input.type === 'password';
+            input.type = isPassword ? 'text' : 'password';
+            toggle.setAttribute('aria-pressed', String(isPassword));
+            toggle.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+            toggle.classList.toggle('is-visible', isPassword);
+        });
+    })();
+</script>

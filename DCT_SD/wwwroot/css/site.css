@@ -376,15 +376,141 @@ body {
   align-items: end;
 }
 
-/* Login page */
-.login-card {
+/* Login page - split shell: branded panel (left) + form panel (right). Always rendered in the
+   light token set (data-bs-theme="light" on .login-shell, matched by the [data-bs-theme="light"]
+   reset above) regardless of a saved dark-mode preference, since this screen renders before the
+   app's own theme toggle is reachable. */
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+}
+.login-hero {
+  flex: 1 1 58%;
+  position: relative;
+  background-size: cover;
+  background-position: left center;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+/* Blends the photo into the white form panel regardless of the source image's own
+   composition/crop, and scrims the bottom-left corner so the footer credit stays legible
+   over whatever part of the photo lands there. */
+.login-hero-scrim {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(19, 32, 56, 0) 55%, var(--color-surface) 100%),
+    linear-gradient(0deg, rgba(11, 15, 23, 0.55) 0%, rgba(11, 15, 23, 0) 22%);
+  pointer-events: none;
+}
+.login-hero-footer {
+  position: relative;
+  z-index: 1;
+  padding: 1.25rem 1.75rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.75rem;
+  letter-spacing: 0.2px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.login-form-panel {
+  flex: 1 1 42%;
+  min-width: 380px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-surface);
+  padding: 2rem 1.5rem;
+}
+.login-form-card {
   width: 100%;
   max-width: 380px;
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 16px;
-  padding: 2.5rem 1.75rem;
-  box-shadow: 0 8px 32px rgba(15, 22, 40, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+.login-form-eyebrow {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--color-gold-dark);
+  margin-bottom: 0.5rem;
+}
+.login-form-title {
+  font-size: 1.6rem;
+  margin-bottom: 0.35rem;
+}
+.login-form-subtitle {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.75rem;
+}
+.login-form-footnote {
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  text-align: center;
+  margin: 1.25rem 0 0;
+}
+
+/* Input fields with a leading icon (and optional trailing action, e.g. password toggle) */
+.input-icon-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-icon-group .input-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--color-muted);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+.input-icon-group .form-control {
+  padding-left: 38px;
+}
+.input-icon-group .password-toggle {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  background: transparent;
+  color: var(--color-muted);
+  border-radius: 6px;
+}
+.input-icon-group .password-toggle:hover {
+  color: var(--color-navy-2);
+  background: var(--color-surface-muted);
+}
+.input-icon-group .password-toggle.is-visible {
+  color: var(--color-gold-dark);
+}
+.input-icon-group:has(.password-toggle) .form-control {
+  padding-right: 38px;
+}
+
+@media (max-width: 860px) {
+  .login-shell {
+    flex-direction: column;
+  }
+  .login-hero {
+    flex: 0 0 auto;
+    height: 40vh;
+    min-height: 250px;
+    background-position: left 30%;
+  }
+  .login-hero-scrim {
+    background:
+      linear-gradient(180deg, rgba(11, 15, 23, 0) 62%, var(--color-surface) 100%),
+      linear-gradient(0deg, rgba(11, 15, 23, 0.62) 0%, rgba(11, 15, 23, 0) 38%);
+  }
+  .login-form-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 1rem 1.5rem 3rem;
+  }
 }
 
 /* Field-level "missing/flagged" treatment */
