@@ -91,17 +91,23 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
-    // ConnectionStrings:DefaultConnection in appsettings.json keeps its normal "Key=Value;..."
-    // shape and is safe to commit: the Server/Database/User Id/Password values are individually
-    // AES-GCM ciphertext, decrypted here using a key that lives only in an environment variable
-    // or user secrets (ConfigProtection:Key / ConfigProtection__Key), never in source control.
+    // ConnectionStrings:DefaultConnection in appsettings.json can hold either a plain connection
+    // string, or one whose Server/Database/User Id/Password values are individually AES-GCM
+    // ciphertext (safe to commit that way) decrypted here using a key that lives only in an
+    // environment variable or user secrets (ConfigProtection:Key / ConfigProtection__Key), never
+    // in source control. ConfigProtection:Key is optional: when it's not set, the connection
+    // string is used exactly as written in appsettings.json (assumed already plain), for
+    // environments that don't want the encryption step at all.
     private static string ResolveConnectionString(IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured.");
 
-        var key = configuration["ConfigProtection:Key"]
-            ?? throw new InvalidOperationException("ConfigProtection:Key is missing. Set it via the ConfigProtection__Key environment variable or user secrets.");
+        var key = configuration["ConfigProtection:Key"];
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return connectionString;
+        }
 
         return ConfigProtector.DecryptConnectionString(connectionString, key);
     }
