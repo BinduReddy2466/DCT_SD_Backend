@@ -27,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IMenuService, MenuService>();
+        services.AddScoped<IDashboardService, DashboardService>();
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IEmptyFolderService, EmptyFolderService>();
         services.AddScoped<IRdConfigService, RdConfigService>();

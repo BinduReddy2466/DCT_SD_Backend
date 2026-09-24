@@ -12,6 +12,7 @@ public static class MenuRoutes
         [MenuKeys.RdConfig] = "/RdConfig",
         [MenuKeys.MigrationMonitoring] = "/Migrations",
         [MenuKeys.ManualValidation] = "/ManualValidation",
+        [MenuKeys.Dashboard] = "/Dashboard",
         [MenuKeys.EmptyFolders] = "/EmptyFolders",
         [MenuKeys.Reports] = "/Reports",
         [MenuKeys.FailedExtraction] = "/FailedExtraction",

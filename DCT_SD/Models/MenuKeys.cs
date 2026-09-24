@@ -5,6 +5,7 @@ public static class MenuKeys
     public const string RdConfig = "rd-config";
     public const string MigrationMonitoring = "migration-monitoring";
     public const string ManualValidation = "manual-validation";
+    public const string Dashboard = "dashboard";
     public const string EmptyFolders = "empty-folders";
     public const string Reports = "reports";
     public const string FailedExtraction = "failed-extraction";
@@ -21,7 +22,7 @@ public static class MenuKeys
 
     public static readonly string[] BaseMenus =
     {
-        RdConfig, MigrationMonitoring, ManualValidation, EmptyFolders, Reports, FailedExtraction
+        RdConfig, MigrationMonitoring, ManualValidation, Dashboard, EmptyFolders, Reports, FailedExtraction
     };
 
     public static readonly string[] RestrictedMenus =
