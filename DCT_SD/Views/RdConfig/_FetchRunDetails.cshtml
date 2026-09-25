@@ -7,6 +7,10 @@
 }
 else
 {
+    var fetchPct = Model.TotalCount.HasValue && Model.TotalCount.Value > 0
+        ? Math.Min(100, (int)Math.Round(Model.ProcessedCount * 100.0 / Model.TotalCount.Value))
+        : (Model.Status != "Ongoing" ? 100 : 0);
+    var fetchComplete = Model.Status != "Ongoing";
     <dl class="row small mb-0">
         <dt class="col-5">ID</dt>
         <dd class="col-7 font-monospace">@Model.Id</dd>
@@ -19,6 +23,16 @@ else
 
         <dt class="col-5">Total Count</dt>
         <dd class="col-7">@(Model.TotalCount?.ToString() ?? "—")</dd>
+
+        <dt class="col-5">Fetch Progress</dt>
+        <dd class="col-7">
+            <div class="fetch-progress">
+                <div class="fetch-progress-track">
+                    <div class="fetch-progress-fill @(fetchComplete ? "is-complete" : "")" style="width: @(fetchPct)%;"></div>
+                </div>
+                <span class="fetch-progress-count">@(fetchPct)%</span>
+            </div>
+        </dd>
 
         <dt class="col-5">Run Time</dt>
         <dd class="col-7">@(Model.RunTime ?? "—")</dd>

@@ -1,5 +1,8 @@
-// Topbar clock, sidebar profile dropdown, and sidebar collapse toggle. Ports the legacy HTML
-// prototype's formatHistoryDate()/tickClock()/toggleProfileMenu() behavior.
+// Topbar clock, sidebar profile dropdown, sidebar collapse toggle, and the Light/Dark theme
+// switch. Ports the legacy HTML prototype's formatHistoryDate()/tickClock()/toggleProfileMenu()
+// behavior. Light is the default theme; Dark Premium (see site.css's [data-bs-theme="dark"]
+// token block) is available as an opt-in via #themeSwitch, which this file also loads on the
+// Login page (Login has its own copy of the same #themeSwitch control - see Login.cshtml).
 (function () {
   'use strict';
 
@@ -44,10 +47,10 @@
     }
 
     // --- Theme toggle (Light/Dark) ---
-    // A single on/off switch in the topbar, next to the clock. The actual data-bs-theme
-    // attribute is already set before this script even runs (see the inline head script in
-    // _Layout.cshtml, which prevents a flash of the wrong theme on load) - this just wires the
-    // switch and keeps its checked state in sync with it.
+    // A single on/off switch (#themeSwitch) in the topbar, and an identical one on the Login
+    // page. The actual data-bs-theme attribute is already set before this script even runs (see
+    // the inline head script in _Layout.cshtml, which prevents a flash of the wrong theme on
+    // load) - this just wires the switch and keeps its checked state in sync with it.
     var THEME_STORAGE_KEY = 'dct-theme';
     var themeSwitch = document.getElementById('themeSwitch');
 

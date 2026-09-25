@@ -8,7 +8,7 @@
                 <th>Request ID</th>
                 <th>Migration Date</th>
                 <th>RD</th>
-                <th>Entry No.</th>
+                <th class="cell-wrap">Entry No.</th>
                 <th>Title No.</th>
                 <th>Title Type</th>
                 <th>Migration Status</th>
@@ -30,7 +30,7 @@
                         <td><span class="chip-mono">@item.RequestNumber</span></td>
                         <td>@item.MigrationDate.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>@item.RdName</td>
-                        <td>@(item.EntryNumbersCsv ?? "—")</td>
+                        <td class="cell-wrap">@(item.EntryNumbersCsv ?? "—")</td>
                         <td class="font-monospace small">@(item.Title ?? "—")</td>
                         <td>@(item.TitleType ?? "—")</td>
                         <td><status-badge status="@StatusDisplay.MigrationStatusToDisplay(item.MigrationStatus)"></status-badge></td>

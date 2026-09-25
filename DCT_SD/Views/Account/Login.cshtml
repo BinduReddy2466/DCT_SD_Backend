@@ -5,8 +5,14 @@
     var heroUrl = string.IsNullOrEmpty(backgroundUrl) ? Url.Content("~/images/login-hero.png") : backgroundUrl;
 }
 
-<div class="login-shell" data-bs-theme="light">
-    <div class="login-hero" style="background-image: url('@heroUrl');">
+<div class="login-shell">
+    <div class="login-theme-toggle form-check form-switch mb-0" title="Switch between Light and Dark theme">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path stroke-linecap="round" d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" /></svg>
+        <input class="form-check-input" type="checkbox" role="switch" id="themeSwitch" style="cursor: pointer;" aria-label="Toggle Dark theme">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
+    </div>
+    <div class="login-hero">
+        <div class="login-hero-photo" style="background-image: url('@heroUrl');"></div>
         <div class="login-hero-scrim"></div>
         <div class="login-hero-footer">Authorized personnel only &middot; Activity is logged and monitored</div>
     </div>

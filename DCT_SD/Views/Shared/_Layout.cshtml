@@ -48,7 +48,9 @@
     <title>@(ViewData["Title"] != null ? ViewData["Title"] + " - DCT" : "DCT")</title>
     <!-- Applies the saved theme (default Light - see app-shell.js) before the stylesheets/body
          render, so a returning Dark-theme user never sees a flash of the Light theme first.
-         Kept inline/synchronous for exactly that reason - an external script would load too late. -->
+         Kept inline/synchronous for exactly that reason - an external script would load too late.
+         Runs on every page, including Login (rendered through this same layout), so the theme
+         choice - and the Dark Premium look it unlocks - is available even before authentication. -->
     <script>
         (function () {
             var theme = 'light';
@@ -85,14 +87,14 @@
                         <li class="nav-item">
                             @if (builtMenuRoutes.TryGetValue(key, out var route))
                             {
-                                <a class="nav-link d-flex align-items-center gap-3 @(ViewData["ActiveMenu"] as string == key ? "active" : "")" href="@route">
+                                <a class="nav-link d-flex align-items-center gap-3 @(ViewData["ActiveMenu"] as string == key ? "active" : "")" href="@route" title="@menuLabels[key]">
                                     @Html.Raw(MenuIcons.Svg(key))
                                     <span class="nav-label">@menuLabels[key]</span>
                                 </a>
                             }
                             else
                             {
-                                <span class="nav-link d-flex align-items-center gap-3 disabled opacity-50">
+                                <span class="nav-link d-flex align-items-center gap-3 disabled opacity-50" title="@(menuLabels[key] + " (coming soon)")">
                                     @Html.Raw(MenuIcons.Svg(key))
                                     <span class="nav-label">@menuLabels[key] <small>(coming soon)</small></span>
                                 </span>
