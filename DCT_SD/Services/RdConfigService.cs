@@ -320,7 +320,7 @@ public class RdConfigService : IRdConfigService
     }
 
     private static IEnumerable<DriveInfo> GetAllowedDrives() =>
-        DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady);
+        DriveInfo.GetDrives().Where(d => (d.DriveType == DriveType.Fixed || d.DriveType == DriveType.Network) && d.IsReady);
 
     // Only allows browsing within one of this machine's own fixed drives - defends against a
     // crafted path (e.g. a UNC path or one built from ".." segments) resolving somewhere
