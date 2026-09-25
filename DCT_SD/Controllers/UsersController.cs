@@ -254,7 +254,11 @@ public class UsersController : Controller
     private async Task<IReadOnlyList<RoleDto>> GetRoleOptionsAsync(string? currentRole, string? editingUserRole, CancellationToken cancellationToken)
     {
         var roles = await _roleService.GetAllAsync(cancellationToken);
-        var options = roles.Where(r => r.Name != RoleNames.Administrator);
+        // Encoder/LARES QA/LRA QA are no longer offered as a selectable role - Sub-Admin is the
+        // only assignable option now. An existing account already in one of those roles still
+        // displays correctly (see the editingUserRole fallback below); it just can't be newly
+        // assigned to anyone else.
+        var options = roles.Where(r => r.Name != RoleNames.Administrator && !NonSubAdminRoles.Contains(r.Name));
 
         if (currentRole == RoleNames.SubAdmin)
         {

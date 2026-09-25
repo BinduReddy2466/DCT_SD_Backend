@@ -11,7 +11,7 @@ public class MenuService : IMenuService
 {
     private static readonly MenuDto[] FixedMenus =
     [
-        new() { Id = 1, Key = MenuKeys.RdConfig, Label = "RD Configuration", IsBaseMenu = true },
+        new() { Id = 1, Key = MenuKeys.RdConfig, Label = "Fetching Management", IsBaseMenu = true },
         new() { Id = 2, Key = MenuKeys.MigrationMonitoring, Label = "Migration Monitoring", IsBaseMenu = true },
         new() { Id = 4, Key = MenuKeys.ManualValidation, Label = "Manual Validation", IsBaseMenu = true },
         new() { Id = 12, Key = MenuKeys.Dashboard, Label = "Dashboard", IsBaseMenu = true },
@@ -24,11 +24,13 @@ public class MenuService : IMenuService
         new() { Id = 9, Key = MenuKeys.DctSd, Label = "DCT_SD", IsBaseMenu = false },
     ];
 
-    // Base menus (the individual DCT_SD pages) are never individually assignable - a Sub-Admin
-    // gets all of them at once, or none, via the single "DCT_SD" parent toggle (see
-    // AllowedMenuResolver). So the Assign Tab picker's list, its pre-checked state, and its
-    // "N selected" count all stay scoped to this same set: DCT_SD plus the 3 restricted pages.
-    private static readonly MenuDto[] AssignableMenus = FixedMenus.Where(m => !m.IsBaseMenu).ToArray();
+    // The Assign Tab picker's list, its pre-checked state, and its "N selected" count all stay
+    // scoped to this same set: the individual DCT_SD base menus, each grantable on its own -
+    // User Management/Roles/Settings are never offered here. AllowedMenuResolver's separate
+    // "dct-sd" all-or-nothing bundle key stays supported at login time (unchanged) purely so any
+    // account that already has it saved keeps its existing access; it's just no longer selectable
+    // from this picker going forward.
+    private static readonly MenuDto[] AssignableMenus = FixedMenus.Where(m => m.IsBaseMenu).ToArray();
 
     public Task<IReadOnlyList<MenuDto>> GetAllAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<MenuDto>>(AssignableMenus);
