@@ -13,11 +13,13 @@ public class RdConfigService : IRdConfigService
 {
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IRemoteFolderBrowserService _folderBrowser;
 
-    public RdConfigService(ApplicationDbContext context, ICurrentUserService currentUser)
+    public RdConfigService(ApplicationDbContext context, ICurrentUserService currentUser, IRemoteFolderBrowserService folderBrowser)
     {
         _context = context;
         _currentUser = currentUser;
+        _folderBrowser = folderBrowser;
     }
 
     public async Task<RootPathDto> GetCurrentRootPathAsync(CancellationToken cancellationToken = default)
@@ -278,12 +280,22 @@ public class RdConfigService : IRdConfigService
     {
         if (string.IsNullOrWhiteSpace(path))
         {
-            var drives = GetAllowedDrives()
-                .Select(d => new DirectoryEntryDto { Name = d.Name.TrimEnd('\\'), FullPath = d.Name })
+            var mappedDrives = _folderBrowser.GetMappedDrives();
+            var drives = mappedDrives
+                .Select(d => new DirectoryEntryDto { Name = $"{d.DriveLetter} \u2192 {d.UncPath}", FullPath = d.UncPath })
                 .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            return Task.FromResult(new DirectoryBrowseDto { CurrentPath = null, ParentPath = null, Directories = drives });
+            // No mapped/shared drive is visible to this process's identity at all - a distinct,
+            // actionable message (rather than the generic "No subfolders found." the view falls
+            // back to) since this specifically means the current Windows identity (the IIS
+            // Application Pool once deployed, or the local VM user in dev) has nothing mapped for
+            // it, not that a folder happens to be empty.
+            var error = drives.Length == 0
+                ? "No mapped or shared network drives are available to this application. Ask your administrator to map a network drive for this application's Windows identity."
+                : null;
+
+            return Task.FromResult(new DirectoryBrowseDto { CurrentPath = null, ParentPath = null, Directories = drives, Error = error });
         }
 
         string normalized;
@@ -309,6 +321,8 @@ public class RdConfigService : IRdConfigService
             directories = new List<DirectoryEntryDto>();
         }
 
+        // GetParent on a UNC root (e.g. "\\server\share") returns null, same as GetParent on a
+        // drive root did before - "Up" correctly disables once back at the mapped drive's root.
         var parentPath = Directory.GetParent(normalized)?.FullName;
 
         return Task.FromResult(new DirectoryBrowseDto
@@ -319,13 +333,14 @@ public class RdConfigService : IRdConfigService
         });
     }
 
-    private static IEnumerable<DriveInfo> GetAllowedDrives() =>
-        DriveInfo.GetDrives().Where(d => (d.DriveType == DriveType.Fixed || d.DriveType == DriveType.Network) && d.IsReady);
-
-    // Only allows browsing within one of this machine's own fixed drives - defends against a
-    // crafted path (e.g. a UNC path or one built from ".." segments) resolving somewhere
-    // outside the set of roots the picker itself ever offers.
-    private static string ValidateAndNormalizePath(string path)
+    // Resolves the given path to its UNC form via IRemoteFolderBrowserService - which is also
+    // where the actual security boundary lives: it only ever returns true for a path rooted at
+    // one of the CURRENTLY mapped/shared drives, so a local drive (C:, D:, ...) or a crafted UNC
+    // path outside every mapped share is rejected here exactly the same way an inaccessible path
+    // is, without this method needing its own separate allowlist. GetFullPath collapses any ".."
+    // segments before that check ever runs, so a crafted "..\..\Windows"-style path can only ever
+    // resolve to somewhere still under an already-authorized share, never outside of it.
+    private string ValidateAndNormalizePath(string path)
     {
         if (!Path.IsPathRooted(path))
         {
@@ -342,16 +357,12 @@ public class RdConfigService : IRdConfigService
             throw new BusinessValidationException("This folder is not accessible.");
         }
 
-        var root = Path.GetPathRoot(full)?.TrimEnd('\\');
-        var isAllowedDrive = !string.IsNullOrEmpty(root) &&
-            GetAllowedDrives().Any(d => string.Equals(d.Name.TrimEnd('\\'), root, StringComparison.OrdinalIgnoreCase));
-
-        if (!isAllowedDrive || !Directory.Exists(full))
+        if (!_folderBrowser.TryResolveToUncPath(full, out var uncFull) || !Directory.Exists(uncFull))
         {
             throw new BusinessValidationException("This folder is not accessible.");
         }
 
-        return full;
+        return uncFull;
     }
 
     private Task<FetchRun?> GetLatestHistoryAsync(CancellationToken cancellationToken) =>

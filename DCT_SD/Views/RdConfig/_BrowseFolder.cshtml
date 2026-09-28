@@ -27,7 +27,7 @@
                         </td>
                     </tr>
                 }
-                @if (Model.Directories.Count == 0)
+                @if (Model.Directories.Count == 0 && string.IsNullOrEmpty(Model.Error))
                 {
                     <tr><td class="text-center text-muted py-3">No subfolders found.</td></tr>
                 }

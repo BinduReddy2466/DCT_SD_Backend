@@ -1,11 +1,14 @@
 // The "Browse Folder" button opens the shared #ajaxModal via modal-loader.js's generic
 // data-modal-url mechanism, loading RdConfigController.BrowseFolders (a server-side directory
-// listing of this machine's fixed drives, drilling down like a native folder picker). This
-// exists because browsers deliberately never expose a real filesystem path from the
-// client-side File System Access API - only ever a folder *name* - which cannot work as an
-// actual scan root for the backend's fetch process. Clicking a folder/the "Up" link re-fetches
-// this same partial into the modal (event delegation on #ajaxModalContent, since content
-// swapped in via innerHTML never re-runs inline scripts). "Select This Folder" copies the
+// listing of this machine's mapped/shared network drives - never local/fixed drives - drilling
+// down like a native folder picker; see IRemoteFolderBrowserService). Every path the modal shows
+// or hands back, from the drive list down through every subfolder, is already resolved to its
+// UNC form server-side, so "Select This Folder" below always copies a UNC path, never a
+// drive-letter one. This exists because browsers deliberately never expose a real filesystem
+// path from the client-side File System Access API - only ever a folder *name* - which cannot
+// work as an actual scan root for the backend's fetch process. Clicking a folder/the "Up" link
+// re-fetches this same partial into the modal (event delegation on #ajaxModalContent, since
+// content swapped in via innerHTML never re-runs inline scripts). "Select This Folder" copies the
 // modal's current path into the Root Source Path field and closes the modal; Cancel/dismissing
 // the modal leaves the field untouched.
 (function () {

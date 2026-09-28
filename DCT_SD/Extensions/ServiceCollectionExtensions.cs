@@ -31,6 +31,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IEmptyFolderService, EmptyFolderService>();
         services.AddScoped<IRdConfigService, RdConfigService>();
+        services.AddScoped<IRemoteFolderBrowserService, RemoteFolderBrowserService>();
         services.AddScoped<IRegistryOfficeService, RegistryOfficeService>();
         services.AddScoped<IDocumentTypeService, DocumentTypeService>();
         services.AddScoped<IMigrationService, MigrationService>();
