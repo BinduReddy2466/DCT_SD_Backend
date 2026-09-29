@@ -63,7 +63,14 @@
     <link rel="stylesheet" href="~/lib/bootstrap/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
 </head>
-<body>
+@{
+    // The server's own currently-configured UTC offset, in minutes - lets client-side JS (which
+    // otherwise only knows the VIEWER's browser timezone) show "the server's local time" too,
+    // consistent with every server-rendered timestamp (see Helpers/DisplayTime.cs). Read fresh on
+    // every page load rather than cached, so a server timezone change takes effect immediately.
+    var serverUtcOffsetMinutes = (int)TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow).TotalMinutes;
+}
+<body data-server-utc-offset-minutes="@serverUtcOffsetMinutes">
     @if (isAuthenticated)
     {
         <div class="d-flex" id="appShell">
@@ -214,6 +221,7 @@
     }
 
     <script src="~/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/server-time.js" asp-append-version="true"></script>
     <script src="~/js/list-page.js"></script>
     <script src="~/js/date-range.js" asp-append-version="true"></script>
     <script src="~/js/modal-loader.js"></script>

@@ -24,7 +24,7 @@
                 {
                     var rd = string.Join(" - ", new[] { item.RdCode, item.RdName }.Where(v => !string.IsNullOrWhiteSpace(v)));
                     <tr>
-                        <td class="font-monospace small">@item.FetchDateTime.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@item.FetchDateTime.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>@(string.IsNullOrEmpty(rd) ? "—" : rd)</td>
                         <td>@item.FolderName</td>
                         <td class="font-monospace small">@item.FolderPath</td>

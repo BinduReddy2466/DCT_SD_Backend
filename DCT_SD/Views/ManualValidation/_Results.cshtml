@@ -36,7 +36,7 @@
                            "Incomplete Extraction" (no period) stored - changing the shared map's
                            value would break parsing those rows back into the enum on read. *@
                         <td><status-badge status="@(item.Status == "IncompleteExtraction" ? "Incomplete Extraction." : StatusDisplay.ManualValidationStatusToDisplay(item.Status))"></status-badge></td>
-                        <td class="font-monospace small">@item.ExtractionDate.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@item.ExtractionDate.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>
                             @if (item.UpdatedBy != null)
                             {
@@ -47,7 +47,7 @@
                                 @:—
                             }
                         </td>
-                        <td class="font-monospace small">@(item.UpdatedDate.ToIst()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
+                        <td class="font-monospace small">@(item.UpdatedDate.ToLocalDisplay()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
                         <td>
                             <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "ManualValidation", new { id = item.Id })">View</a>
                         </td>

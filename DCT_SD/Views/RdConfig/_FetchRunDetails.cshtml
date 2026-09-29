@@ -47,10 +47,10 @@ else
         <dd class="col-7 font-monospace">@(Model.LastProcessedFolderPath ?? "—")</dd>
 
         <dt class="col-5">Started At</dt>
-        <dd class="col-7 font-monospace">@Model.StartedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</dd>
+        <dd class="col-7 font-monospace">@Model.StartedAt.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</dd>
 
         <dt class="col-5">Completed At</dt>
-        <dd class="col-7 font-monospace">@(Model.CompletedAt.ToIst()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</dd>
+        <dd class="col-7 font-monospace">@(Model.CompletedAt.ToLocalDisplay()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</dd>
 
         @if (!string.IsNullOrWhiteSpace(Model.FailureReason))
         {

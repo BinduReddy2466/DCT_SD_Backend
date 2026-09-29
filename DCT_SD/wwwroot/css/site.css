@@ -883,6 +883,35 @@ a:hover { color: var(--bs-link-hover-color); }
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
 .form-control::placeholder { color: var(--color-muted-2); }
+/* Replaces the browser's own tiny/inconsistent native select arrow with one deliberate chevron
+   icon, sized and positioned the same everywhere - the light/dark variants below only swap its
+   color to match each theme's ink, since an inline SVG background-image can't read a CSS custom
+   property directly. */
+.form-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.25rem;
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 14px 14px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23161A22' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+[data-bs-theme="dark"] .form-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23EAF0FC' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+/* The dropdown *list* a <select> opens is rendered natively by the OS/browser, not by our own
+   CSS - Chromium-based browsers (Edge/Chrome) do respect color/background-color set directly on
+   <option> elements, though, so this is what actually fixes the "light popup on a dark page"
+   mismatch; other engines may still fall back to their own native styling regardless. */
+.form-select option {
+  background-color: var(--color-surface-solid);
+  color: var(--color-ink);
+}
+.form-select option:checked,
+.form-select option:hover {
+  background-color: var(--color-blue);
+  color: #fff;
+}
 .form-control:focus, .form-select:focus {
   border-color: var(--color-blue);
   box-shadow: var(--shadow-focus);

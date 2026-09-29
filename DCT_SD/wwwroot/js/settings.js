@@ -109,7 +109,15 @@
     if (activeKey) renderEmailTemplate(activeKey);
 
     function fillEmailPlaceholders(text) {
-      var now = new Date();
+      // Matches Helpers/EmailPlaceholders.cs's own server-side preview value - both follow
+      // whatever timezone the server itself is configured with (via the offset server-time.js
+      // embeds on <body>), rather than each independently computing "today" in a different
+      // timezone. This is just a template preview (never an actual sent email).
+      var offsetRaw = document.body ? document.body.getAttribute('data-server-utc-offset-minutes') : null;
+      var offsetMinutes = offsetRaw === null ? NaN : parseInt(offsetRaw, 10);
+      if (isNaN(offsetMinutes)) offsetMinutes = 0;
+      var shifted = new Date(Date.now() + offsetMinutes * 60000);
+      var currentDate = String(shifted.getUTCMonth() + 1).padStart(2, '0') + '-' + String(shifted.getUTCDate()).padStart(2, '0') + '-' + shifted.getUTCFullYear();
       var sample = {
         '{{FirstName}}': 'Jane',
         '{{LastName}}': 'Doe',
@@ -117,7 +125,7 @@
         '{{TemporaryPassword}}': 'TempPass@123',
         '{{ResetPasswordLink}}': 'https://lares.example.com/reset-password?token=demo',
         '{{ChangePasswordLink}}': 'https://lares.example.com/change-password?token=demo',
-        '{{CurrentDate}}': String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0') + '-' + now.getFullYear(),
+        '{{CurrentDate}}': currentDate,
       };
       var out = text;
       Object.keys(sample).forEach(function (key) {

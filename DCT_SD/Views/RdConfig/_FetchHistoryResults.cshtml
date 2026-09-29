@@ -29,8 +29,8 @@
                         : (item.Status != "Ongoing" ? 100 : 0);
                     var fetchComplete = item.Status != "Ongoing";
                     <tr>
-                        <td class="font-monospace small">@item.StartedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
-                        <td class="font-monospace small">@(item.CompletedAt.ToIst()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
+                        <td class="font-monospace small">@item.StartedAt.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td class="font-monospace small">@(item.CompletedAt.ToLocalDisplay()?.ToString("MM/dd/yyyy h:mm tt") ?? "—")</td>
                         <td>@(item.RunTime ?? "—")</td>
                         <td>
                             <div class="fetch-progress">

@@ -6,14 +6,11 @@
 (function () {
   'use strict';
 
+  // Shows the server's own configured local time (not the viewer's browser/OS timezone) - see
+  // wwwroot/js/server-time.js / Helpers/DisplayTime.cs. Whatever timezone the server this app is
+  // deployed on is set to, that's what the topbar clock (and every other timestamp) follows.
   function formatClock(date) {
-    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    var hours = date.getHours();
-    var minutes = String(date.getMinutes()).padStart(2, '0');
-    var ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12;
-    if (hours === 0) hours = 12;
-    return months[date.getMonth()] + ' ' + String(date.getDate()).padStart(2, '0') + ', ' + date.getFullYear() + ' ' + String(hours).padStart(2, '0') + ':' + minutes + ' ' + ampm;
+    return window.formatServerClock ? window.formatServerClock(date) : date.toLocaleString();
   }
 
   document.addEventListener('DOMContentLoaded', function () {

@@ -14,7 +14,7 @@ public static class EmailPlaceholders
             ["{{TemporaryPassword}}"] = "TempPass@123",
             ["{{ResetPasswordLink}}"] = "https://lares.example.com/reset-password?token=demo",
             ["{{ChangePasswordLink}}"] = "https://lares.example.com/change-password?token=demo",
-            ["{{CurrentDate}}"] = DateTime.Now.ToString("MM-dd-yyyy"),
+            ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
         };
 
         var result = text;

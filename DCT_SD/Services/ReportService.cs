@@ -337,7 +337,7 @@ public class ReportService : IReportService
         PageSize = page.PageSize,
     };
 
-    private static string FormatDate(DateTime value) => value.ToIst().ToString("MM/dd/yyyy h:mm tt");
+    private static string FormatDate(DateTime value) => value.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt");
     private static string FormatDate(DateTime? value) => value.HasValue ? FormatDate(value.Value) : string.Empty;
 
     public async Task<ReportGenerationResult> GenerateAsync(string reportType, IDictionary<string, string?> filters, CancellationToken cancellationToken = default)
@@ -368,7 +368,7 @@ public class ReportService : IReportService
         {
             HasRecords = true,
             FileBytes = stream.ToArray(),
-            FileName = $"{label}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx",
+            FileName = $"{label}_{DateTime.UtcNow.ToLocalDisplay():yyyyMMdd_HHmmss}.xlsx",
         };
     }
 
@@ -389,7 +389,7 @@ public class ReportService : IReportService
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.ModifiedAt.ToIst();
+            sheet.Cell(row, 1).Value = item.ModifiedAt.ToLocalDisplay();
             sheet.Cell(row, 2).Value = item.FromPath ?? string.Empty;
             sheet.Cell(row, 3).Value = item.ToPath;
             sheet.Cell(row, 4).Value = item.ModifiedBy;
@@ -418,8 +418,8 @@ public class ReportService : IReportService
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.StartedAt.ToIst();
-            if (item.CompletedAt.HasValue) sheet.Cell(row, 2).Value = item.CompletedAt.Value.ToIst();
+            sheet.Cell(row, 1).Value = item.StartedAt.ToLocalDisplay();
+            if (item.CompletedAt.HasValue) sheet.Cell(row, 2).Value = item.CompletedAt.Value.ToLocalDisplay();
             sheet.Cell(row, 3).Value = item.RunTime ?? string.Empty;
             sheet.Cell(row, 4).Value = item.TotalCount.HasValue ? $"{item.ProcessedCount}/{item.TotalCount}" : item.ProcessedCount.ToString();
             sheet.Cell(row, 5).Value = item.Status;
@@ -454,7 +454,7 @@ public class ReportService : IReportService
         foreach (var item in items)
         {
             sheet.Cell(row, 1).Value = item.RequestNumber;
-            sheet.Cell(row, 2).Value = item.MigrationDate.ToIst();
+            sheet.Cell(row, 2).Value = item.MigrationDate.ToLocalDisplay();
             sheet.Cell(row, 3).Value = item.RdName;
             sheet.Cell(row, 4).Value = item.EntryNumbersCsv ?? string.Empty;
             sheet.Cell(row, 5).Value = item.Title ?? string.Empty;
@@ -498,9 +498,9 @@ public class ReportService : IReportService
             sheet.Cell(row, 6).Value = item.TitleType ?? string.Empty;
             sheet.Cell(row, 7).Value = StatusDisplay.ManualValidationStatusToDisplay(item.Status);
             sheet.Cell(row, 8).Value = StatusDisplay.DescribeMissingFields(item.MissingFields);
-            sheet.Cell(row, 9).Value = item.ExtractionDate.ToIst();
+            sheet.Cell(row, 9).Value = item.ExtractionDate.ToLocalDisplay();
             sheet.Cell(row, 10).Value = item.UpdatedBy ?? string.Empty;
-            if (item.UpdatedDate.HasValue) sheet.Cell(row, 11).Value = item.UpdatedDate.Value.ToIst();
+            if (item.UpdatedDate.HasValue) sheet.Cell(row, 11).Value = item.UpdatedDate.Value.ToLocalDisplay();
             row++;
         }
 
@@ -526,7 +526,7 @@ public class ReportService : IReportService
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.FetchDateTime.ToIst();
+            sheet.Cell(row, 1).Value = item.FetchDateTime.ToLocalDisplay();
             sheet.Cell(row, 2).Value = item.RdCode ?? string.Empty;
             sheet.Cell(row, 3).Value = item.RdName ?? string.Empty;
             sheet.Cell(row, 4).Value = item.FolderName;
@@ -557,7 +557,7 @@ public class ReportService : IReportService
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.ExtractionDateTime.ToIst();
+            sheet.Cell(row, 1).Value = item.ExtractionDateTime.ToLocalDisplay();
             sheet.Cell(row, 2).Value = item.RdName ?? string.Empty;
             sheet.Cell(row, 3).Value = item.FolderName;
             sheet.Cell(row, 4).Value = item.FolderPath;

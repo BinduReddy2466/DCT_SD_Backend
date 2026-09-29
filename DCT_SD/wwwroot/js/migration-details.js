@@ -92,7 +92,7 @@
         info.innerHTML =
           '<div class="mb-2"><span class="badge badge-info">' + badge + '</span></div>' +
           (doc.performedBy ? '<div><strong>Performed By:</strong> ' + doc.performedBy + '</div>' : '') +
-          (doc.actionDate ? '<div><strong>Action Date:</strong> ' + new Date(doc.actionDate).toLocaleString() + '</div>' : '');
+          (doc.actionDate ? '<div><strong>Action Date:</strong> ' + (window.formatServerDateTime ? window.formatServerDateTime(doc.actionDate) : new Date(doc.actionDate).toLocaleString()) + '</div>' : '');
         footerEl.appendChild(info);
       }
     }

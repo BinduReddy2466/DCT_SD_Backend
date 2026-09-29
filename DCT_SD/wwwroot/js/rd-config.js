@@ -144,13 +144,12 @@
       return undefined;
     }
 
+    // The server's own local time (whatever timezone that machine is configured with), matching
+    // every server-rendered timestamp on this same table (see server-time.js /
+    // DisplayTime.ToLocalDisplay()), so this optimistic live row never disagrees with what the
+    // row shows once the page reloads.
     function formatNow(date) {
-      var hours = date.getHours();
-      var minutes = String(date.getMinutes()).padStart(2, '0');
-      var ampm = hours >= 12 ? 'PM' : 'AM';
-      hours = hours % 12 || 12;
-      return (date.getMonth() + 1) + '/' + String(date.getDate()).padStart(2, '0') + '/' + date.getFullYear() +
-        ' ' + hours + ':' + minutes + ' ' + ampm;
+      return window.formatServerClock ? window.formatServerClock(date) : date.toLocaleString();
     }
 
     function getHistoryTbody() {

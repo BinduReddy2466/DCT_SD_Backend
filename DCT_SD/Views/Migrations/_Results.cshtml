@@ -28,7 +28,7 @@
                 {
                     <tr>
                         <td><span class="chip-mono">@item.RequestNumber</span></td>
-                        <td>@item.MigrationDate.ToIst().ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td>@item.MigrationDate.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>@item.RdName</td>
                         <td class="cell-wrap">@(item.EntryNumbersCsv ?? "—")</td>
                         <td class="font-monospace small">@(item.Title ?? "—")</td>

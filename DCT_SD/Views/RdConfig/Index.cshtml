@@ -37,7 +37,7 @@
             @if (Model.LatestUpdate != null)
             {
                 <div class="small mt-1">
-                    @Model.LatestUpdate.ModifiedAt.ToIst().ToString("MM/dd/yyyy h:mm tt")
+                    @Model.LatestUpdate.ModifiedAt.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")
                     <span class="text-muted mx-2">|</span>
                     Modified by <strong>@Model.LatestUpdate.ModifiedBy</strong>
                 </div>
