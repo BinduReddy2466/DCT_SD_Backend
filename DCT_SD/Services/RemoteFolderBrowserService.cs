@@ -9,50 +9,71 @@ namespace DCT_SD.Services;
 
 // Resolves mapped/shared network drives - and mapped-drive paths to their UNC form - dynamically
 // from the current Windows process's own drive-mapping table (via the WNetGetConnection Win32
-// API), never from a hardcoded drive letter or server. This is deliberately the ONLY thing this
-// service knows about: which network drives THIS process's identity currently sees, and what
-// they resolve to. On the local dev VM that's the interactively logged-on user; once deployed to
-// IIS it's whatever the Application Pool's identity has mapped (which may be none at all - see
-// GetMappedDrives, no drive is ever assumed present).
+// API), never from a hardcoded drive letter or server. On the local dev VM that's the
+// interactively logged-on user; once deployed to IIS it's whatever the Application Pool's
+// identity has mapped - which, in practice, is often nothing at all, not due to misconfiguration
+// but a genuine Windows limitation: a drive letter mapped for that identity in one logon session
+// (e.g. a Scheduled Task run) is not visible from a different logon session for that same
+// identity (IIS's own worker process) - Windows only auto-reconnects persistent drives during an
+// actual interactive desktop logon, never for a background service. Live drive-letter detection
+// therefore can't be relied on as the only source in an IIS deployment, so
+// RemoteFolderBrowser:NetworkRoots (appsettings.json) supplements it with explicitly configured
+// UNC paths - each entry is still exactly a network location, still subject to that Windows
+// identity's real file-share permissions, and still resolved/validated the same way; this only
+// removes the dependency on a drive letter happening to be visible in that specific session.
 public class RemoteFolderBrowserService : IRemoteFolderBrowserService
 {
     private readonly ILogger<RemoteFolderBrowserService> _logger;
+    private readonly IConfiguration _configuration;
 
-    public RemoteFolderBrowserService(ILogger<RemoteFolderBrowserService> logger)
+    public RemoteFolderBrowserService(ILogger<RemoteFolderBrowserService> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _configuration = configuration;
     }
 
     public IReadOnlyList<MappedDriveDto> GetMappedDrives()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            // Mapped drives are a Windows concept (WNetGetConnection is Windows-only); on any
-            // other OS there simply are none to offer - not an error, just an empty picker.
-            return Array.Empty<MappedDriveDto>();
-        }
-
         var result = new List<MappedDriveDto>();
 
-        foreach (var drive in DriveInfo.GetDrives())
+        if (OperatingSystem.IsWindows())
         {
-            if (drive.DriveType != DriveType.Network)
+            foreach (var drive in DriveInfo.GetDrives())
             {
-                // Local/fixed drives (C:, D:, ...) are never offered - mapped/shared drives only.
-                continue;
+                if (drive.DriveType != DriveType.Network)
+                {
+                    // Local/fixed drives (C:, D:, ...) are never offered - mapped/shared drives only.
+                    continue;
+                }
+
+                var letter = drive.Name.TrimEnd('\\');
+                if (!TryGetUncTarget(letter, out var uncPath))
+                {
+                    // A network drive DriveInfo enumerated but WNetGetConnection couldn't resolve
+                    // (disconnected share, transient network issue, etc.) - skip it rather than
+                    // show a drive with no usable target; logged for diagnosis, never surfaced
+                    // raw to the UI.
+                    _logger.LogWarning("Mapped drive {DriveLetter} is listed but its UNC target could not be resolved.", letter);
+                    continue;
+                }
+
+                result.Add(new MappedDriveDto { DriveLetter = letter, UncPath = uncPath });
+            }
+        }
+
+        foreach (var configuredRoot in _configuration.GetSection("RemoteFolderBrowser:NetworkRoots").Get<string[]>() ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(configuredRoot)) continue;
+
+            var normalized = configuredRoot.TrimEnd('\\');
+            if (result.Any(d => string.Equals(d.UncPath, normalized, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue; // Already offered via a live-detected drive - don't list it twice.
             }
 
-            var letter = drive.Name.TrimEnd('\\');
-            if (!TryGetUncTarget(letter, out var uncPath))
-            {
-                // A network drive DriveInfo enumerated but WNetGetConnection couldn't resolve
-                // (disconnected share, transient network issue, etc.) - skip it rather than show
-                // a drive with no usable target; logged for diagnosis, never surfaced raw to the UI.
-                _logger.LogWarning("Mapped drive {DriveLetter} is listed but its UNC target could not be resolved.", letter);
-                continue;
-            }
-
-            result.Add(new MappedDriveDto { DriveLetter = letter, UncPath = uncPath });
+            // No drive letter - this entry only exists because a real mapped drive couldn't be
+            // relied on to appear for this identity/session; the UI shows the UNC path directly.
+            result.Add(new MappedDriveDto { DriveLetter = string.Empty, UncPath = normalized });
         }
 
         return result;
@@ -62,7 +83,12 @@ public class RemoteFolderBrowserService : IRemoteFolderBrowserService
     {
         uncPath = string.Empty;
 
-        if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(path))
+        // No platform guard here - GetMappedDrives() already gates its own Windows-only portion
+        // internally (drive-letter detection) while still returning configured NetworkRoots on
+        // any OS, so this method works the same way: the UNC-already branch below never needed
+        // Windows-specific APIs at all, and gating it out here would incorrectly block resolving
+        // a configured network root too.
+        if (string.IsNullOrWhiteSpace(path))
         {
             return false;
         }

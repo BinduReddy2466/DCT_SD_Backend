@@ -282,7 +282,14 @@ public class RdConfigService : IRdConfigService
         {
             var mappedDrives = _folderBrowser.GetMappedDrives();
             var drives = mappedDrives
-                .Select(d => new DirectoryEntryDto { Name = $"{d.DriveLetter} \u2192 {d.UncPath}", FullPath = d.UncPath })
+                // A configured network root (RemoteFolderBrowser:NetworkRoots) has no drive
+                // letter - shown as just its UNC path rather than a misleading "\u2192" with nothing
+                // on the left.
+                .Select(d => new DirectoryEntryDto
+                {
+                    Name = string.IsNullOrEmpty(d.DriveLetter) ? d.UncPath : $"{d.DriveLetter} \u2192 {d.UncPath}",
+                    FullPath = d.UncPath,
+                })
                 .OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
