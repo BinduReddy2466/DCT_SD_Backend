@@ -58,7 +58,7 @@ public class RdFetchApiClient : IRdFetchApiClient
         {
             _logger.LogError(ex, "POST {BaseAddress}/fetch/start timed out.", _httpClient.BaseAddress);
             throw new BusinessValidationException(
-                "The fetch service did not respond in time. Make sure you're connected to Paradigm WiFi or VPN and try again.");
+                "The fetch service did not respond in time.");
         }
 
         if (!response.IsSuccessStatusCode)
@@ -91,7 +91,7 @@ public class RdFetchApiClient : IRdFetchApiClient
         {
             _logger.LogError(ex, "GET {BaseAddress}/fetch/{FetchRunId} timed out.", _httpClient.BaseAddress, fetchRunId);
             throw new BusinessValidationException(
-                "The fetch service did not respond in time. Make sure you're connected to Paradigm WiFi or VPN and try again.");
+                "The fetch service did not respond in time.");
         }
 
         using (response)
@@ -177,7 +177,7 @@ public class RdFetchApiClient : IRdFetchApiClient
         {
             _logger.LogError(ex, "POST {BaseAddress}{RequestUri} timed out.", _httpClient.BaseAddress, requestUri);
             throw new BusinessValidationException(
-                "The fetch service did not respond in time. Make sure you're connected to Paradigm WiFi or VPN and try again.");
+                "The fetch service did not respond in time.");
         }
 
         if (!response.IsSuccessStatusCode)
