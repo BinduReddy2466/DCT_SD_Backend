@@ -116,9 +116,14 @@ public class RdConfigController : Controller
         var current = await _rdConfigService.GetCurrentRootPathAsync(cancellationToken);
         if (string.Equals(current.CurrentPath, path, StringComparison.OrdinalIgnoreCase))
         {
-            TempData["ToastMessage"] = "The selected Root Source Path is the same as the current configuration. No changes have been made.";
-            TempData["ToastVariant"] = "default";
-            return RedirectToAction("Index");
+            // Inline, in the same validation area as the field's other messages (e.g. "Root
+            // Source Path is required.") - not a toast/popup - and the page re-renders in place
+            // rather than redirecting, so nothing here ever reaches the external API call or the
+            // local history mirror below.
+            ModelState.AddModelError("RootPathForm.RootPath", "The selected Root Source Path is the same as the current configuration. No changes have been made.");
+            var unchangedModel = await BuildIndexViewModelAsync(cancellationToken);
+            unchangedModel.RootPathForm = model;
+            return View("Index", unchangedModel);
         }
 
         try

@@ -79,11 +79,13 @@ public class ManualValidationService : IManualValidationService
         // RetrieveTitleSequenceAsync).
         var matchingRecords = await query.ToListAsync(cancellationToken);
 
-        // Same sole grouping key as the Details page (GetGroupRecordsAsync): rows sharing the
-        // exact same non-blank EntryNumbersCsv become one UI row; a blank/whitespace
-        // EntryNumbersCsv never groups; each such row is its own group of one.
+        // Same grouping key as the Details page (GetGroupRecordsAsync): rows sharing the exact
+        // same (RdCode, EntryNumbersCsv) pair become one UI row - never EntryNumbersCsv alone
+        // (the same entry number can recur under a different RD) and never RdCode alone (one RD
+        // has many unrelated entry-number groups). A blank/whitespace EntryNumbersCsv never
+        // groups; each such row is its own group of one.
         var groups = matchingRecords
-            .GroupBy(r => string.IsNullOrWhiteSpace(r.EntryNumbersCsv) ? $"__row:{r.Id}" : r.EntryNumbersCsv)
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.EntryNumbersCsv) ? $"__row:{r.Id}" : $"{r.RdCode}|{r.EntryNumbersCsv}")
             .Select(g => g.OrderBy(r => r.Id).ToList())
             .ToList();
 
@@ -843,11 +845,14 @@ public class ManualValidationService : IManualValidationService
             .FirstOrDefaultAsync(r => r.Id == id && r.MigratedAt == null, cancellationToken)
             ?? throw new NotFoundException("Manual validation record", id);
 
-    // Every active ManualValidationRequest sharing `primary`'s exact EntryNumbersCsv, in
-    // ascending Id order (so "Title Record 1" is always the earliest-created row) - this is the
-    // sole grouping key, never RequestNumber or Id. A blank/whitespace EntryNumbersCsv never
-    // groups: a record with no Entry Number always forms a group of one (itself), so records
-    // that simply haven't had an Entry Number entered yet are never lumped together by accident.
+    // Every active ManualValidationRequest sharing `primary`'s exact RD Code AND EntryNumbersCsv,
+    // in ascending Id order (so "Title Record 1" is always the earliest-created row) - the group
+    // key is the (RdCode, EntryNumbersCsv) pair, never EntryNumbersCsv alone (the same entry
+    // number can legitimately recur under a different RD) and never RdCode alone (one RD has many
+    // unrelated entry-number groups), and never RequestNumber or Id. A blank/whitespace
+    // EntryNumbersCsv never groups: a record with no Entry Number always forms a group of one
+    // (itself), so records that simply haven't had an Entry Number entered yet are never lumped
+    // together by accident.
     // Returns tracked entities (so SaveAsync can mutate and persist group siblings directly).
     private async Task<List<ManualValidationRequest>> GetGroupRecordsAsync(ManualValidationRequest primary, CancellationToken cancellationToken)
     {
@@ -856,9 +861,10 @@ public class ManualValidationService : IManualValidationService
             return [primary];
         }
 
+        var rdCode = primary.RdCode;
         var entryNumbersCsv = primary.EntryNumbersCsv;
         var group = await _context.ManualValidationRequests
-            .Where(r => r.MigratedAt == null && r.EntryNumbersCsv == entryNumbersCsv)
+            .Where(r => r.MigratedAt == null && r.RdCode == rdCode && r.EntryNumbersCsv == entryNumbersCsv)
             .OrderBy(r => r.Id)
             .ToListAsync(cancellationToken);
 
@@ -906,11 +912,13 @@ public class ManualValidationService : IManualValidationService
         // below), so there is nothing to merge; doing so previously caused the same document to
         // occasionally render as two rows (or, after a correction, to collide in display with an
         // unrelated document of the same resulting name from a sibling's own folder - see
-        // NextDocumentSequenceNumber). Sorted ascending by Image File Name (renamedFileName) - the
-        // sole sort key, per the acceptance criteria - so the list and the image viewer's
-        // Prev/Next order agree.
+        // NextDocumentSequenceNumber). Sorted ascending by Document Type (documentName - the
+        // "Document Type" column in Details.cshtml), then by Image File Name (renamedFileName) as
+        // the tiebreaker for documents sharing the same type - so the image viewer's Prev/Next
+        // order follows the same Document Type grouping the table displays.
         var displayDocuments = ParseDocumentItems(primary.DocumentsJson)
-            .OrderBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item.DocumentName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return new ManualValidationDetailDto
