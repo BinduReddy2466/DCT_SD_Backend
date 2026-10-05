@@ -86,6 +86,45 @@
       }, true);
     }
 
+    // Root Source Path Configuration: block the Update confirm dialog (data-confirm-message on
+    // this form, handled by confirm-dialog.js) when a mandatory field is empty - without this,
+    // the "Are you sure...?" popup appeared regardless of whether the fields were even fillable,
+    // before the server ever got a chance to validate. Same document-capture veto technique as
+    // the two search forms above: stopPropagation() during the capture phase stops the event
+    // from ever reaching confirm-dialog.js's own (bubble-phase) listener on document, so neither
+    // that modal nor the actual POST happens until every required field is filled in. Messages
+    // are written directly into the existing asp-validation-for spans - no popup/alert/toast.
+    var updateRootPathForm = document.getElementById('updateRootPathForm');
+    if (updateRootPathForm) {
+      var rootPathErrorEl = document.querySelector('[data-valmsg-for="RootPathForm.RootPath"]');
+      var remarksErrorEl = document.querySelector('[data-valmsg-for="RootPathForm.Remarks"]');
+
+      var setFieldError = function (el, message) {
+        if (!el) return;
+        el.textContent = message || '';
+        el.classList.toggle('field-validation-error', !!message);
+        el.classList.toggle('field-validation-valid', !message);
+      };
+
+      document.addEventListener('submit', function (e) {
+        if (e.target !== updateRootPathForm) return;
+
+        var rootPathValue = (document.getElementById('rootPathHiddenInput') || {}).value || '';
+        var remarksValue = (document.getElementById('remarksField') || {}).value || '';
+
+        var rootPathMissing = rootPathValue.trim().length === 0;
+        var remarksMissing = remarksValue.trim().length === 0;
+
+        setFieldError(rootPathErrorEl, rootPathMissing ? 'Root Source Path is required.' : '');
+        setFieldError(remarksErrorEl, remarksMissing ? 'Remarks is required.' : '');
+
+        if (rootPathMissing || remarksMissing) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, true);
+    }
+
     var contentEl = document.getElementById('ajaxModalContent');
     if (!contentEl) return;
 

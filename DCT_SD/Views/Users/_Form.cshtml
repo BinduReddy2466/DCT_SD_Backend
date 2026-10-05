@@ -11,6 +11,23 @@
 </div>
 <form asp-controller="Users" asp-action="@action" asp-route-id="@Model.Id" method="post" id="userForm" autocomplete="off">
     <div class="modal-body">
+        @if (!Model.IsEditing)
+        {
+            @* Decoy credential fields, Add User only. autocomplete="new-password" on the real
+               Password field below is the semantically correct attribute, but Chrome's own
+               "saved passwords for this site" suggestion dropdown is a built-in password-manager
+               affordance it shows on any <input type="password"> for an origin with saved
+               credentials - by design, it ignores autocomplete="off"/"new-password" for that
+               specific UI (only for silent auto-fill, not this interactive list). The widely-used
+               mitigation is to give Chrome's form-detection a password-shaped pair to latch onto
+               first: placed first in the form, off-screen (not display:none/visibility:hidden,
+               which Chrome's heuristics specifically see through and ignore), with names that
+               don't bind to anything on UserFormViewModel so they're inert server-side. *@
+            <div style="position: absolute; width: 1px; height: 1px; overflow: hidden; left: -9999px; top: -9999px;" aria-hidden="true">
+                <input type="text" name="decoy_username" tabindex="-1" autocomplete="off" />
+                <input type="password" name="decoy_password" tabindex="-1" autocomplete="off" />
+            </div>
+        }
         <div asp-validation-summary="ModelOnly" id="formValidationSummary" class="alert alert-danger py-2 small"></div>
 
         <input type="hidden" asp-for="Id" />
@@ -33,7 +50,7 @@
                     <label asp-for="Username" class="form-label field-label mb-0"></label>
                     @await Html.PartialAsync("_FieldInfoTooltip", new FieldInfoTooltipViewModel { Title = "Username Requirements", Items = DCT_SD.Helpers.UserValidation.UsernameRequirements })
                 </div>
-                <input asp-for="Username" class="form-control mt-2" placeholder="user@example.com" readonly="@Model.IsEditing" autocomplete="off" />
+                <input asp-for="Username" class="form-control mt-2" placeholder="user@example.com" readonly="@Model.IsEditing" autocomplete="username" />
                 <span asp-validation-for="Username" class="text-danger small"></span>
             </div>
 

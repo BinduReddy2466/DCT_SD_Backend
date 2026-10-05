@@ -24,7 +24,7 @@
 }
 <div class="d-flex justify-content-between align-items-center mt-3 pagination-bar">
     <div class="d-flex align-items-center gap-2">
-        <span>Rows per page</span>
+        <span>Records per page</span>
         <select class="form-select form-select-sm" style="width: auto;" data-list-page-pagesize
                 data-action="@Url.Action(Model.ActionName)" data-query="@currentQueryJson">
             @foreach (var size in new[] { 10, 25, 50, 100 })
