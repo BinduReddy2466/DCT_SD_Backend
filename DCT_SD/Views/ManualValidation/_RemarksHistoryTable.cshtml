@@ -6,9 +6,9 @@
             <tr>
                 <th style="width: 2rem;">#</th>
                 <th>Date and Time</th>
+                <th>Action Taken</th>
                 <th>Performed By</th>
                 <th>Remarks</th>
-                <th>Action Taken</th>
             </tr>
         </thead>
         <tbody>
@@ -25,9 +25,9 @@
                     <tr>
                         <td>@(start + i + 1)</td>
                         <td class="font-monospace small">@r.UpdatedAt.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td><status-badge status="@r.Action"></status-badge></td>
                         <td><span class="chip-mono">@r.By</span></td>
                         <td>@r.Remarks</td>
-                        <td><status-badge status="@r.Action"></status-badge></td>
                     </tr>
                 }
             }
