@@ -32,6 +32,7 @@ All of these are read via `IConfiguration`, so they can come from either
 | `RdFetchApi:Password` | same | ✅ already set in your user-secrets |
 | `Jwt:SigningKey` | [Program.cs:26](Program.cs#L26), [TokenService.cs:19](Services/TokenService.cs#L19) — HMAC-SHA256 signs the login JWT | ✅ generated and stored for you (see below) |
 | `ConfigProtection:Key` | [ServiceCollectionExtensions.cs:101](Extensions/ServiceCollectionExtensions.cs#L101) — AES-256-GCM key that decrypts `ConnectionStrings:DefaultConnection` in `appsettings.json` | ❌ **still missing — see below** |
+| `Smtp:Password` | [EmailSenderService.cs](Services/EmailSenderService.cs) — SMTP auth password for the Zimbra mail server (`Smtp:Host`/`Port`/`EnableSsl`/`FromAddress`/`Username` are plain config in `appsettings.json`) used to send the Add User registration email | ❌ **set this yourself — see below** |
 
 ### `Jwt:SigningKey` — done
 
@@ -69,6 +70,23 @@ re-encrypt the real DB connection string with `ConfigProtector.Encrypt(...)`,
 replace `ConnectionStrings:DefaultConnection` in `appsettings.json`, and
 distribute the new key to the team. That changes committed, shared config, so
 don't do it unilaterally — loop in the team first.
+
+### `Smtp:Password` — set it to the same Zimbra account password used by the other app
+
+This project sends the Add User registration email through the same
+`mail.devmail.com` Zimbra server already used by another application in this
+organization, authenticating as `alerts.imc@mail.devmail.com`. Get that
+mailbox's password from whoever manages the other app's config and set it
+here — don't paste it into `appsettings.json` or into chat:
+
+```bash
+dotnet user-secrets set "Smtp:Password" "<the mailbox password>"
+```
+
+Without this set, `EmailSenderService` throws when sending — account creation
+itself still succeeds either way (the email send is wrapped so a failure here
+never blocks it, see `UsersController.SendRegistrationEmailAsync`), but the
+user won't receive the email until this secret is set.
 
 ## Quick checklist
 

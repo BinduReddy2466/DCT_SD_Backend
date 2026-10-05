@@ -1241,6 +1241,14 @@ textarea.form-control { line-height: 1.5; }
   text-align: center;
   margin: 1.25rem 0 0;
 }
+.login-forgot-link {
+  color: var(--color-navy-soft-text);
+  text-decoration: none;
+  font-weight: 500;
+}
+.login-forgot-link:hover {
+  text-decoration: underline;
+}
 .login-form-card .btn-navy {
   padding: 0.65rem 1rem;
   font-size: 14px;

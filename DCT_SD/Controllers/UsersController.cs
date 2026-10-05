@@ -19,12 +19,27 @@ public class UsersController : Controller
     private readonly IUserService _userService;
     private readonly IRoleService _roleService;
     private readonly IMenuService _menuService;
+    private readonly ISettingsService _settingsService;
+    private readonly ITokenService _tokenService;
+    private readonly IEmailSenderService _emailSenderService;
+    private readonly ILogger<UsersController> _logger;
 
-    public UsersController(IUserService userService, IRoleService roleService, IMenuService menuService)
+    public UsersController(
+        IUserService userService,
+        IRoleService roleService,
+        IMenuService menuService,
+        ISettingsService settingsService,
+        ITokenService tokenService,
+        IEmailSenderService emailSenderService,
+        ILogger<UsersController> logger)
     {
         _userService = userService;
         _roleService = roleService;
         _menuService = menuService;
+        _settingsService = settingsService;
+        _tokenService = tokenService;
+        _emailSenderService = emailSenderService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -89,9 +104,10 @@ public class UsersController : Controller
             return PartialView("_Form", model);
         }
 
+        UserDetailDto createdUser;
         try
         {
-            await _userService.CreateAsync(new CreateUserRequestDto
+            createdUser = await _userService.CreateAsync(new CreateUserRequestDto
             {
                 FirstName = model.FirstName.Trim(),
                 LastName = model.LastName.Trim(),
@@ -108,6 +124,11 @@ public class UsersController : Controller
             model.Menus = await _menuService.GetAllAsync(cancellationToken);
             return PartialView("_Form", model);
         }
+
+        // The account is already created at this point - a notification-email failure (bad SMTP
+        // config, mail server down, etc.) must never turn a successful account creation into a
+        // failure response, so this is fully isolated from the success result below.
+        await SendRegistrationEmailAsync(createdUser, model.Password ?? string.Empty, cancellationToken);
 
         return Json(new { success = true, message = "Account successfully created." });
     }
@@ -164,9 +185,15 @@ public class UsersController : Controller
             return PartialView("_Form", model);
         }
 
+        // Read before the update so there's something to compare the new status against - the
+        // acceptance criteria only send a status-change email when the status actually changed,
+        // never on a save that leaves it the same.
+        var previousStatus = (await _userService.GetByIdAsync(id, cancellationToken)).Status;
+
+        UserDetailDto updatedUser;
         try
         {
-            await _userService.UpdateAsync(id, new UpdateUserRequestDto
+            updatedUser = await _userService.UpdateAsync(id, new UpdateUserRequestDto
             {
                 FirstName = model.FirstName.Trim(),
                 LastName = model.LastName.Trim(),
@@ -181,6 +208,10 @@ public class UsersController : Controller
             await RepopulateEditFormAsync(model, id, cancellationToken);
             return PartialView("_Form", model);
         }
+
+        // The update already succeeded at this point - same isolation as the registration email,
+        // a notification failure must never turn a successful update into a failure response.
+        await SendStatusChangeEmailAsync(updatedUser, previousStatus, cancellationToken);
 
         return Json(new { success = true, message = "Account successfully updated." });
     }
@@ -206,6 +237,12 @@ public class UsersController : Controller
 
     private void ValidateCreateFields(UserFormViewModel model)
     {
+        var missingRequiredField = string.IsNullOrWhiteSpace(model.FirstName)
+            || string.IsNullOrWhiteSpace(model.LastName)
+            || string.IsNullOrWhiteSpace(model.Username)
+            || string.IsNullOrWhiteSpace(model.Password)
+            || model.RoleId is null or 0;
+
         if (string.IsNullOrWhiteSpace(model.Username))
         {
             ModelState.AddModelError(nameof(model.Username), "Username is required.");
@@ -223,12 +260,25 @@ public class UsersController : Controller
         else if (!UserValidation.IsValidPassword(model.Password))
         {
             ModelState.AddModelError(nameof(model.Password),
-                "The password does not meet the minimum requirements: 8-32 characters with at least one uppercase, one lowercase, one number, and one special character (!,@#$%^&*_-+=).");
+                "The password you entered does not meet the minimum security requirements described below:\n" +
+                "Password must be between 8 to 32 characters long;\n" +
+                "Password must contain at least one uppercase letter;\n" +
+                "Password must contain at least one lowercase letter;\n" +
+                "Password must contain at least one number;\n" +
+                "Password must contain at least one special character (!,@#$%^&*_-+=).");
         }
 
         if (model.RoleId is null or 0)
         {
             ModelState.AddModelError(nameof(model.RoleId), "Please select a role.");
+        }
+
+        // Additive to the specific per-field messages above - this is the one general-purpose
+        // message the acceptance criteria require whenever any mandatory field is empty or the
+        // Role is still "Select", shown alongside (not instead of) the field-level detail.
+        if (missingRequiredField)
+        {
+            ModelState.AddModelError(string.Empty, "Please fill out all required fields.");
         }
     }
 
@@ -239,6 +289,92 @@ public class UsersController : Controller
         if (model.RoleId is null or 0)
         {
             ModelState.AddModelError(nameof(model.RoleId), "Please select a role.");
+        }
+    }
+
+    private async Task SendRegistrationEmailAsync(UserDetailDto createdUser, string temporaryPassword, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var templates = await _settingsService.GetEmailTemplatesAsync(cancellationToken);
+            var template = templates.FirstOrDefault(t => t.Key == "user_created");
+            if (template is null)
+            {
+                _logger.LogWarning("No 'user_created' email template is configured - registration email for user {UserId} was not sent.", createdUser.Id);
+                return;
+            }
+
+            var (resetToken, _) = _tokenService.CreatePasswordResetToken(createdUser.Id, createdUser.Username);
+            var resetLink = Url.Action("ResetPassword", "Account", new { token = resetToken }, Request.Scheme)
+                ?? string.Empty;
+
+            var values = new Dictionary<string, string>
+            {
+                ["{{FirstName}}"] = createdUser.FirstName,
+                ["{{LastName}}"] = createdUser.LastName,
+                ["{{Email}}"] = createdUser.Username,
+                ["{{TemporaryPassword}}"] = temporaryPassword,
+                ["{{ResetPasswordLink}}"] = resetLink,
+                ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
+            };
+
+            var subject = EmailPlaceholders.FillWithValues(template.Subject, values);
+            var body = EmailPlaceholders.FillWithValues(template.Body, values);
+
+            await _emailSenderService.SendAsync(createdUser.Username, subject, body, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send the registration email for user {UserId}.", createdUser.Id);
+        }
+    }
+
+    private async Task SendStatusChangeEmailAsync(UserDetailDto updatedUser, string previousStatus, CancellationToken cancellationToken)
+    {
+        if (string.Equals(previousStatus, updatedUser.Status, StringComparison.OrdinalIgnoreCase))
+        {
+            // No actual status change - e.g. a Role/Assign-Tab-only edit - so no notification.
+            return;
+        }
+
+        var templateKey = updatedUser.Status switch
+        {
+            "Locked" => "user_locked",
+            "Active" => "user_activated",
+            "Deactivated" => "user_deactivated",
+            _ => null,
+        };
+        if (templateKey is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var templates = await _settingsService.GetEmailTemplatesAsync(cancellationToken);
+            var template = templates.FirstOrDefault(t => t.Key == templateKey);
+            if (template is null)
+            {
+                _logger.LogWarning("No '{TemplateKey}' email template is configured - status-change email for user {UserId} was not sent.", templateKey, updatedUser.Id);
+                return;
+            }
+
+            var values = new Dictionary<string, string>
+            {
+                ["{{FirstName}}"] = updatedUser.FirstName,
+                ["{{LastName}}"] = updatedUser.LastName,
+                ["{{Email}}"] = updatedUser.Username,
+                ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
+            };
+
+            var subject = EmailPlaceholders.FillWithValues(template.Subject, values);
+            var body = EmailPlaceholders.FillWithValues(template.Body, values);
+
+            await _emailSenderService.SendAsync(updatedUser.Username, subject, body, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send the '{TemplateKey}' status-change email for user {UserId}.", templateKey, updatedUser.Id);
         }
     }
 

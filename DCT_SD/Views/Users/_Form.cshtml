@@ -59,7 +59,7 @@
                     <button type="button" class="btn btn-link btn-sm position-absolute top-50 end-0 translate-middle-y me-2 p-0"
                             onclick="var i=document.getElementById('userPasswordInput'); i.type = i.type === 'password' ? 'text' : 'password'; this.textContent = i.type === 'password' ? 'SHOW' : 'HIDE';">SHOW</button>
                 </div>
-                <span asp-validation-for="Password" class="text-danger small"></span>
+                <span asp-validation-for="Password" class="text-danger small" style="white-space: pre-line;"></span>
             </div>
 
             <div class="col-sm-6">

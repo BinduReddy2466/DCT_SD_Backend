@@ -93,6 +93,15 @@ public class UserService : IUserService
         return await MapToDetailAsync(user, cancellationToken);
     }
 
+    public async Task<UserDetailDto?> FindByUsernameAsync(string username, CancellationToken cancellationToken = default)
+    {
+        var trimmed = username.Trim();
+        var user = await _context.Users.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Username.ToLower() == trimmed.ToLower(), cancellationToken);
+
+        return user is null ? null : await MapToDetailAsync(user, cancellationToken);
+    }
+
     public async Task<UserDetailDto> CreateAsync(CreateUserRequestDto request, CancellationToken cancellationToken = default)
     {
         var role = await _roleService.GetByIdAsync(request.RoleId, cancellationToken);
@@ -233,6 +242,20 @@ public class UserService : IUserService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task ResetPasswordAsync(int userId, string newPassword, CancellationToken cancellationToken = default)
+    {
+        var user = await LoadUserAsync(userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(User), userId);
+
+        user.PasswordHash = PasswordHasher.Hash(newPassword);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Mirrors UpdateAsync's status-change handling - a password reset must invalidate any
+        // refresh tokens already issued under the old password, so a session started before the
+        // reset can't silently keep renewing afterward.
+        await _authService.RevokeAllRefreshTokensForUserAsync(user.Id, cancellationToken);
+    }
+
     private Task<User?> LoadUserAsync(int id, CancellationToken cancellationToken) =>
         _context.Users.FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
 
@@ -286,8 +309,18 @@ public class UserService : IUserService
         LastName = user.LastName,
         Username = user.Username,
         Role = user.RoleName,
-        Status = user.Status.ToString(),
+        Status = EffectiveStatus(user).ToString(),
     };
+
+    // An auto-lock (LockoutEndUtc set) that has already elapsed should read as Active here even
+    // if nobody has logged in yet to trigger AuthService.LoginAsync's own lazy clear of the
+    // Status/LockoutEndUtc columns - mirrors the same lazy-expiry read pattern already used for
+    // Manual Validation record locks (a stale lock isn't eagerly cleared from the DB either, it's
+    // just treated as expired wherever it's read) rather than needing a background sweep job.
+    private static UserStatus EffectiveStatus(User user) =>
+        user.Status == UserStatus.Locked && user.LockoutEndUtc.HasValue && user.LockoutEndUtc.Value <= DateTime.UtcNow
+            ? UserStatus.Active
+            : user.Status;
 
     private async Task<UserDetailDto> MapToDetailAsync(User user, CancellationToken cancellationToken)
     {
@@ -311,7 +344,7 @@ public class UserService : IUserService
             PasswordHash = user.PasswordHash,
             RoleId = roleId,
             Role = user.RoleName,
-            Status = user.Status.ToString(),
+            Status = EffectiveStatus(user).ToString(),
             AssignedMenuIds = _menuService.ResolveIds(menuKeys),
             DateCreated = user.CreatedAt,
         };

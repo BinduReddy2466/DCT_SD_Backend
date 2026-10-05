@@ -218,6 +218,20 @@
                 </div>
             </div>
         </div>
+
+        <!-- Inactivity warning prompt (wwwroot/js/inactivity-timer.js) - static backdrop/no Esc
+             dismissal since the whole point is a deliberate Yes/No choice, not an easy dismiss. -->
+        <div class="modal fade" id="inactivityWarningModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-sm">
+                <div class="modal-content">
+                    <div class="modal-body pt-4">You have been inactive for 10 minutes. Do you want to continue updating?</div>
+                    <div class="modal-footer border-0 pt-0">
+                        <button type="button" class="btn btn-outline-secondary" id="inactivityNoBtn">No</button>
+                        <button type="button" class="btn btn-navy" id="inactivityYesBtn">Yes</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     }
 
     <script src="~/lib/bootstrap/js/bootstrap.bundle.min.js"></script>
@@ -231,6 +245,10 @@
     <script src="~/js/reports.js"></script>
     <script src="~/js/failed-extraction.js" asp-append-version="true"></script>
     <script src="~/js/app-shell.js" asp-append-version="true"></script>
+    @if (isAuthenticated)
+    {
+        <script src="~/js/inactivity-timer.js" asp-append-version="true"></script>
+    }
     @if (TempData["ToastMessage"] is string toastMessage)
     {
         <script>

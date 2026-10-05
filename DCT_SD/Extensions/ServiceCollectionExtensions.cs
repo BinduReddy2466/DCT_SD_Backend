@@ -39,6 +39,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISettingsService, SettingsService>();
         services.AddScoped<IReportService, ReportService>();
         services.AddScoped<IFailedExtractionService, FailedExtractionService>();
+        services.AddScoped<IEmailSenderService, EmailSenderService>();
 
         // The one external HTTP dependency in this app - a separate RD/fetch service, reachable
         // only over Paradigm WiFi/VPN. Base URL is config (RdFetchApi:BaseUrl), never hardcoded.

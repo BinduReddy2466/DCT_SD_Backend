@@ -4,11 +4,11 @@ namespace DCT_SD.Models.ViewModels;
 
 public class LoginViewModel
 {
-    [Required(ErrorMessage = "Please enter your User ID / Email.")]
+    [Required(ErrorMessage = "All fields are required.")]
     [Display(Name = "User ID / Email")]
     public string Username { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Please enter your password.")]
+    [Required(ErrorMessage = "All fields are required.")]
     [DataType(DataType.Password)]
     public string Password { get; set; } = string.Empty;
 

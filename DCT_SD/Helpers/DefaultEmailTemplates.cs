@@ -13,26 +13,32 @@ public static class DefaultEmailTemplates
             "user_created",
             "User Created",
             "{{Email}}",
-            "Lares Profile Created",
-            "Hi {{FirstName}} {{LastName}},\n\nYour Lares account has been created.\n\nUsername: {{Email}}\nTemporary Password: {{TemporaryPassword}}\n\nPlease sign in and change your password using the link below:\n{{ChangePasswordLink}}\n\nDate: {{CurrentDate}}"),
+            "Lares Profile created",
+            "Dear {{FirstName}} {{LastName}},\n\nA profile has been created for you in the Lares Portal.\n\nPlease follow the instructions below to complete the registration process:\n\n1. Log in to the portal using the link: {{ResetPasswordLink}}.\n2. Use the credentials provided below to access your account:\n   User ID: {{Email}}\n   Password: {{TemporaryPassword}}\n\nOnce logged in, you will be prompted to update your password for security purposes.\n\nIf you have any questions or need assistance, please do not hesitate to contact us.\n\nWarm regards,\nLares"),
+        new DefaultEmailTemplate(
+            "password_reset",
+            "Password Reset Request",
+            "{{Email}}",
+            "Password Reset Request",
+            "Dear {{FirstName}} {{LastName}},\n\nTo reset your password, please click the link below:\n{{ResetPasswordLink}}\n\nIf you did not request a password reset, please ignore this email. Your account will remain secure.\n\nImportant:\n\nThis link will expire in {{ExpiryMinutes}} minutes for security reasons.\n\nIf you need further assistance, feel free to contact our support team.\n\nWarm regards,\nLares"),
         new DefaultEmailTemplate(
             "user_locked",
             "User Locked",
             "{{Email}}",
             "Lares User Status Change",
-            "Hi {{FirstName}} {{LastName}},\n\nYour Lares account ({{Email}}) has been locked as of {{CurrentDate}}.\n\nIf you believe this is a mistake, please contact your Administrator."),
+            "Dear {{FirstName}} {{LastName}},\n\nYour account status has been locked by the Administrator.\n\nUser ID: {{Email}}\n\nWarm regards,\nLares"),
         new DefaultEmailTemplate(
             "user_activated",
             "User Activated",
             "{{Email}}",
             "Lares User Status Change",
-            "Hi {{FirstName}} {{LastName}},\n\nYour Lares account ({{Email}}) has been activated as of {{CurrentDate}}.\n\nYou may sign in using your existing credentials."),
+            "Dear {{FirstName}} {{LastName}},\n\nYour account status has been activated by the Administrator.\n\nUser ID: {{Email}}\n\nYou may sign in using your existing credentials.\n\nWarm regards,\nLares"),
         new DefaultEmailTemplate(
             "user_deactivated",
             "User Deactivated",
             "{{Email}}",
             "Lares User Status Change",
-            "Hi {{FirstName}} {{LastName}},\n\nYour Lares account ({{Email}}) has been deactivated as of {{CurrentDate}}.\n\nPlease contact your Administrator for further assistance."),
+            "Dear {{FirstName}} {{LastName}},\n\nYour account status has been deactivated by the Administrator.\n\nUser ID: {{Email}}\n\nWarm regards,\nLares"),
     };
 
     public static DefaultEmailTemplate? Find(string key) => All.FirstOrDefault(t => t.Key == key);

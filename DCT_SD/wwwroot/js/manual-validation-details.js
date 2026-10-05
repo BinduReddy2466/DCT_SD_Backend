@@ -842,5 +842,15 @@
       if (typeof revertPendingDocumentChange === 'function') revertPendingDocumentChange();
       closePage();
     });
+
+    // Lets the global inactivity timer (inactivity-timer.js) save this page's in-progress edits
+    // right before it force-ends the session on the 15-minute mark - reuses the exact same Save
+    // request the Save button triggers, just silent (no "Saved Successfully." toast, since the
+    // session is about to end anyway). A no-op if nothing is actually dirty (doSave's own check).
+    if (window.dctInactivity) {
+      window.dctInactivity.registerSaveHook(function () {
+        return doSave(true);
+      });
+    }
   });
 })();

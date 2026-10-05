@@ -60,6 +60,9 @@
                     </button>
                 </div>
                 <span asp-validation-for="Password" class="text-danger small"></span>
+                <div class="text-end mt-1">
+                    <a asp-controller="Account" asp-action="ForgotPassword" class="login-forgot-link small">Forgot Password?</a>
+                </div>
             </div>
 
             <input type="hidden" asp-for="ReturnUrl" />
