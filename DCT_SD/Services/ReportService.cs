@@ -111,21 +111,14 @@ public class ReportService : IReportService
                 new() { Key = "DateFrom", Label = "Migration Date From", Type = "date" },
                 new() { Key = "DateTo", Label = "Migration Date To", Type = "date" },
             ],
+            // Exactly the same 4 filters as the real Manual Validation page (Views/ManualValidation/
+            // Index.cshtml) - no extra fields (Request ID/Title Number/Status used to be offered
+            // here but don't exist on that page, so Reports could show a different, broader result
+            // set than what Manual Validation itself would ever display for the same criteria).
             ReportTypes.ManualValidation =>
             [
                 registryOfficeField!,
-                new() { Key = "RequestNumber", Label = "Request ID", Type = "text" },
                 new() { Key = "EntryNumbersCsv", Label = "Entry Number", Type = "text" },
-                new() { Key = "Title", Label = "Title Number", Type = "text" },
-                new()
-                {
-                    Key = "Status",
-                    Label = "Status",
-                    Type = "select",
-                    Options = new[] { "IncompleteExtraction", "TargetRdNotIdentified" }
-                        .Select(s => new ReportFilterOptionDto { Value = s, Label = StatusDisplay.ManualValidationStatusToDisplay(s) })
-                        .ToArray(),
-                },
                 new() { Key = "DateFrom", Label = "Extraction Date From", Type = "date" },
                 new() { Key = "DateTo", Label = "Extraction Date To", Type = "date" },
             ],
@@ -243,17 +236,19 @@ public class ReportService : IReportService
         });
     }
 
-    private static readonly string[] ManualValidationHeaders = ["Request ID", "RD Code", "RD Name", "Entry No.", "Title No.", "Title Type", "Status", "Missing Fields", "Extraction Date", "Updated By", "Updated Date"];
+    // Matches the Manual Validation list page's own columns exactly (RD Code, RD Name, Entry
+    // Number, Extraction Status, Extraction Date and Time, Updated By, Updated Date and Time) -
+    // Request ID/Title No./Title Type/Missing Fields were dropped since they aren't shown there
+    // either, for the same "stay consistent with the module being mirrored" reason the filters
+    // above were trimmed to 4.
+    private static readonly string[] ManualValidationHeaders = ["RD Code", "RD Name", "Entry Number", "Extraction Status", "Extraction Date and Time", "Updated By", "Updated Date and Time"];
 
     private async Task<ReportPreviewDto> PreviewManualValidationAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
     {
         var request = new ManualValidationSearchRequestDto
         {
             RdCode = GetString(filters, "RdCode"),
-            RequestNumber = GetString(filters, "RequestNumber"),
             EntryNumbersCsv = GetString(filters, "EntryNumbersCsv"),
-            Title = GetString(filters, "Title"),
-            Status = GetString(filters, "Status"),
             DateFrom = ParseDate(filters, "DateFrom"),
             DateTo = ParseDate(filters, "DateTo"),
             PageNumber = pageNumber,
@@ -263,14 +258,10 @@ public class ReportService : IReportService
         var page = await _manualValidationService.SearchAsync(request, cancellationToken);
         return ToPreview(ManualValidationHeaders, page, item => new[]
         {
-            item.RequestNumber,
             item.RdCode ?? string.Empty,
             item.RdName ?? string.Empty,
             item.EntryNumbersCsv ?? string.Empty,
-            item.Title ?? string.Empty,
-            item.TitleType ?? string.Empty,
             StatusDisplay.ManualValidationStatusToDisplay(item.Status),
-            StatusDisplay.DescribeMissingFields(item.MissingFields),
             FormatDate(item.ExtractionDate),
             item.UpdatedBy ?? string.Empty,
             FormatDate(item.UpdatedDate),
@@ -474,10 +465,7 @@ public class ReportService : IReportService
         var request = new ManualValidationSearchRequestDto
         {
             RdCode = GetString(filters, "RdCode"),
-            RequestNumber = GetString(filters, "RequestNumber"),
             EntryNumbersCsv = GetString(filters, "EntryNumbersCsv"),
-            Title = GetString(filters, "Title"),
-            Status = GetString(filters, "Status"),
             DateFrom = ParseDate(filters, "DateFrom"),
             DateTo = ParseDate(filters, "DateTo"),
         };
@@ -486,21 +474,17 @@ public class ReportService : IReportService
         if (items.Count == 0) return false;
 
         var sheet = workbook.Worksheets.Add("Report");
-        WriteHeader(sheet, "Request ID", "RD Code", "RD Name", "Entry No.", "Title No.", "Title Type", "Status", "Missing Fields", "Extraction Date", "Updated By", "Updated Date");
+        WriteHeader(sheet, "RD Code", "RD Name", "Entry Number", "Extraction Status", "Extraction Date and Time", "Updated By", "Updated Date and Time");
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.RequestNumber;
-            sheet.Cell(row, 2).Value = item.RdCode ?? string.Empty;
-            sheet.Cell(row, 3).Value = item.RdName ?? string.Empty;
-            sheet.Cell(row, 4).Value = item.EntryNumbersCsv ?? string.Empty;
-            sheet.Cell(row, 5).Value = item.Title ?? string.Empty;
-            sheet.Cell(row, 6).Value = item.TitleType ?? string.Empty;
-            sheet.Cell(row, 7).Value = StatusDisplay.ManualValidationStatusToDisplay(item.Status);
-            sheet.Cell(row, 8).Value = StatusDisplay.DescribeMissingFields(item.MissingFields);
-            sheet.Cell(row, 9).Value = item.ExtractionDate.ToLocalDisplay();
-            sheet.Cell(row, 10).Value = item.UpdatedBy ?? string.Empty;
-            if (item.UpdatedDate.HasValue) sheet.Cell(row, 11).Value = item.UpdatedDate.Value.ToLocalDisplay();
+            sheet.Cell(row, 1).Value = item.RdCode ?? string.Empty;
+            sheet.Cell(row, 2).Value = item.RdName ?? string.Empty;
+            sheet.Cell(row, 3).Value = item.EntryNumbersCsv ?? string.Empty;
+            sheet.Cell(row, 4).Value = StatusDisplay.ManualValidationStatusToDisplay(item.Status);
+            sheet.Cell(row, 5).Value = item.ExtractionDate.ToLocalDisplay();
+            sheet.Cell(row, 6).Value = item.UpdatedBy ?? string.Empty;
+            if (item.UpdatedDate.HasValue) sheet.Cell(row, 7).Value = item.UpdatedDate.Value.ToLocalDisplay();
             row++;
         }
 

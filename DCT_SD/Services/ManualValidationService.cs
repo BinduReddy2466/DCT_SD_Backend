@@ -399,8 +399,16 @@ public class ManualValidationService : IManualValidationService
         var perRecordItems = group.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
         var allItemsFlat = perRecordItems.SelectMany(x => x.Items).ToList();
 
+        // Must match MapToDetail's displayDocuments ordering EXACTLY (Document Type, then Image
+        // File Name) - change.Index is a 1-based position in that displayed list (see
+        // SaveTitleRecordItemDto's sibling, SaveManualValidationRequestDto's DocumentChangesJson
+        // doc comment), so resolving it against any different order here silently targets
+        // whatever document happens to land on that position under the two orderings instead -
+        // the file that actually gets renamed, and the one left untouched, can both be wrong
+        // without either operation itself failing or throwing.
         var primarySorted = perRecordItems.First(x => x.RecordId == primary.Id).Items
-            .OrderBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item.DocumentName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var targets = new List<(DocumentJsonItem Target, DocumentChangeItemDto Change)>();
@@ -1015,8 +1023,12 @@ public class ManualValidationService : IManualValidationService
         // Same source and same sort as MapToDetail (the opened record's own DocumentsJson only,
         // never merged across group siblings), so a given documentId always resolves to the exact
         // document shown at that position on screen - no separate group lookup needed here at all.
+        // Must match MapToDetail's displayDocuments ordering EXACTLY (Document Type, then Image
+        // File Name) - a mismatched sort here would stream back a different document's image than
+        // the one actually clicked, whenever the two orderings disagree.
         var sorted = ParseDocumentItems(record.DocumentsJson)
-            .OrderBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item.DocumentName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var index = documentId - 1;
