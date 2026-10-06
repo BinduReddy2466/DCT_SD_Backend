@@ -121,6 +121,27 @@
         if (rootPathMissing || remarksMissing) {
           e.preventDefault();
           e.stopPropagation();
+          return;
+        }
+
+        // Selected path unchanged from the actual currently-configured path (data-current-path,
+        // set once server-side from Model.CurrentPath - NOT the form's own current value/
+        // defaultValue, which already gets overwritten with whatever was just submitted on a
+        // validation-failure re-render, so it can't reliably tell "still the old path" apart from
+        // "resubmitting the same new path after fixing an unrelated error") - skip the "Are you
+        // sure...?" popup entirely in that case and let this submit through as an ordinary POST.
+        // The server already detects this same condition and responds with the inline "No changes
+        // have been made." message, with no save and no history record - this only controls
+        // whether the confirm popup shows first, nothing about what happens once the request
+        // lands server-side. Setting data-confirmed is confirm-dialog.js's own existing bypass
+        // flag (it uses the same flag, the same way, right before letting its own "Yes" click
+        // through) - reusing it here means confirm-dialog.js's listener sees this form as
+        // "already confirmed" and does nothing, rather than needing a second veto mechanism. A
+        // real path change leaves this flag unset, so confirm-dialog.js's popup still appears
+        // exactly as before.
+        var currentConfiguredPath = updateRootPathForm.getAttribute('data-current-path') || '';
+        if (rootPathValue.trim().toLowerCase() === currentConfiguredPath.trim().toLowerCase()) {
+          updateRootPathForm.dataset.confirmed = 'true';
         }
       }, true);
     }

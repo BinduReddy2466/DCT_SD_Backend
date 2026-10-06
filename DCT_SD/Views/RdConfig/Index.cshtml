@@ -17,7 +17,8 @@
     </div>
 
     <form id="updateRootPathForm" asp-controller="RdConfig" asp-action="UpdateRootPath" method="post"
-          data-confirm-message="Are you sure you want to update the Root Source Path?" data-confirm-label="Yes" data-confirm-cancel-label="No">
+          data-confirm-message="Are you sure you want to update the Root Source Path?" data-confirm-label="Yes" data-confirm-cancel-label="No"
+          data-current-path="@Model.CurrentPath">
         <input type="hidden" asp-for="RootPathForm.RootPath" id="rootPathHiddenInput" />
 
         <div class="mb-3">
