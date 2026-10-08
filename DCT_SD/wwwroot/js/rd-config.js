@@ -144,6 +144,31 @@
           updateRootPathForm.dataset.confirmed = 'true';
         }
       }, true);
+
+      // A Browse selection writes the newly picked path straight into rootPathField/
+      // rootPathHiddenInput (see the #browseFolderSelectBtn handler below) well before Update is
+      // even clicked, so it must be treated as a pending/uncommitted value until the confirm
+      // dialog's "Yes" actually submits this form. confirm-dialog.js (shared by other forms too,
+      // so left untouched) only ever intercepts submit - it has no "restore on cancel" concept -
+      // so clicking "No" (or dismissing via backdrop/Esc) left the newly browsed path visibly
+      // displayed. #confirmDialog is shared app-wide, but this is the only form on this page that
+      // uses it, so reacting to its hidden.bs.modal here only ever concerns this form. By the time
+      // this fires for a real "Yes", confirm-dialog.js has already synchronously set
+      // data-confirmed="true" (its hide() call starts the close, but hidden.bs.modal itself only
+      // fires once that finishes) - so only a dismissal that was never confirmed reaches the reset
+      // below, restoring exactly the path that was configured before this Browse selection.
+      var confirmDialogEl = document.getElementById('confirmDialog');
+      if (confirmDialogEl) {
+        confirmDialogEl.addEventListener('hidden.bs.modal', function () {
+          if (updateRootPathForm.dataset.confirmed === 'true') return;
+
+          var currentConfiguredPath = updateRootPathForm.getAttribute('data-current-path') || '';
+          var rootPathField = document.getElementById('rootPathField');
+          var rootPathHiddenInput = document.getElementById('rootPathHiddenInput');
+          if (rootPathField) rootPathField.value = currentConfiguredPath;
+          if (rootPathHiddenInput) rootPathHiddenInput.value = currentConfiguredPath;
+        });
+      }
     }
 
     var contentEl = document.getElementById('ajaxModalContent');
