@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using DCT_SD.Configuration;
 using DCT_SD.Helpers;
@@ -287,6 +288,24 @@ public class ManualValidationService : IManualValidationService
         var touchedRecordIds = new HashSet<int>();
         try
         {
+            // Applied before ApplyDocumentTypeChanges below (not after): this never renames a
+            // file, so it always resolves against record.DocumentsJson exactly as the client last
+            // saw it (DocumentId + RenamedFileName unchanged) - running it first means a Document
+            // Type correction targeting the very same document in this same Save still finds its
+            // match, instead of looking for a RenamedFileName that a rename already applied after
+            // this point would have changed out from under it.
+            if (!string.IsNullOrWhiteSpace(request.DocumentDuplicateFlagsJson))
+            {
+                var duplicateFlagChanges = (JsonSerializer.Deserialize<List<DocumentDuplicateFlagItemDto>>(request.DocumentDuplicateFlagsJson, JsonOptions) ?? [])
+                    .Where(c => !string.IsNullOrWhiteSpace(c.RenamedFileName))
+                    .ToList();
+
+                if (duplicateFlagChanges.Count > 0)
+                {
+                    ApplyDocumentDuplicateFlags(record, duplicateFlagChanges, ChangesFor(record.Id));
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(request.DocumentChangesJson))
             {
                 var documentChanges = (JsonSerializer.Deserialize<List<DocumentChangeItemDto>>(request.DocumentChangesJson, JsonOptions) ?? [])
@@ -456,6 +475,48 @@ public class ManualValidationService : IManualValidationService
 
         const string suffix = "...";
         return combined[..(RemarksMaxLength - suffix.Length)] + suffix;
+    }
+
+    // Applies zero or more pending Duplicate checkbox toggles in a single Save. Each change
+    // targets one document by DocumentId + RenamedFileName (not position/index - the Supporting
+    // Documents list can be sorted/reordered, and unlike a Document Type correction this never
+    // renames a file, so there's no stable position to resolve against in the first place) within
+    // the OPENED record's OWN DocumentsJson only - never a group sibling's copy, matching the
+    // acceptance criteria that only the specific document a checkbox targets gets updated. A
+    // document never represented in `changes` (nobody touched its checkbox this Save) is left
+    // completely untouched, including its existing "duplicate" value.
+    private static void ApplyDocumentDuplicateFlags(ManualValidationRequest record, List<DocumentDuplicateFlagItemDto> changes, List<string> changeDescriptions)
+    {
+        var items = ParseDocumentItems(record.DocumentsJson);
+        var changed = false;
+
+        foreach (var change in changes)
+        {
+            var item = items.FirstOrDefault(i =>
+                string.Equals(i.DocumentId ?? string.Empty, change.DocumentId ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(i.RenamedFileName, change.RenamedFileName, StringComparison.OrdinalIgnoreCase));
+
+            if (item is null)
+            {
+                continue;
+            }
+
+            var wasDuplicate = string.Equals(item.IsDuplicate, "yes", StringComparison.OrdinalIgnoreCase);
+            if (wasDuplicate == change.IsDuplicate)
+            {
+                continue;
+            }
+
+            item.IsDuplicate = change.IsDuplicate ? "yes" : "no";
+            changed = true;
+            changeDescriptions.Add(
+                $"Supporting Document '{item.RenamedFileName}' - Duplicate: Previous = '{(wasDuplicate ? "Yes" : "No")}', Current = '{(change.IsDuplicate ? "Yes" : "No")}'");
+        }
+
+        if (changed)
+        {
+            record.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
+        }
     }
 
     // Applies one or more pending Others -> real Document Type corrections in a single Save.
@@ -1052,6 +1113,7 @@ public class ManualValidationService : IManualValidationService
                 DocumentName = item.DocumentName,
                 RenamedFileName = item.RenamedFileName,
                 CanChangeDocumentType = IsOthersEligible(item),
+                IsDuplicate = string.Equals(item.IsDuplicate, "yes", StringComparison.OrdinalIgnoreCase),
             }).ToArray(),
         };
     }
@@ -1126,5 +1188,17 @@ public class ManualValidationService : IManualValidationService
         public string? OriginalFileName { get; set; }
         public string RenamedFileName { get; set; } = string.Empty;
         public string? ImagePath { get; set; }
+
+        // "yes"/"no" - set via the Supporting Documents table's Duplicate checkbox (see
+        // ApplyDocumentDuplicateFlags). A separate property from (and never touched by anything
+        // that writes) the existing "duplicate" property the external merge-entry service sets.
+        public string? IsDuplicate { get; set; }
+
+        // Every DocumentsJson property not modeled above (e.g. titleNumber, plan, block, lot,
+        // duplicate) - captured here purely so re-serializing this item (ApplyDocumentTypeChanges,
+        // ApplyDocumentDuplicateFlags) round-trips them unchanged instead of silently dropping them;
+        // nothing in this service ever reads or writes through this bag directly.
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? ExtensionData { get; set; }
     }
 }
