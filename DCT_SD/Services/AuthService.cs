@@ -89,16 +89,21 @@ public class AuthService : IAuthService
             throw new UnauthorizedAppException(InvalidCredentialsMessage);
         }
 
-        // Checked only once credentials are confirmed correct - a wrong-password attempt must
-        // never reveal whether the account also happens to have an active session elsewhere, and
-        // must still count toward the failed-attempt lockout above like any other wrong password.
-        var hasActiveSession = await _context.RefreshTokens.AnyAsync(
-            t => t.UserId == user.Id && t.RevokedAt == null && t.ExpiresAt > DateTime.UtcNow, cancellationToken);
-        if (hasActiveSession)
-        {
-            _logger.LogWarning("Login blocked for user {UserId}: an active session already exists.", user.Id);
-            throw new UnauthorizedAppException(ConcurrentSessionMessage);
-        }
+        // TEMPORARILY DISABLED FOR THIS RELEASE - concurrent-login blocking is not wanted this
+        // release; users must be able to log in even with an active session elsewhere. The
+        // implementation (check + message) is kept in place, commented out, so it can be
+        // re-enabled by uncommenting this block in a future release - nothing here was deleted.
+        //
+        // // Checked only once credentials are confirmed correct - a wrong-password attempt must
+        // // never reveal whether the account also happens to have an active session elsewhere, and
+        // // must still count toward the failed-attempt lockout above like any other wrong password.
+        // var hasActiveSession = await _context.RefreshTokens.AnyAsync(
+        //     t => t.UserId == user.Id && t.RevokedAt == null && t.ExpiresAt > DateTime.UtcNow, cancellationToken);
+        // if (hasActiveSession)
+        // {
+        //     _logger.LogWarning("Login blocked for user {UserId}: an active session already exists.", user.Id);
+        //     throw new UnauthorizedAppException(ConcurrentSessionMessage);
+        // }
 
         user.FailedLoginAttempts = 0;
         user.LastLoginAt = DateTime.UtcNow;
