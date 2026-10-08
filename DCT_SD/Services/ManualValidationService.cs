@@ -22,11 +22,15 @@ public class ManualValidationService : IManualValidationService
 
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IRdFetchApiClient _rdFetchApiClient;
+    private readonly ILogger<ManualValidationService> _logger;
 
-    public ManualValidationService(ApplicationDbContext context, ICurrentUserService currentUserService)
+    public ManualValidationService(ApplicationDbContext context, ICurrentUserService currentUserService, IRdFetchApiClient rdFetchApiClient, ILogger<ManualValidationService> logger)
     {
         _context = context;
         _currentUserService = currentUserService;
+        _rdFetchApiClient = rdFetchApiClient;
+        _logger = logger;
     }
 
     public async Task<PagedResult<ManualValidationListItemDto>> SearchAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default)
@@ -203,6 +207,11 @@ public class ManualValidationService : IManualValidationService
                 .Select(c => c.Name)
                 .FirstOrDefaultAsync(cancellationToken);
 
+        // Captured before the mutation loop below overwrites record.EntryNumbersCsv, so the
+        // merge-entry comparison after SaveChangesAsync (further down) still sees the true
+        // pre-edit value instead of comparing the new value against itself.
+        var originalEntryNumbersCsvForMerge = record.EntryNumbersCsv;
+
         foreach (var r in group)
         {
             var originalRdCode = r.RdCode;
@@ -331,6 +340,80 @@ public class ManualValidationService : IManualValidationService
             }
 
             throw;
+        }
+
+        // Additional to the existing Save flow above - never replaces or changes it. Runs only
+        // after SaveChangesAsync has fully committed (and only reached at all if the try block
+        // above succeeded - an exception there propagates out of SaveAsync before this point, so
+        // the existing rollback-and-rethrow behavior on a failed Save is unaffected). This has to
+        // run AFTER the existing Save, not before: the external service writes document_json for
+        // this record directly, and calling it any earlier meant our own SaveChangesAsync above -
+        // still holding this entity exactly as loaded at the top, before the external write -
+        // would flush that original DocumentsJson back over whatever the external service had
+        // just written, silently reverting it. A failure here is logged by RdFetchApiClient
+        // itself and swallowed - it must never fail a Save that has already succeeded.
+        if (!string.Equals(originalEntryNumbersCsvForMerge, newEntryNumbersCsv, StringComparison.Ordinal))
+        {
+            // The external service's own match query excludes any row that is currently locked
+            // (LockedByUserId not null) - both this record (locked by the current user for the
+            // whole edit session, set by OpenForEditAsync, never cleared by Save) and the
+            // pre-existing row it needs to merge into, if that one happens to be locked too (e.g.
+            // left open in another tab). Left as-is, either lock makes the external service unable
+            // to find/merge into the match, so every lock on a plausible match (this record, plus
+            // any other active row sharing the new RdCode + EntryNumbersCsv) is released here, the
+            // call is made, then all of them are restored afterward - everyone's "being reviewed"
+            // state must be exactly what it was once this finishes, same as before this call.
+            var lockedByUserId = record.LockedByUserId;
+            var lockedByUsername = record.LockedByUsername;
+            var lockedAt = record.LockedAt;
+
+            var candidateTargets = await _context.ManualValidationRequests
+                .Where(r => r.Id != record.Id
+                    && r.MigratedAt == null
+                    && r.RdCode == newRdCode
+                    && r.EntryNumbersCsv == newEntryNumbersCsv
+                    && r.LockedByUserId != null)
+                .ToListAsync(cancellationToken);
+            var candidateLockState = candidateTargets
+                .Select(r => (r.Id, r.LockedByUserId, r.LockedByUsername, r.LockedAt))
+                .ToList();
+
+            record.LockedByUserId = null;
+            record.LockedByUsername = null;
+            record.LockedAt = null;
+            foreach (var candidate in candidateTargets)
+            {
+                candidate.LockedByUserId = null;
+                candidate.LockedByUsername = null;
+                candidate.LockedAt = null;
+            }
+
+            await _context.SaveChangesAsync(cancellationToken);
+
+            try
+            {
+                await _rdFetchApiClient.MergeEntryAsync(newRdCode ?? string.Empty, newEntryNumbersCsv ?? string.Empty, record.RequestNumber, cancellationToken);
+            }
+            catch (BusinessValidationException)
+            {
+                // Logged already inside RdFetchApiClient - swallowed here so this additional,
+                // best-effort call never fails an otherwise-successful Save.
+            }
+            finally
+            {
+                foreach (var (candidateId, userId, username, at) in candidateLockState)
+                {
+                    var candidate = candidateTargets.First(r => r.Id == candidateId);
+                    candidate.LockedByUserId = userId;
+                    candidate.LockedByUsername = username;
+                    candidate.LockedAt = at;
+                }
+
+                record.LockedByUserId = lockedByUserId;
+                record.LockedByUsername = lockedByUsername;
+                record.LockedAt = lockedAt;
+                await _context.SaveChangesAsync(cancellationToken);
+            }
         }
 
         return MapToDetail(record, group);

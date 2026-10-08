@@ -38,4 +38,10 @@ public interface IRdFetchApiClient
     /// records_created/manual_validation_created counts as the success signal, not the free-text
     /// "status" field and not merely the absence of an HTTP error.
     Task<ExternalFailedExtractionReprocessResponse> ReprocessFailedExtractionAsync(string folderPath, int? executedByUserId, CancellationToken cancellationToken = default);
+
+    /// Additional to the existing Manual Validation Save flow (POST /manual-validation/merge-entry)
+    /// - fired only when a Save changes the group's Entry Number, so the external service can
+    /// re-associate/merge its own records under the resulting (rd_code, entry_number) pair.
+    /// Never replaces or precedes the existing Save itself; see ManualValidationService.SaveAsync.
+    Task<ExternalMergeEntryResponse> MergeEntryAsync(string rdCode, string entryNumber, string requestNumber, CancellationToken cancellationToken = default);
 }

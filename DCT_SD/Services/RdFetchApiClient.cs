@@ -28,6 +28,12 @@ public class RdFetchApiClient : IRdFetchApiClient
         return await PostAsync<ExternalFailedExtractionReprocessRequest, ExternalFailedExtractionReprocessResponse>("/failed-extractions/reprocess", request, cancellationToken);
     }
 
+    public async Task<ExternalMergeEntryResponse> MergeEntryAsync(string rdCode, string entryNumber, string requestNumber, CancellationToken cancellationToken = default)
+    {
+        var request = new ExternalMergeEntryRequest { RdCode = rdCode, EntryNumber = entryNumber, RequestNumber = requestNumber };
+        return await PostAsync<ExternalMergeEntryRequest, ExternalMergeEntryResponse>("/manual-validation/merge-entry", request, cancellationToken);
+    }
+
     private static readonly JsonSerializerOptions DetailsJsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public async Task<HttpResponseMessage> StartFetchStreamAsync(string rootPath, int executedByUserId, CancellationToken cancellationToken = default)

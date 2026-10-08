@@ -81,6 +81,32 @@ public class ExternalFailedExtractionReprocessResponse
     public string? Message { get; set; }
 }
 
+// POST /manual-validation/merge-entry - fired only when a Manual Validation Save changes the
+// group's Entry Number, so the external service can re-associate/merge its own records under the
+// resulting (rd_code, entry_number) pair. Additional to the existing Save flow - never replaces
+// it - so the response isn't otherwise acted on; all fields are nullable/optional to tolerate
+// whatever shape the external service actually returns without this failing to deserialize.
+public class ExternalMergeEntryRequest
+{
+    [JsonPropertyName("rd_code")]
+    public string RdCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("entry_number")]
+    public string EntryNumber { get; set; } = string.Empty;
+
+    [JsonPropertyName("request_number")]
+    public string RequestNumber { get; set; } = string.Empty;
+}
+
+public class ExternalMergeEntryResponse
+{
+    [JsonPropertyName("status")]
+    public string? Status { get; set; }
+
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+}
+
 // GET /fetch/{fetch_run_id} response shape - the FetchRunSummary schema per the deployed
 // service's own OpenAPI spec (http://172.16.1.68:8123/openapi.json). PropertyNameCaseInsensitive
 // is set at the deserialization call site as a light safety net, but these names/shapes are

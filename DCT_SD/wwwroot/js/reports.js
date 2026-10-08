@@ -18,6 +18,8 @@
     var resultsContainer = document.getElementById('reportResults');
     var generateBtn = document.getElementById('generateReportBtn');
     var generateForm = document.getElementById('reportGenerateForm');
+    var searchBtn = document.getElementById('reportSearchBtn');
+    var clearBtn = document.getElementById('reportClearBtn');
     if (!typeSelect || !filtersContainer || !form || !resultsContainer || !generateBtn || !generateForm) return;
 
     function loadResults() {
@@ -35,6 +37,10 @@
       filtersContainer.innerHTML = '';
       resultsContainer.innerHTML = '';
       if (errorEl) errorEl.classList.add('d-none');
+      // Hidden while no Report Type is selected (nothing to search/clear yet); shown again as
+      // soon as one is - Search and Clear themselves are unchanged otherwise.
+      if (searchBtn) searchBtn.classList.toggle('d-none', !reportType);
+      if (clearBtn) clearBtn.classList.toggle('d-none', !reportType);
       if (!reportType) return;
 
       fetch('/Reports/Filters?reportType=' + encodeURIComponent(reportType), {
@@ -51,6 +57,23 @@
     typeSelect.addEventListener('change', function () {
       loadForType(typeSelect.value);
     });
+
+    // Clears only this report type's own filter field values (the "row" of inputs rendered into
+    // #reportFiltersContainer) and refreshes the table - Report Type itself is left alone, same
+    // as every other list page's Clear only resets its own filter fields, never the page/view
+    // you're on.
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        filtersContainer.querySelectorAll('input, select').forEach(function (el) {
+          if (el.tagName === 'SELECT') {
+            el.selectedIndex = 0;
+          } else {
+            el.value = '';
+          }
+        });
+        loadResults();
+      });
+    }
 
     // Browsers can restore a <select>'s value on a plain reload/back-forward navigation
     // (the option shows as selected) without ever firing a 'change' event - which would leave
