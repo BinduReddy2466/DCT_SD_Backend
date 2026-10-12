@@ -486,6 +486,13 @@
         return pump();
       }).catch(function () {
         startBtn.disabled = false;
+        // The stream ended via a rejected read (dropped/reset connection, idle timeout, etc.)
+        // rather than a clean result.done - refreshFetchHistory() above is the only place that
+        // replaces the optimistic live row with the real, DB-backed row, so without this call here
+        // too, an error-terminated stream left that live row stuck on screen (showing whatever it
+        // last displayed) indefinitely, even though the server's own run reconciliation still
+        // completes independently of this client connection.
+        refreshFetchHistory();
       });
     }
 

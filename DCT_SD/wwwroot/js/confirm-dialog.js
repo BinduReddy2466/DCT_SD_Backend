@@ -41,5 +41,17 @@
         pendingForm = null;
       }
     });
+
+    // A cancel/backdrop-dismiss/Esc never reaches the confirmBtn handler above, so without this,
+    // pendingForm stayed set to this form indefinitely. Anything else that later reuses this same
+    // shared #confirmDialog/#confirmDialogConfirmBtn outside this form-intercept mechanism (e.g.
+    // RD Configuration's own Start Fetching confirm, which wires its own click listener directly
+    // onto confirmBtn) would then have its own "Yes" click also fire this stale pendingForm's
+    // submit - silently re-submitting an unrelated, already-dismissed form alongside whatever that
+    // other "Yes" was actually supposed to do. Already a no-op on a real confirm: pendingForm is
+    // set back to null synchronously above, before this (async) event ever fires.
+    modalEl.addEventListener('hidden.bs.modal', function () {
+      pendingForm = null;
+    });
   });
 })();
