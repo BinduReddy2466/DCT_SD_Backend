@@ -36,10 +36,32 @@ public class ApplicationDbContext : DbContext
         base.OnModelCreating(modelBuilder);
     }
 
-    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         ApplyAuditInformation();
-        return base.SaveChangesAsync(cancellationToken);
+        await SetSessionContextAsync(cancellationToken);
+        return await base.SaveChangesAsync(cancellationToken);
+    }
+
+    // Lets the Section 23 _Hist/_Log triggers know who/where a change came from via
+    // SESSION_CONTEXT, since trigger code has no other way to see the calling user.
+    // Must run on the same open connection SaveChanges then uses, so the connection
+    // is opened explicitly here (EF Core won't close a connection it didn't open).
+    private async Task SetSessionContextAsync(CancellationToken cancellationToken)
+    {
+        if (!ChangeTracker.HasChanges())
+        {
+            return;
+        }
+
+        var userIdClaim = _httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = int.TryParse(userIdClaim, out var id) ? id : (int?)null;
+        var ipAddr = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+
+        await Database.OpenConnectionAsync(cancellationToken);
+        await Database.ExecuteSqlInterpolatedAsync(
+            $"EXEC sp_set_session_context N'AppUserId', {userId}; EXEC sp_set_session_context N'AppClientIp', {ipAddr};",
+            cancellationToken);
     }
 
     private void ApplyAuditInformation()

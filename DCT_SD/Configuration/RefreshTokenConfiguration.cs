@@ -8,7 +8,7 @@ public class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
 {
     public void Configure(EntityTypeBuilder<RefreshToken> builder)
     {
-        builder.ToTable("RefreshTokens");
+        builder.ToTable("RefreshTokens", tb => tb.UseSqlOutputClause(false)); // trg_RefreshTokens_HistLog blocks the default OUTPUT clause
 
         builder.HasKey(t => t.Id);
 
