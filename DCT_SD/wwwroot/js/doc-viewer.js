@@ -13,6 +13,15 @@
     // moves the image content up/down (and left/right) within the frame, exactly like scrolling
     // a normal page, rather than zooming. Manual Validation's viewer opts into this instead.
     var enableWheelPan = container.dataset.enableWheelPan === 'true';
+    // When set (Manual Validation only), the frame always fills the full space available to it
+    // (same as Migrations/Compare's plain full-width frame) and object-fit:contain letterboxes
+    // the image inside it - so pan math has to use the image's actual rendered (contain-fit)
+    // size, not its raw naturalWidth/Height, since the <img> element's own CSS box is the full
+    // frame size, larger than the visible picture on whichever axis doesn't match the frame's
+    // aspect ratio. Zoom still works purely as a CSS transform (scale), clipped by the frame and
+    // panned via drag/wheel - the frame itself never changes size and no scrollbar is ever shown,
+    // on this page or any other.
+    var enableShrinkToFit = container.dataset.shrinkToFit === 'true';
     var minZoom = 0.2;
     var maxZoom = 5;
     var buttonZoomStep = 0.2;
@@ -32,9 +41,23 @@
       var iw = img.naturalWidth || img.width || 0;
       var ih = img.naturalHeight || img.height || 0;
       var swapped = Math.abs(state.rotation % 180) === 90;
+      var effIw = swapped ? ih : iw;
+      var effIh = swapped ? iw : ih;
+      if (enableShrinkToFit) {
+        // The frame always fills the full available card space and object-fit:contain
+        // letterboxes the picture inside it, so the <img> element's own CSS box (clientWidth/
+        // Height) is the full frame size, not the actual visible picture size - using it (or the
+        // source file's raw naturalWidth/Height, which can be far larger than the frame for a
+        // high-res scan) let the allowed pan range balloon well past the actual content, so it
+        // could be dragged mostly off to one side even at 100% zoom. Compute the real "contain"
+        // fit against the frame's current size instead.
+        if (!effIw || !effIh || !frame) return { w: 0, h: 0 };
+        var scale = Math.min(frame.clientWidth / effIw, frame.clientHeight / effIh);
+        return { w: effIw * scale * state.zoom, h: effIh * scale * state.zoom };
+      }
       return {
-        w: (swapped ? ih : iw) * state.zoom,
-        h: (swapped ? iw : ih) * state.zoom,
+        w: effIw * state.zoom,
+        h: effIh * state.zoom,
       };
     }
 
@@ -72,6 +95,12 @@
 
     function zoomOut() {
       state.zoom = Math.max(minZoom, state.zoom - buttonZoomStep);
+      // Once back at/under 100% there's nothing left to pan through, so snap back to centered
+      // instead of leaving it wherever it was last dragged to while zoomed in further.
+      if (enableShrinkToFit && state.zoom <= 1) {
+        state.panX = 0;
+        state.panY = 0;
+      }
       clampPan();
       applyTransform();
     }
@@ -101,6 +130,34 @@
       setPanButtonState();
       applyTransform();
     }
+
+    // Expands the viewer to the full screen using the browser's native Fullscreen API, rather
+    // than a custom modal/overlay - this reuses the exact same DOM (image, toolbar, zoom/pan/
+    // rotate state, event listeners) with nothing duplicated or re-initialized, so every control
+    // keeps working identically, just with far more room. A matching CSS rule sizes the frame to
+    // the fullscreen viewport; Escape (handled natively by the browser) or the same button again
+    // exits back to the normal in-page layout.
+    function toggleFullscreen() {
+      if (document.fullscreenElement === container) {
+        document.exitFullscreen();
+      } else if (container.requestFullscreen) {
+        container.requestFullscreen();
+      }
+    }
+
+    function setFullscreenButtonState() {
+      var btn = container.querySelector('[data-viewer-action="toggleFullscreen"]');
+      if (btn) btn.classList.toggle('btn-navy', document.fullscreenElement === container);
+    }
+
+    document.addEventListener('fullscreenchange', function () {
+      setFullscreenButtonState();
+      // The frame's available size changes drastically on entering/exiting fullscreen; re-clamp
+      // pan (against the frame's new size) so the image stays positioned sensibly instead of
+      // partly outside the newly resized frame.
+      clampPan();
+      applyTransform();
+    });
 
     function fitToScreen() {
       var cw = frame.clientWidth;
@@ -193,11 +250,20 @@
     });
 
     img.addEventListener('load', function () {
+      clampPan();
+      applyTransform();
       if (pendingFitOnLoad) {
         pendingFitOnLoad = false;
         fitToScreen();
       }
     });
+
+    if (enableShrinkToFit) {
+      window.addEventListener('resize', function () {
+        clampPan();
+        applyTransform();
+      });
+    }
 
     container.querySelectorAll('[data-viewer-action]').forEach(function (btn) {
       var action = btn.getAttribute('data-viewer-action');
@@ -209,6 +275,7 @@
         else if (action === 'rotateLeft') rotateLeft();
         else if (action === 'rotateRight') rotateRight();
         else if (action === 'togglePan') togglePan();
+        else if (action === 'toggleFullscreen') toggleFullscreen();
         else if (action === 'reset') {
           // Same zoom=1/rotation=0/pan=0 restore as "100%" (actualSize), plus also turning off
           // Pan/Move if it was on - a full Reset clears every user-applied view transformation.
