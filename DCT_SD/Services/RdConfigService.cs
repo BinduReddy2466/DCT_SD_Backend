@@ -103,8 +103,7 @@ public class RdConfigService : IRdConfigService
             throw new BusinessValidationException("The root source path must be configured before starting a fetch.");
         }
 
-        var hasOngoing = await _context.FetchRuns.AnyAsync(r => r.Status == FetchRunStatus.Ongoing, cancellationToken);
-        if (hasOngoing)
+        if (await HasOngoingFetchAsync(cancellationToken))
         {
             throw new BusinessValidationException("A fetch is already in progress. Please wait for it to complete.");
         }
@@ -126,6 +125,9 @@ public class RdConfigService : IRdConfigService
         // 0 (never persisted); callers must not treat it as a real row id.
         return MapToFetchRunItem(run);
     }
+
+    public Task<bool> HasOngoingFetchAsync(CancellationToken cancellationToken = default) =>
+        _context.FetchRuns.AnyAsync(r => r.Status == FetchRunStatus.Ongoing, cancellationToken);
 
     public async Task CompleteFetchRunAsync(int localFetchRunId, FetchRunDetailDto details, string? failureReason = null, CancellationToken cancellationToken = default)
     {
@@ -167,9 +169,16 @@ public class RdConfigService : IRdConfigService
 
     public async Task FailFetchRunAsync(int localFetchRunId, string? failureReason = null, CancellationToken cancellationToken = default)
     {
+        // localFetchRunId is always 0 (see StartFetchAsync - this app never inserts its own
+        // FetchRuns row), so looking it up by that id would never match the real row the external
+        // service created under its own id - every call site that reaches this method does so
+        // precisely because no real id was ever learned (the stream ended before any run_complete/
+        // fetch_run_id arrived), so there is no id to look up by in the first place. Falling back
+        // to "whichever row is currently Ongoing" is safe and unambiguous: StartFetchAsync's own
+        // guard (HasOngoingFetchAsync) already enforces that at most one can exist at a time.
         var run = await _context.FetchRuns
-            .FirstOrDefaultAsync(r => r.Id == localFetchRunId && r.RecordKind == FetchRunRecordKinds.FetchRun, cancellationToken);
-        if (run is null || run.Status != FetchRunStatus.Ongoing)
+            .FirstOrDefaultAsync(r => r.RecordKind == FetchRunRecordKinds.FetchRun && r.Status == FetchRunStatus.Ongoing, cancellationToken);
+        if (run is null)
         {
             return;
         }

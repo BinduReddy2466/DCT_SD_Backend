@@ -1,7 +1,16 @@
 @model RdConfigIndexViewModel
 @{
     var hasRootPath = !string.IsNullOrWhiteSpace(Model.RootPathForm.RootPath);
-    var startFetchDisabledTitle = "Root Source Path must be configured before fetching can be started.";
+    // Checked fresh server-side on every render (Model.HasOngoingFetch, from
+    // RdConfigService.HasOngoingFetchAsync) - not just the client-side state rd-config.js sets
+    // when it starts a fetch in this tab, which a page refresh always discards. Without this, the
+    // button would come back enabled after a refresh even while a fetch is still genuinely running.
+    var startFetchDisabled = !hasRootPath || Model.HasOngoingFetch;
+    var startFetchDisabledTitle = !hasRootPath
+        ? "Root Source Path must be configured before fetching can be started."
+        : Model.HasOngoingFetch
+            ? "A fetch is already in progress. Please wait for it to complete."
+            : null;
 }
 
 <div class="card p-4 mb-4">
@@ -53,10 +62,10 @@
             @* A disabled <button> doesn't fire hover/title tooltips in Chrome/Firefox (disabled
                elements stop receiving pointer interaction), so the tooltip has to live on a
                non-disabled wrapper around it instead. *@
-            <span id="startFetchTooltipWrapper" title="@(hasRootPath ? null : startFetchDisabledTitle)"
-                  data-bs-toggle="@(hasRootPath ? null : "tooltip")" data-bs-custom-class="@(hasRootPath ? null : "start-fetch-tooltip")">
+            <span id="startFetchTooltipWrapper" title="@startFetchDisabledTitle"
+                  data-bs-toggle="@(startFetchDisabledTitle is null ? null : "tooltip")" data-bs-custom-class="@(startFetchDisabledTitle is null ? null : "start-fetch-tooltip")">
                 <button type="button" id="startFetchBtn" class="btn btn-gold" data-current-username="@Model.CurrentUserDisplayName"
-                        disabled="@(!hasRootPath)">Start Fetching</button>
+                        disabled="@startFetchDisabled">Start Fetching</button>
             </span>
         </div>
     </div>

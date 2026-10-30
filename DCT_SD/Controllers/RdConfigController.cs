@@ -51,6 +51,7 @@ public class RdConfigController : Controller
         var rootPath = await _rdConfigService.GetCurrentRootPathAsync(cancellationToken);
         var rootHistory = await _rdConfigService.SearchRootPathHistoryAsync(new RootPathHistorySearchRequestDto { PageNumber = 1, PageSize = 25 }, cancellationToken);
         var fetchHistory = await _rdConfigService.SearchFetchHistoryAsync(new FetchHistorySearchRequestDto { PageNumber = 1, PageSize = 25 }, cancellationToken);
+        var hasOngoingFetch = await _rdConfigService.HasOngoingFetchAsync(cancellationToken);
 
         // Same "FirstName_LastName" display name already used for Modified By/Executed By
         // elsewhere (see ManualValidationService), so the live/streaming row's Executed By -
@@ -69,6 +70,7 @@ public class RdConfigController : Controller
             RootHistory = rootHistory,
             RootPathForm = new RootPathFormViewModel { RootPath = rootPath.CurrentPath ?? string.Empty },
             CurrentUserDisplayName = currentUserDisplayName,
+            HasOngoingFetch = hasOngoingFetch,
         };
     }
 

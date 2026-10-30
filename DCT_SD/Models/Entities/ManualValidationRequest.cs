@@ -11,6 +11,11 @@ public class ManualValidationRequest
     public string? RdCode { get; set; }
     public string? RdName { get; set; }
     public string? EntryNumbersCsv { get; set; }
+    // Maps to the EntryNumberRange column already present in the deployed schema (added via
+    // DBChanges/dct_sd_main.sql, not an EF migration - see ManualValidationService.GetGroupRecordsAsync
+    // for why it exists: it is the grouping/record-matching key, distinct in purpose from
+    // EntryNumbersCsv, which stays a separate, independently-edited field.
+    public string? EntryNumberRange { get; set; }
     public string? Title { get; set; }
     public TitleType? TitleType { get; set; }
     public string? Plan { get; set; }

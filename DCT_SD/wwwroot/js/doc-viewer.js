@@ -30,6 +30,11 @@
     var frame = container.querySelector('[data-viewer-frame]');
     var img = container.querySelector('[data-viewer-image]');
     var filenameEl = container.querySelector('[data-viewer-filename]');
+    // Manual Validation only - Migrations/Compare still use a plain "100%" button
+    // (data-viewer-action="actualSize", untouched below) and have no element matching this
+    // selector, so zoomInput is null there and every block below guarded by `if (zoomInput)` is
+    // simply skipped - zero behavior change for those two pages.
+    var zoomInput = container.querySelector('[data-viewer-zoom-input]');
 
     var state = { zoom: 1, rotation: 0, panX: 0, panY: 0, panMode: false };
     var drag = { isDragging: false, startX: 0, startY: 0 };
@@ -73,6 +78,16 @@
       state.panY = Math.min(maxPanY, Math.max(-maxPanY, state.panY));
     }
 
+    // Single point where the zoom percentage display is kept in sync - applyTransform already
+    // runs after every state change that can affect zoom (buttons, wheel, drag, load, rotate,
+    // fullscreen), so hooking it here is the one place needed rather than repeating this call at
+    // every individual call site. No-op (via the zoomInput null-check) on Migrations/Compare.
+    function updateZoomDisplay() {
+      if (zoomInput) {
+        zoomInput.value = Math.round(state.zoom * 100) + '%';
+      }
+    }
+
     function applyTransform() {
       img.style.transform =
         'translate(' + state.panX + 'px, ' + state.panY + 'px) scale(' + state.zoom + ') rotate(' + state.rotation + 'deg)';
@@ -80,6 +95,7 @@
       if (!drag.isDragging) {
         img.style.cursor = state.panMode || state.zoom > 1 ? 'grab' : 'default';
       }
+      updateZoomDisplay();
     }
 
     function setPanButtonState() {
@@ -263,6 +279,34 @@
         clampPan();
         applyTransform();
       });
+    }
+
+    // Manual Validation only (see zoomInput declaration above) - lets the percentage be typed
+    // directly instead of only stepped via +/-. Reuses the exact same minZoom/maxZoom/state.zoom/
+    // clampPan/applyTransform already used everywhere else, so this is just another way to set
+    // state.zoom, not a parallel zoom mechanism.
+    if (zoomInput) {
+      var applyZoomInput = function () {
+        var parsed = parseFloat(String(zoomInput.value).replace('%', '').trim());
+        if (!isFinite(parsed) || parsed <= 0) {
+          // Invalid (non-numeric, zero, negative) - reject and revert to the current actual zoom
+          // rather than applying anything.
+          updateZoomDisplay();
+          return;
+        }
+        var clampedPercent = Math.min(maxZoom * 100, Math.max(minZoom * 100, parsed));
+        state.zoom = clampedPercent / 100;
+        clampPan();
+        applyTransform();
+      };
+      zoomInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          applyZoomInput();
+          zoomInput.blur();
+        }
+      });
+      zoomInput.addEventListener('blur', applyZoomInput);
     }
 
     container.querySelectorAll('[data-viewer-action]').forEach(function (btn) {

@@ -11,6 +11,12 @@ public interface IRdConfigService
     Task<FetchRunItemDto> StartFetchAsync(CancellationToken cancellationToken = default);
     Task<PagedResult<FetchRunItemDto>> SearchFetchHistoryAsync(FetchHistorySearchRequestDto request, CancellationToken cancellationToken = default);
 
+    /// Whether a fetch is currently Ongoing - the same check StartFetchAsync uses to refuse a
+    /// second concurrent fetch, exposed so the Index page can disable the Start Fetching button
+    /// on initial render/refresh instead of relying solely on client-side JS state, which a page
+    /// reload always loses.
+    Task<bool> HasOngoingFetchAsync(CancellationToken cancellationToken = default);
+
     /// Updates the local FetchRuns mirror row created by StartFetchAsync once the external run
     /// finishes, so the existing Fetch History table reflects the real outcome without callers
     /// having to re-query the external service just to render the list/pagination. failureReason,

@@ -85,12 +85,16 @@ public class ManualValidationService : IManualValidationService
         var matchingRecords = await query.ToListAsync(cancellationToken);
 
         // Same grouping key as the Details page (GetGroupRecordsAsync): rows sharing the exact
-        // same (RdCode, EntryNumbersCsv) pair become one UI row - never EntryNumbersCsv alone
-        // (the same entry number can recur under a different RD) and never RdCode alone (one RD
-        // has many unrelated entry-number groups). A blank/whitespace EntryNumbersCsv never
-        // groups; each such row is its own group of one.
+        // same (RdCode, EntryNumberRange) pair become one UI row - never EntryNumberRange alone
+        // (the same range can recur under a different RD) and never RdCode alone (one RD has many
+        // unrelated ranges). EntryNumbersCsv is a separate field and plays no part in this key. A
+        // blank/whitespace EntryNumberRange (NULL included), or a blank RdCode, never groups -
+        // each such row is identified independently by its own Id, never merged with another row
+        // just because both happen to be missing a range.
         var groups = matchingRecords
-            .GroupBy(r => string.IsNullOrWhiteSpace(r.EntryNumbersCsv) ? $"__row:{r.Id}" : $"{r.RdCode}|{r.EntryNumbersCsv}")
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.RdCode) || string.IsNullOrWhiteSpace(r.EntryNumberRange)
+                ? $"__row:{r.Id}"
+                : $"{r.RdCode}|{r.EntryNumberRange}")
             .Select(g => g.OrderBy(r => r.Id).ToList())
             .ToList();
 
@@ -185,10 +189,11 @@ public class ManualValidationService : IManualValidationService
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
-        // Every row sharing this record's (pre-edit) EntryNumbersCsv - the sole grouping key.
-        // Locking stays scoped to `record` alone (EnsureNotLockedByAnotherUser above only checked
-        // that one row); group siblings are written here regardless of their own lock state, same
-        // as today's single-record Save never checked a second row's lock.
+        // Every row sharing this record's (pre-edit) RdCode + EntryNumberRange - the grouping key
+        // (see GetGroupRecordsAsync). Locking stays scoped to `record` alone
+        // (EnsureNotLockedByAnotherUser above only checked that one row); group siblings are
+        // written here regardless of their own lock state, same as today's single-record Save
+        // never checked a second row's lock.
         var group = await GetGroupRecordsAsync(record, cancellationToken);
         var groupIds = group.Select(r => r.Id).ToHashSet();
 
@@ -197,8 +202,11 @@ public class ManualValidationService : IManualValidationService
             changeDescriptionsByRecordId.TryGetValue(recordId, out var list) ? list : changeDescriptionsByRecordId[recordId] = [];
 
         // RD Code / RD Name / Entry Number are shown once in General Information, not per Title
-        // Record, so an edit there applies to every row in the group - keeping the group coherent
-        // for the next time it's opened (all rows still share the same, now-updated, EntryNumbersCsv).
+        // Record, so an edit there applies to every row in the group. RdCode is overwritten
+        // uniformly here, which keeps the group's RdCode half of the (RdCode, EntryNumberRange)
+        // key consistent; EntryNumberRange itself is never written by this app (it is populated
+        // externally) and was already identical across every row in the group - that is precisely
+        // why they grouped together - so it needs no update here to stay coherent.
         var newRdCode = request.RdCode?.Trim();
         var newEntryNumbersCsv = request.EntryNumbersCsv?.Trim();
         var newRdName = string.IsNullOrWhiteSpace(newRdCode)
@@ -224,6 +232,21 @@ public class ManualValidationService : IManualValidationService
 
             AddFieldChange(ChangesFor(r.Id), "RD Code", originalRdCode, r.RdCode);
             AddFieldChange(ChangesFor(r.Id), "Entry Number", originalEntryNumbersCsv, r.EntryNumbersCsv);
+        }
+
+        // Required change: once a record flagged "Target RD Not Identified" (the status the
+        // external fetch service assigns when it can't match a target RD) gets a real RD Code from
+        // this Save, it no longer belongs in that status - move it to "Incomplete Extraction"
+        // instead, since the rest of its data may still be incomplete. Scoped to `record` alone,
+        // never other rows in `group`. Set on the tracked entity here (not via a separate
+        // SaveChangesAsync), so it commits atomically with everything else below - if this Save
+        // throws before the SaveChangesAsync call further down, nothing is persisted, including
+        // this, matching "if saving fails, do not update the status."
+        if (record.Status == ManualValidationStatus.TargetRdNotIdentified && !string.IsNullOrWhiteSpace(newRdCode))
+        {
+            var originalStatus = record.Status;
+            record.Status = ManualValidationStatus.IncompleteExtraction;
+            AddFieldChange(ChangesFor(record.Id), "Status", originalStatus.ToString(), record.Status.ToString());
         }
 
         // Each Title Record targets exactly one underlying row by RecordId - never by position/
@@ -997,26 +1020,29 @@ public class ManualValidationService : IManualValidationService
             .FirstOrDefaultAsync(r => r.Id == id && r.MigratedAt == null, cancellationToken)
             ?? throw new NotFoundException("Manual validation record", id);
 
-    // Every active ManualValidationRequest sharing `primary`'s exact RD Code AND EntryNumbersCsv,
+    // Every active ManualValidationRequest sharing `primary`'s exact RD Code AND EntryNumberRange,
     // in ascending Id order (so "Title Record 1" is always the earliest-created row) - the group
-    // key is the (RdCode, EntryNumbersCsv) pair, never EntryNumbersCsv alone (the same entry
-    // number can legitimately recur under a different RD) and never RdCode alone (one RD has many
-    // unrelated entry-number groups), and never RequestNumber or Id. A blank/whitespace
-    // EntryNumbersCsv never groups: a record with no Entry Number always forms a group of one
-    // (itself), so records that simply haven't had an Entry Number entered yet are never lumped
-    // together by accident.
+    // key is the (RdCode, EntryNumberRange) pair, never EntryNumberRange alone (the same range
+    // can legitimately recur under a different RD) and never RdCode alone (one RD has many
+    // unrelated ranges), and never RequestNumber or Id. EntryNumbersCsv is a separate,
+    // independently-edited field and is never compared, used as a fallback, or otherwise made
+    // part of this key. A blank/whitespace EntryNumberRange (NULL included) never groups, even
+    // with another blank/whitespace row: a record with no range always forms a group of one
+    // (itself) - two records both missing a range are identified independently by Id, never
+    // assumed to belong together. RdCode must also be present for a match; either side being
+    // blank forces a group of one.
     // Returns tracked entities (so SaveAsync can mutate and persist group siblings directly).
     private async Task<List<ManualValidationRequest>> GetGroupRecordsAsync(ManualValidationRequest primary, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(primary.EntryNumbersCsv))
+        if (string.IsNullOrWhiteSpace(primary.RdCode) || string.IsNullOrWhiteSpace(primary.EntryNumberRange))
         {
             return [primary];
         }
 
         var rdCode = primary.RdCode;
-        var entryNumbersCsv = primary.EntryNumbersCsv;
+        var entryNumberRange = primary.EntryNumberRange;
         var group = await _context.ManualValidationRequests
-            .Where(r => r.MigratedAt == null && r.RdCode == rdCode && r.EntryNumbersCsv == entryNumbersCsv)
+            .Where(r => r.MigratedAt == null && r.RdCode == rdCode && r.EntryNumberRange == entryNumberRange)
             .OrderBy(r => r.Id)
             .ToListAsync(cancellationToken);
 
@@ -1060,7 +1086,7 @@ public class ManualValidationService : IManualValidationService
     {
         // Supporting Documents are read from the OPENED record's own DocumentsJson only - never
         // merged/concatenated across its group siblings. Every Title Record sharing this
-        // EntryNumbersCsv describes the same physical document set (see SaveAsync's sync step
+        // EntryNumberRange describes the same physical document set (see SaveAsync's sync step
         // below), so there is nothing to merge; doing so previously caused the same document to
         // occasionally render as two rows (or, after a correction, to collide in display with an
         // unrelated document of the same resulting name from a sibling's own folder - see

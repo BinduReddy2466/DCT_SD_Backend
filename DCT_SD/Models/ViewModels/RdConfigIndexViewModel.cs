@@ -14,4 +14,10 @@ public class RdConfigIndexViewModel
     // History row's Executed By cell (see rd-config.js) while a run is in progress, before the
     // real persisted row (with its own, separately-sourced Executed By) exists.
     public string CurrentUserDisplayName { get; set; } = string.Empty;
+
+    // Whether a fetch is currently Ongoing (per RdConfigService.HasOngoingFetchAsync), checked
+    // fresh on every page render - lets Index.cshtml disable the Start Fetching button correctly
+    // on initial load/refresh, instead of relying only on the client-side state rd-config.js sets
+    // when it itself starts a fetch, which a page reload always discards.
+    public bool HasOngoingFetch { get; set; }
 }
