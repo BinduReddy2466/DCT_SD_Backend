@@ -85,7 +85,8 @@ public class RdConfigController : Controller
     public async Task<IActionResult> FetchHistoryResults([FromQuery] FetchHistorySearchRequestDto request, CancellationToken cancellationToken)
     {
         var result = await _rdConfigService.SearchFetchHistoryAsync(request, cancellationToken);
-        return PartialView("_FetchHistoryResults", result);
+        var hasAppliedFilters = request.DateFrom.HasValue || request.DateTo.HasValue || !string.IsNullOrWhiteSpace(request.ExecutedBy);
+        return PartialView("_FetchHistoryResults", new FetchHistoryResultsViewModel { Result = result, HasAppliedFilters = hasAppliedFilters });
     }
 
     [HttpGet]

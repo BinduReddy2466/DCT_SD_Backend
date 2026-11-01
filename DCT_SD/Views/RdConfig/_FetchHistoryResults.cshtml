@@ -1,4 +1,8 @@
-@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.RdConfig.FetchRunItemDto>
+@model FetchHistoryResultsViewModel
+@{
+    var result = Model.Result;
+    var emptyMessage = Model.HasAppliedFilters ? "No records found." : "No fetch history found.";
+}
 
 <div class="table-responsive table-frame">
     <table class="table table-hover align-middle">
@@ -16,13 +20,13 @@
             </tr>
         </thead>
         <tbody>
-            @if (Model.Items.Count == 0)
+            @if (result.Items.Count == 0)
             {
-                <tr><td colspan="9" class="text-center text-muted py-4">No records found.</td></tr>
+                <tr><td colspan="9" class="text-center text-muted py-4">@emptyMessage</td></tr>
             }
             else
             {
-                @foreach (var item in Model.Items)
+                @foreach (var item in result.Items)
                 {
                     var fetchPct = item.TotalCount.HasValue && item.TotalCount.Value > 0
                         ? Math.Min(100, (int)Math.Round(item.ProcessedCount * 100.0 / item.TotalCount.Value))
@@ -59,7 +63,7 @@
     </table>
 </div>
 
-@if (Model.TotalCount > 0)
+@if (result.TotalCount > 0)
 {
-    @await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "FetchHistoryResults" })
+    @await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = result.PageNumber, PageSize = result.PageSize, TotalCount = result.TotalCount, TotalPages = result.TotalPages, ActionName = "FetchHistoryResults" })
 }

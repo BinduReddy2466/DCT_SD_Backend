@@ -98,7 +98,7 @@
                 </div>
             </form>
             <div id="fetch-history-results">
-                @await Html.PartialAsync("_FetchHistoryResults", Model.FetchHistory)
+                @await Html.PartialAsync("_FetchHistoryResults", new FetchHistoryResultsViewModel { Result = Model.FetchHistory, HasAppliedFilters = false })
             </div>
         </div>
 

@@ -14,7 +14,13 @@
             </thead>
         }
         <tbody>
-            @if (Model.Rows.Count == 0)
+            @if (Model.Rows.Count == 0 && Model.Headers.Count == 0)
+            {
+                // No Report Type selected yet (the initial page load, or a direct/stale request
+                // with no reportType) - there's nothing to search yet, so showing "No records
+                // found." here would wrongly imply a search already ran and matched nothing.
+            }
+            else if (Model.Rows.Count == 0)
             {
                 <tr><td colspan="@Math.Max(Model.Headers.Count, 1)" class="text-center text-muted py-4">No records found.</td></tr>
             }
