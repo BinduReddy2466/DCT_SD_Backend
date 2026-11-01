@@ -9,10 +9,12 @@ public class UserFormViewModel
     public int? Id { get; set; }
 
     [Required(ErrorMessage = "First Name is required.")]
+    [StringLength(32, ErrorMessage = "First Name cannot exceed 32 characters.")]
     [Display(Name = "First Name")]
     public string FirstName { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "Last Name is required.")]
+    [StringLength(32, ErrorMessage = "Last Name cannot exceed 32 characters.")]
     [Display(Name = "Last Name")]
     public string LastName { get; set; } = string.Empty;
 

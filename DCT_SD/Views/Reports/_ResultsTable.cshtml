@@ -25,7 +25,11 @@
                     <tr>
                         @foreach (var cell in row)
                         {
-                            <td>@(string.IsNullOrWhiteSpace(cell) ? "—" : cell)</td>
+                            @* white-space: pre-line matches the Fetch History page's own Fetch
+                               Summary column (_FetchHistoryResults.cshtml) - preserves that
+                               field's embedded line breaks. A no-op for every other column/report
+                               type, since none of them contain embedded line breaks. *@
+                            <td style="white-space: pre-line;">@(string.IsNullOrWhiteSpace(cell) ? "—" : cell)</td>
                         }
                     </tr>
                 }

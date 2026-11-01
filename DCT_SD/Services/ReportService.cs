@@ -154,7 +154,7 @@ public class ReportService : IReportService
             _ => Task.FromResult(new ReportPreviewDto()),
         };
 
-    private static readonly string[] RootSourcePathHistoryHeaders = ["Modified Date & Time", "From Source Path", "To Source Path", "Modified By", "Remarks"];
+    private static readonly string[] RootSourcePathHistoryHeaders = ["From Source Path", "To Source Path", "Modified Date & Time", "Modified By", "Remarks"];
 
     private async Task<ReportPreviewDto> PreviewRootSourcePathHistoryAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
     {
@@ -170,15 +170,15 @@ public class ReportService : IReportService
         var page = await _rdConfigService.SearchRootPathHistoryAsync(request, cancellationToken);
         return ToPreview(RootSourcePathHistoryHeaders, page, item => new[]
         {
-            FormatDate(item.ModifiedAt),
             item.FromPath ?? string.Empty,
             item.ToPath,
+            FormatDate(item.ModifiedAt),
             item.ModifiedBy,
             item.Remarks,
         });
     }
 
-    private static readonly string[] FetchHistoryHeaders = ["Fetch Date & Time", "Completion Date & Time", "Run Time", "Progress", "Status", "Executed By", "Source Path"];
+    private static readonly string[] FetchHistoryHeaders = ["Fetch Date and Time", "Fetch Completion Date and Time", "Fetch Run Time", "Fetch Progress", "Fetch Status", "Executed By", "Fetch Summary", "Source Path"];
 
     private async Task<ReportPreviewDto> PreviewFetchHistoryAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
     {
@@ -200,6 +200,10 @@ public class ReportService : IReportService
             item.TotalCount.HasValue ? $"{item.ProcessedCount}/{item.TotalCount}" : item.ProcessedCount.ToString(),
             item.Status,
             item.ExecutedBy,
+            // Same field the Fetch History page itself shows under this same "Fetch Summary"
+            // header (see RdConfigService.MapToFetchRunItem) - the per-run breakdown of
+            // extracted/failed/moved-to-empty-entry/total folders.
+            item.FailureReason ?? string.Empty,
             item.SourcePath,
         });
     }
@@ -268,7 +272,7 @@ public class ReportService : IReportService
         });
     }
 
-    private static readonly string[] EmptyEntryFoldersHeaders = ["Fetch Date/Time", "RD Code", "RD Name", "Folder Name", "Folder Path", "Status"];
+    private static readonly string[] EmptyEntryFoldersHeaders = ["Fetch Date and Time", "Registry of Deeds (RD)", "Folder Name", "Folder Path", "Extraction Status"];
 
     private async Task<ReportPreviewDto> PreviewEmptyEntryFoldersAsync(IDictionary<string, string?> filters, int pageNumber, int pageSize, CancellationToken cancellationToken)
     {
@@ -286,8 +290,9 @@ public class ReportService : IReportService
         return ToPreview(EmptyEntryFoldersHeaders, page, item => new[]
         {
             FormatDate(item.FetchDateTime),
-            item.RdCode ?? string.Empty,
-            item.RdName ?? string.Empty,
+            // Same "RdCode - RdName" combined format as the Empty Folders page itself
+            // (Views/EmptyFolders/_Results.cshtml) - one column there, not two.
+            string.Join(" - ", new[] { item.RdCode, item.RdName }.Where(v => !string.IsNullOrWhiteSpace(v))),
             item.FolderName,
             item.FolderPath,
             item.Status,

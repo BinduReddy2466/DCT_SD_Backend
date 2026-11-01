@@ -27,9 +27,20 @@
       var url = form.getAttribute('action') + '?' + params.toString();
       resultsContainer.setAttribute('aria-busy', 'true');
       fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        .then(function (r) { return r.text(); })
-        .then(function (html) { resultsContainer.innerHTML = html; })
-        .catch(function () { /* leave whatever was already shown rather than blanking it */ })
+        .then(function (r) {
+          if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+          if (!r.ok) {
+            if (window.showToast) window.showToast('Could not load results. Please try again.', 'error');
+            return null;
+          }
+          return r.text();
+        })
+        .then(function (html) { if (html !== null) resultsContainer.innerHTML = html; })
+        .catch(function () {
+          // leave whatever was already shown rather than blanking it, but say so this time -
+          // silently doing nothing here reads exactly like the page froze.
+          if (window.showToast) window.showToast('Could not load results. Please check your connection and try again.', 'error');
+        })
         .finally(function () { resultsContainer.removeAttribute('aria-busy'); });
     }
 
@@ -43,15 +54,27 @@
       if (clearBtn) clearBtn.classList.toggle('d-none', !reportType);
       if (!reportType) return;
 
+      filtersContainer.setAttribute('aria-busy', 'true');
       fetch('/Reports/Filters?reportType=' + encodeURIComponent(reportType), {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
-        .then(function (r) { return r.text(); })
+        .then(function (r) {
+          if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+          if (!r.ok) {
+            if (window.showToast) window.showToast('Could not load the filters for this report type. Please try again.', 'error');
+            return null;
+          }
+          return r.text();
+        })
         .then(function (html) {
-          if (typeSelect.value !== reportType) return; // selection changed again mid-fetch
+          if (html === null || typeSelect.value !== reportType) return; // selection changed again mid-fetch, or request failed
           filtersContainer.innerHTML = html;
           loadResults();
-        });
+        })
+        .catch(function () {
+          if (window.showToast) window.showToast('Could not load the filters for this report type. Please check your connection and try again.', 'error');
+        })
+        .finally(function () { filtersContainer.removeAttribute('aria-busy'); });
     }
 
     typeSelect.addEventListener('change', function () {
@@ -85,6 +108,7 @@
     }
 
     generateBtn.addEventListener('click', function () {
+      if (generateBtn.disabled) return;
       if (!typeSelect.value) {
         if (errorEl) errorEl.classList.remove('d-none');
         return;
@@ -103,6 +127,22 @@
         hidden.setAttribute('data-dynamic-field', '');
         generateForm.appendChild(hidden);
       });
+
+      // This submit is a real top-level form POST (needed so the browser treats the response as
+      // a file download), so there's no fetch promise to key a "done" state off of - on success
+      // the browser stays on this same page (no navigation happens for a file-attachment
+      // response), and on failure the server redirects back to Index, which reloads the page and
+      // resets this button along with everything else. The only gap that leaves is the success
+      // case, so re-enable after a generous fixed delay rather than leaving it disabled forever;
+      // this also stops a double-click from firing two concurrent report generations, each a
+      // multi-second, single-threaded Excel build on the server.
+      var originalLabel = generateBtn.textContent;
+      generateBtn.disabled = true;
+      generateBtn.textContent = 'Generating...';
+      setTimeout(function () {
+        generateBtn.disabled = false;
+        generateBtn.textContent = originalLabel;
+      }, 15000);
 
       generateForm.submit();
     });

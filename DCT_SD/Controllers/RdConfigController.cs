@@ -594,8 +594,15 @@ public class RdConfigController : Controller
 
         // Neither GET /fetch/{id} nor run_complete itself ever carries a reason - it only ever
         // existed in the live SSE stream at the moment the run failed, which is why it's
-        // recorded locally (RdConfigService.RecordFailureReasonAsync) instead.
-        details.FailureReason ??= local.Value.FailureReason;
+        // recorded locally (RdConfigService.RecordFailureReasonAsync) instead. That same
+        // RecordHistory remark also carries a success-run completion breakdown (see that
+        // method's own comment) - that belongs only in the Fetch History list's "Fetch Summary"
+        // column, never in this popup's "Failure Reason" field, so it's only applied here when
+        // the run actually failed.
+        if (string.Equals(details.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+        {
+            details.FailureReason ??= local.Value.FailureReason;
+        }
 
         return PartialView("_FetchRunDetailsModal", details);
     }

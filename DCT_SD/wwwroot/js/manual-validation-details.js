@@ -665,9 +665,21 @@
     var remarksContainer = document.getElementById('mvRemarksHistory');
 
     function loadRemarks(pageNumber) {
+      remarksContainer.setAttribute('aria-busy', 'true');
       fetch('/ManualValidation/RemarksHistoryInline?id=' + recordId + '&pageNumber=' + pageNumber, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        .then(function (r) { return r.text(); })
-        .then(function (html) { remarksContainer.innerHTML = html; });
+        .then(function (r) {
+          if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+          if (!r.ok) {
+            if (window.showToast) window.showToast('Could not load remarks history. Please try again.', 'error');
+            return null;
+          }
+          return r.text();
+        })
+        .then(function (html) { if (html !== null) remarksContainer.innerHTML = html; })
+        .catch(function () {
+          if (window.showToast) window.showToast('Could not load remarks history. Please check your connection and try again.', 'error');
+        })
+        .finally(function () { remarksContainer.removeAttribute('aria-busy'); });
     }
 
     if (remarksContainer) {

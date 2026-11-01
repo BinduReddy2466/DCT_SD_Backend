@@ -11,12 +11,34 @@
     container.innerHTML = html;
   }
 
+  // Shared "From Date"/"To Date" range validation: every date-range filter in the app (Fetch
+  // History, Root Source Path History, Empty Folders, Migrations, Users, Manual Validation,
+  // Failed Extraction, Reports) names its fields exactly DateFrom/DateTo and submits through this
+  // same submitForm(), so one check here covers all of them. Forms with no such fields (the
+  // `!from || !to` case) are completely unaffected.
+  function hasExactlyOneDate(form) {
+    const from = form.querySelector('[name="DateFrom"]');
+    const to = form.querySelector('[name="DateTo"]');
+    if (!from || !to) return false;
+    return Boolean(from.value) !== Boolean(to.value);
+  }
+
   async function fetchAndSwap(url, container) {
     container.setAttribute('aria-busy', 'true');
     try {
       const response = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+      if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(response)) return;
+      if (!response.ok) {
+        if (window.showToast) window.showToast('Could not load results. Please try again.', 'error');
+        return;
+      }
       const html = await response.text();
       swapResults(container, html);
+    } catch (e) {
+      // Network failure (offline, DNS, server unreachable, etc.) - without this, the fetch
+      // rejects silently, leaving whatever results were already on screen with no indication
+      // the refresh/search/pagination click actually failed.
+      if (window.showToast) window.showToast('Could not load results. Please check your connection and try again.', 'error');
     } finally {
       container.removeAttribute('aria-busy');
     }
@@ -42,6 +64,12 @@
     }
 
     function submitForm() {
+      if (hasExactlyOneDate(form)) {
+        if (window.showToast) {
+          window.showToast('Please enter both From Date and To Date', 'error');
+        }
+        return;
+      }
       const query = new URLSearchParams(new FormData(form)).toString();
       const url = form.getAttribute('action') + '?' + query;
       fetchAndSwap(url, container);
