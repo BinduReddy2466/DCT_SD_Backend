@@ -103,6 +103,20 @@ public class AccountController : Controller
         }
     }
 
+    // Called when the user clicks "Yes" on the inactivity warning (inactivity-timer.js). That
+    // click used to be purely client-side (it only reset a local JS timer), which didn't actually
+    // keep the session alive: the real access/refresh tokens (both AccessTokenMinutes and
+    // RefreshTokenMinutes = 15 in appsettings.json) are only renewed by Program.cs's silent-refresh
+    // middleware, which only runs when an actual request reaches the server - so a user who went
+    // inactive right after their last real request, then clicked "Yes" and navigated, could still
+    // get bounced to Login: the 10-minute warning + 5-minute grace period (15 minutes total)
+    // leaves no safety margin against the tokens' own 15-minute lifetime. This endpoint gives that
+    // "Yes" click a real request to make, so the silent-refresh middleware actually runs and
+    // genuinely extends the session before the user does anything else.
+    [HttpGet]
+    [Authorize]
+    public IActionResult KeepAlive() => NoContent();
+
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Logout(CancellationToken cancellationToken)

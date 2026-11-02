@@ -57,12 +57,21 @@ public static class ServiceCollectionExtensions
         services.AddHttpClient<IRdFetchApiClient, RdFetchApiClient>(client =>
         {
             client.BaseAddress = new Uri(rdFetchApiBaseUrl);
-            // No fixed HttpClient-level timeout: POST /fetch/start returns a long-running SSE
-            // stream (a full fetch run can take far longer than any reasonable fixed cap), and
-            // HttpClient.Timeout bounds the whole request+body-read, not just headers. Each call
-            // instead gets bounded by the caller's own CancellationToken (ultimately the
-            // browser's request, via HttpContext.RequestAborted).
-            client.Timeout = Timeout.InfiniteTimeSpan;
+            // Bounded, not Timeout.InfiniteTimeSpan: HttpClient.Timeout only bounds the whole
+            // request+body-read when using the default HttpCompletionOption.ResponseContentRead.
+            // POST /fetch/start (StartFetchStreamAsync) explicitly uses ResponseHeadersRead, so
+            // this timeout only covers getting the initial response/headers for that call - the
+            // actual long-running SSE body read afterward is governed entirely by the controller's
+            // own CancellationToken (HttpContext.RequestAborted), same as before, completely
+            // unaffected by this value. What this DOES fix: every other call on this same typed
+            // client (GetFetchRunDetailsAsync, UpdateRootPathAsync, ReprocessFailedExtractionAsync,
+            // MergeEntryAsync) reads its response normally (no ResponseHeadersRead), so with
+            // InfiniteTimeSpan those calls had no HttpClient-level cutoff at all - if the external
+            // service accepted the connection but then hung before responding, they would await
+            // indefinitely (notably GetFetchRunDetailsAsync's post-stream reconciliation call in
+            // RdConfigController, which intentionally uses CancellationToken.None so it still
+            // completes even if the browser disconnects, and so has no other cutoff either).
+            client.Timeout = TimeSpan.FromSeconds(60);
             //client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", rdFetchApiAuthHeader);
         }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {

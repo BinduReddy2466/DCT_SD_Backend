@@ -13,6 +13,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly StreamWriter _writer;
     private readonly object _lock = new();
+    private readonly Timer _flushTimer;
     private bool _disposed;
 
     public string LogFilePath { get; }
@@ -23,7 +24,29 @@ public sealed class FileLoggerProvider : ILoggerProvider
         LogFilePath = Path.Combine(logDirectory, $"dctsd-{DateTime.Now:yyyyMMdd-HHmmss}.log");
 
         var stream = new FileStream(LogFilePath, FileMode.Create, FileAccess.Write, FileShare.Read);
-        _writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+        // AutoFlush is deliberately OFF: with it on, every single log line (including every HTTP
+        // client request/response line, every EF Core command, every LogError/LogWarning call
+        // across the whole app) did a real, synchronous, blocking disk flush while holding _lock -
+        // every request thread that needed to log anything serialized on that one lock, so a single
+        // slow disk write could stall the entire app at once. Writes are now buffered in memory
+        // (fast, lock held only briefly) and flushed periodically on a background timer instead, so
+        // the log file still stays current within ~2 seconds without that per-line disk-flush cost
+        // sitting on the request path.
+        _writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = false };
+        _flushTimer = new Timer(_ => TryFlush(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    private void TryFlush()
+    {
+        lock (_lock)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _writer.Flush();
+        }
     }
 
     public ILogger CreateLogger(string categoryName) => new FileLogger(categoryName, this);
@@ -69,6 +92,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
 
     public void Dispose()
     {
+        _flushTimer.Dispose();
         lock (_lock)
         {
             if (_disposed)

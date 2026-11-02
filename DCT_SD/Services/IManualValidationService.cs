@@ -6,6 +6,14 @@ namespace DCT_SD.Services;
 public interface IManualValidationService
 {
     Task<PagedResult<ManualValidationListItemDto>> SearchAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default);
+
+    /// Same filters/grouping as SearchAsync, but returns every matching (grouped) row in one call
+    /// instead of one SearchAsync-sized page at a time - for Reports' full-table Excel export,
+    /// which previously paged through SearchAsync (capped at 100 rows/call) and, because
+    /// SearchAsync redoes the full filter+group pass on every call regardless of page size,
+    /// re-loaded and re-grouped the entire matching set once per 100-row page (O(n^2) for n
+    /// matching rows). This method does that same load+group pass exactly once.
+    Task<List<ManualValidationListItemDto>> SearchAllAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default);
     Task<PagedResult<ManualValidationRemarkDto>> GetRemarksHistoryAsync(int id, int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<ManualValidationDetailDto> OpenForEditAsync(int id, CancellationToken cancellationToken = default);
     Task<ManualValidationDetailDto> SaveAsync(int id, SaveManualValidationRequestDto request, CancellationToken cancellationToken = default);

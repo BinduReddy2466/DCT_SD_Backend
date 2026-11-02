@@ -29,7 +29,7 @@
                         <td class="font-monospace small">@item.ToPath</td>
                         <td class="font-monospace small">@item.ModifiedAt.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td><span class="chip-mono">@item.ModifiedBy</span></td>
-                        <td>@item.Remarks</td>
+                        <td><div class="text-truncate" style="max-width: 320px;" title="@item.Remarks">@item.Remarks</div></td>
                     </tr>
                 }
             }

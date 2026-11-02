@@ -96,6 +96,22 @@
     promptShown = false;
     bsModal.hide();
     resetWarningTimer();
+
+    // Actually keep the session alive server-side, not just silence the local warning: the real
+    // access/refresh tokens are only renewed by Program.cs's silent-refresh middleware, which only
+    // runs when a request reaches the server. Without this call, "Yes" only reset this timer -
+    // the user's next navigation was the first real request since they went inactive, and if the
+    // tokens (15-minute lifetime, same as this warning+grace window) had already expired in the
+    // meantime, that navigation itself would be the one bounced to Login instead of silently
+    // extending the session the way clicking "Yes" is supposed to.
+    fetch('/Account/KeepAlive', { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
+      .then(function (response) {
+        if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(response)) return;
+      })
+      .catch(function () {
+        // A network hiccup here isn't treated as session-ending - the normal 401 handling on
+        // whatever the user does next still catches a session that's genuinely no longer valid.
+      });
   });
 
   noBtn.addEventListener('click', function () {

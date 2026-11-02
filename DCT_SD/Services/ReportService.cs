@@ -336,6 +336,21 @@ public class ReportService : IReportService
     private static string FormatDate(DateTime value) => value.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt");
     private static string FormatDate(DateTime? value) => value.HasValue ? FormatDate(value.Value) : string.Empty;
 
+    // Writing a raw DateTime straight into a cell stores it as a native Excel date/time serial
+    // number. A NumberFormat alone only controls how the GRID cell renders that number - Excel's
+    // formula bar shows the underlying value's own precision independently of the cell's display
+    // format, so a value that still has a non-zero Seconds component shows seconds there even
+    // though the grid cell (correctly) never does. Zeroing Seconds on the value itself - only at
+    // this Excel-export boundary, never touching the DateTime actually read from/returned by the
+    // database elsewhere in the app - means there are no seconds left for either the grid cell or
+    // the formula bar to show, in addition to (not instead of) the explicit NumberFormat below.
+    private static void SetDateCell(IXLCell cell, DateTime value)
+    {
+        var local = value.ToLocalDisplay();
+        cell.Value = new DateTime(local.Year, local.Month, local.Day, local.Hour, local.Minute, 0, local.Kind);
+        cell.Style.NumberFormat.Format = "MM/dd/yyyy h:mm AM/PM";
+    }
+
     public async Task<ReportGenerationResult> GenerateAsync(string reportType, IDictionary<string, string?> filters, CancellationToken cancellationToken = default)
     {
         var label = ReportTypes.Labels.GetValueOrDefault(reportType, reportType);
@@ -385,7 +400,7 @@ public class ReportService : IReportService
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.ModifiedAt.ToLocalDisplay();
+            SetDateCell(sheet.Cell(row, 1), item.ModifiedAt);
             sheet.Cell(row, 2).Value = item.FromPath ?? string.Empty;
             sheet.Cell(row, 3).Value = item.ToPath;
             sheet.Cell(row, 4).Value = item.ModifiedBy;
@@ -414,8 +429,8 @@ public class ReportService : IReportService
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.StartedAt.ToLocalDisplay();
-            if (item.CompletedAt.HasValue) sheet.Cell(row, 2).Value = item.CompletedAt.Value.ToLocalDisplay();
+            SetDateCell(sheet.Cell(row, 1), item.StartedAt);
+            if (item.CompletedAt.HasValue) SetDateCell(sheet.Cell(row, 2), item.CompletedAt.Value);
             sheet.Cell(row, 3).Value = item.RunTime ?? string.Empty;
             sheet.Cell(row, 4).Value = item.TotalCount.HasValue ? $"{item.ProcessedCount}/{item.TotalCount}" : item.ProcessedCount.ToString();
             sheet.Cell(row, 5).Value = item.Status;
@@ -450,7 +465,7 @@ public class ReportService : IReportService
         foreach (var item in items)
         {
             sheet.Cell(row, 1).Value = item.RequestNumber;
-            sheet.Cell(row, 2).Value = item.MigrationDate.ToLocalDisplay();
+            SetDateCell(sheet.Cell(row, 2), item.MigrationDate);
             sheet.Cell(row, 3).Value = item.RdName;
             sheet.Cell(row, 4).Value = item.EntryNumbersCsv ?? string.Empty;
             sheet.Cell(row, 5).Value = item.Title ?? string.Empty;
@@ -475,7 +490,12 @@ public class ReportService : IReportService
             DateTo = ParseDate(filters, "DateTo"),
         };
 
-        var items = await FetchAllAsync(request, _manualValidationService.SearchAsync, cancellationToken);
+        // Unlike the other Write*Async methods below, this doesn't go through the generic
+        // FetchAllAsync/SearchAsync paging loop: ManualValidationService.SearchAsync redoes a full
+        // table load + in-memory regroup on every call regardless of page size, so paging through
+        // it 100 rows at a time here would reload and regroup the entire matching set once per
+        // page (O(n^2) for n matching rows). SearchAllAsync does that same load+group pass once.
+        var items = await _manualValidationService.SearchAllAsync(request, cancellationToken);
         if (items.Count == 0) return false;
 
         var sheet = workbook.Worksheets.Add("Report");
@@ -487,9 +507,9 @@ public class ReportService : IReportService
             sheet.Cell(row, 2).Value = item.RdName ?? string.Empty;
             sheet.Cell(row, 3).Value = item.EntryNumbersCsv ?? string.Empty;
             sheet.Cell(row, 4).Value = StatusDisplay.ManualValidationStatusToDisplay(item.Status);
-            sheet.Cell(row, 5).Value = item.ExtractionDate.ToLocalDisplay();
+            SetDateCell(sheet.Cell(row, 5), item.ExtractionDate);
             sheet.Cell(row, 6).Value = item.UpdatedBy ?? string.Empty;
-            if (item.UpdatedDate.HasValue) sheet.Cell(row, 7).Value = item.UpdatedDate.Value.ToLocalDisplay();
+            if (item.UpdatedDate.HasValue) SetDateCell(sheet.Cell(row, 7), item.UpdatedDate.Value);
             row++;
         }
 
@@ -515,7 +535,7 @@ public class ReportService : IReportService
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.FetchDateTime.ToLocalDisplay();
+            SetDateCell(sheet.Cell(row, 1), item.FetchDateTime);
             sheet.Cell(row, 2).Value = item.RdCode ?? string.Empty;
             sheet.Cell(row, 3).Value = item.RdName ?? string.Empty;
             sheet.Cell(row, 4).Value = item.FolderName;
@@ -546,7 +566,7 @@ public class ReportService : IReportService
         var row = 2;
         foreach (var item in items)
         {
-            sheet.Cell(row, 1).Value = item.ExtractionDateTime.ToLocalDisplay();
+            SetDateCell(sheet.Cell(row, 1), item.ExtractionDateTime);
             sheet.Cell(row, 2).Value = item.RdName ?? string.Empty;
             sheet.Cell(row, 3).Value = item.FolderName;
             sheet.Cell(row, 4).Value = item.FolderPath;

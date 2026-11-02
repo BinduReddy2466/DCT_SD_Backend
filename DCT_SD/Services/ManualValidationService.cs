@@ -34,7 +34,7 @@ public class ManualValidationService : IManualValidationService
         _logger = logger;
     }
 
-    public async Task<PagedResult<ManualValidationListItemDto>> SearchAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default)
+    private IQueryable<ManualValidationRequest> BuildSearchQuery(ManualValidationSearchRequestDto request)
     {
         var query = _context.ManualValidationRequests.AsNoTracking().Where(r => r.MigratedAt == null);
 
@@ -76,27 +76,34 @@ public class ManualValidationService : IManualValidationService
             query = query.Where(r => r.ExtractionDate < DateRangeFilter.EndOfDayExclusive(request.DateTo.Value));
         }
 
+        return query;
+    }
+
+    // Same grouping key as the Details page (GetGroupRecordsAsync): rows sharing the exact
+    // same (RdCode, EntryNumberRange) pair become one UI row - never EntryNumberRange alone
+    // (the same range can recur under a different RD) and never RdCode alone (one RD has many
+    // unrelated ranges). EntryNumbersCsv is a separate field and plays no part in this key. A
+    // blank/whitespace EntryNumberRange (NULL included), or a blank RdCode, never groups -
+    // each such row is identified independently by its own Id, never merged with another row
+    // just because both happen to be missing a range.
+    private static List<List<ManualValidationRequest>> GroupMatchingRecords(List<ManualValidationRequest> matchingRecords) =>
+        matchingRecords
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.RdCode) || string.IsNullOrWhiteSpace(r.EntryNumberRange)
+                ? $"__row:{r.Id}"
+                : $"{r.RdCode}|{r.EntryNumberRange}")
+            .Select(g => g.OrderBy(r => r.Id).ToList())
+            .ToList();
+
+    public async Task<PagedResult<ManualValidationListItemDto>> SearchAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default)
+    {
         // Every filter above still runs server-side exactly as before; only the grouping/paging
         // step below happens in memory, over the already-filtered set. Manual Validation is a
         // human review queue (bounded, not a bulk data table), so this trades a small, predictable
         // amount of extra memory for grouping logic that's simple to read and audit - the same
         // pragmatic in-memory-filter approach already used elsewhere in this service (see
         // RetrieveTitleSequenceAsync).
-        var matchingRecords = await query.ToListAsync(cancellationToken);
-
-        // Same grouping key as the Details page (GetGroupRecordsAsync): rows sharing the exact
-        // same (RdCode, EntryNumberRange) pair become one UI row - never EntryNumberRange alone
-        // (the same range can recur under a different RD) and never RdCode alone (one RD has many
-        // unrelated ranges). EntryNumbersCsv is a separate field and plays no part in this key. A
-        // blank/whitespace EntryNumberRange (NULL included), or a blank RdCode, never groups -
-        // each such row is identified independently by its own Id, never merged with another row
-        // just because both happen to be missing a range.
-        var groups = matchingRecords
-            .GroupBy(r => string.IsNullOrWhiteSpace(r.RdCode) || string.IsNullOrWhiteSpace(r.EntryNumberRange)
-                ? $"__row:{r.Id}"
-                : $"{r.RdCode}|{r.EntryNumberRange}")
-            .Select(g => g.OrderBy(r => r.Id).ToList())
-            .ToList();
+        var matchingRecords = await BuildSearchQuery(request).ToListAsync(cancellationToken);
+        var groups = GroupMatchingRecords(matchingRecords);
 
         var pageNumber = request.PageNumber < 1 ? 1 : request.PageNumber;
         var pageSize = request.PageSize is < 1 or > 100 ? 25 : request.PageSize;
@@ -119,6 +126,17 @@ public class ManualValidationService : IManualValidationService
             PageNumber = pageNumber,
             PageSize = pageSize,
         };
+    }
+
+    public async Task<List<ManualValidationListItemDto>> SearchAllAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default)
+    {
+        var matchingRecords = await BuildSearchQuery(request).ToListAsync(cancellationToken);
+        var groups = GroupMatchingRecords(matchingRecords);
+
+        return groups
+            .OrderByDescending(g => g[0].ExtractionDate)
+            .Select(g => MapToListItem(g[0]))
+            .ToList();
     }
 
     public async Task<PagedResult<ManualValidationRemarkDto>> GetRemarksHistoryAsync(int id, int pageNumber, int pageSize, CancellationToken cancellationToken = default)

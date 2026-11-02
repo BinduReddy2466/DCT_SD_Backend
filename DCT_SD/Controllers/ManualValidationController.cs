@@ -33,15 +33,27 @@ public class ManualValidationController : Controller
         ViewData["RegistryOffices"] = await _registryOfficeService.GetAllActiveAsync(cancellationToken);
 
         var result = await _manualValidationService.SearchAsync(request, cancellationToken);
-        return View(result);
+        var hasAppliedFilters = HasAppliedFilters(request);
+        return View(new ManualValidationResultsViewModel { Result = result, HasAppliedFilters = hasAppliedFilters });
     }
 
     [HttpGet]
     public async Task<IActionResult> Results([FromQuery] ManualValidationSearchRequestDto request, CancellationToken cancellationToken)
     {
         var result = await _manualValidationService.SearchAsync(request, cancellationToken);
-        return PartialView("_Results", result);
+        var hasAppliedFilters = HasAppliedFilters(request);
+        return PartialView("_Results", new ManualValidationResultsViewModel { Result = result, HasAppliedFilters = hasAppliedFilters });
     }
+
+    // Only the 4 filters the Manual Validation page itself actually exposes (Views/ManualValidation/
+    // Index.cshtml: Registry of Deeds, Entry Number, Extraction Date From/To) - RequestNumber/Title/
+    // Status exist on the DTO for other callers (e.g. Reports) but are never set from this page's
+    // own form, so they're deliberately not checked here.
+    private static bool HasAppliedFilters(ManualValidationSearchRequestDto request) =>
+        !string.IsNullOrWhiteSpace(request.RdCode)
+        || !string.IsNullOrWhiteSpace(request.EntryNumbersCsv)
+        || request.DateFrom.HasValue
+        || request.DateTo.HasValue;
 
     [HttpGet]
     public async Task<IActionResult> RemarksHistory(int id, string requestNumber, int pageNumber = 1, CancellationToken cancellationToken = default)

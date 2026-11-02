@@ -22,7 +22,12 @@
 
         <div id="reportFiltersContainer" style="display: contents;"></div>
 
-        <div class="d-flex gap-2">
+        @* .filter-grid is an auto-fit grid where every item (including this one) gets at least
+           one ~180px column - fine for a single input, but not enough room for 3 buttons side by
+           side once enough filter fields (e.g. Manual Validation's 5) make the grid fit more,
+           narrower columns per row. grid-column: span 2 plus a wider min-width keeps this group
+           on one line regardless of how many filter fields the selected report type has. *@
+        <div class="d-flex gap-2" style="grid-column: span 2; min-width: 340px;">
             <button type="submit" class="btn btn-navy flex-fill d-none" id="reportSearchBtn">Search</button>
             <button type="button" class="btn btn-outline-secondary flex-fill d-none" id="reportClearBtn">Clear</button>
             <button type="button" class="btn btn-gold flex-fill" id="generateReportBtn">Generate Report</button>

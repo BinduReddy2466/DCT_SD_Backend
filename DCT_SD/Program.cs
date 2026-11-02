@@ -81,6 +81,23 @@ builder.Services
                     context.Request.Method, context.Request.Path, context.AuthenticateFailure?.Message ?? "no token presented");
 
                 context.HandleResponse();
+
+                // list-page.js, modal-loader.js, reports.js and manual-validation-details.js all
+                // send this header on every AJAX call they make. Without this check, a session
+                // that expires mid-use (e.g. while on the Fetch History page) made every one of
+                // those background requests follow this redirect transparently (fetch() follows
+                // redirects by default) and swap the FULL login page's HTML into whatever small
+                // results/modal container the request was updating - the authenticated page's own
+                // layout stayed on screen around it, producing a garbled, half-login/half-app page
+                // that looked broken/unresponsive rather than cleanly prompting the user to log
+                // back in. A plain 401 here lets each of those callers detect it and redirect the
+                // whole page themselves instead.
+                if (context.Request.Headers["X-Requested-With"] == "XMLHttpRequest")
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return Task.CompletedTask;
+                }
+
                 var returnUrl = Uri.EscapeDataString(context.Request.Path + context.Request.QueryString);
                 context.Response.Redirect($"/Account/Login?returnUrl={returnUrl}");
                 return Task.CompletedTask;
@@ -91,6 +108,15 @@ builder.Services
                 logger.LogWarning(
                     "Authorization forbidden: user {Username} does not have access to {Method} {Path}.",
                     context.HttpContext.User.Identity?.Name ?? "(unknown)", context.Request.Method, context.Request.Path);
+
+                // Same AJAX-vs-full-navigation distinction as OnChallenge above, for the same
+                // reason: an AJAX call that becomes forbidden mid-session should not have the
+                // Access Denied page's full HTML swapped into a small content container.
+                if (context.Request.Headers["X-Requested-With"] == "XMLHttpRequest")
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    return Task.CompletedTask;
+                }
 
                 context.Response.Redirect("/Account/AccessDenied");
                 return Task.CompletedTask;

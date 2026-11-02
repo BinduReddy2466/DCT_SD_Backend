@@ -5,7 +5,14 @@
 }
 
 <div class="table-responsive table-frame">
-    <table class="table table-hover align-middle">
+    @* align-top (not align-middle): Fetch Summary can be several lines tall (its embedded line
+       breaks are preserved below), which previously made every other cell in that same row -
+       including the View button - vertically centered against that extra height, so the button's
+       position visibly shifted row to row depending on how long that row's summary was. Top-
+       aligning keeps every cell starting at the same edge regardless of row height - a no-op for
+       any row where every cell is already single-line (the common case), since there's no extra
+       height to center against there anyway. *@
+    <table class="table table-hover align-top">
         <thead>
             <tr>
                 <th>Fetch Date and Time</th>
@@ -48,11 +55,15 @@
                         <td><span class="chip-mono">@item.ExecutedBy</span></td>
                         @* white-space: pre-line preserves the message's own line breaks (e.g. the
                            "Successfully Extracted / Failed / Moved to Empty Entry Folders / Total
-                           Folders Processed" breakdown) while still wrapping long lines normally -
-                           plain text content would otherwise collapse all of that onto one line. *@
-                        <td class="small" style="white-space: pre-line;">@(string.IsNullOrWhiteSpace(item.FailureReason) ? "—" : item.FailureReason)</td>
-                        <td class="font-monospace small">@item.SourcePath</td>
-                        <td>
+                           Folders Processed" breakdown) while still wrapping long lines normally.
+                           overflow-wrap/max-width keep this column from stretching the whole table
+                           wider than its container when a line has no natural break point to wrap
+                           at (e.g. one long unbroken run of characters) - content still wraps and
+                           stays fully visible, just within a bounded column width instead of
+                           forcing the table to overflow. *@
+                        <td class="small" style="white-space: pre-line; overflow-wrap: break-word; max-width: 280px;">@(string.IsNullOrWhiteSpace(item.FailureReason) ? "—" : item.FailureReason)</td>
+                        <td class="font-monospace small" style="overflow-wrap: break-word; max-width: 240px;">@item.SourcePath</td>
+                        <td style="white-space: nowrap;">
                             <button type="button" class="btn btn-outline-secondary btn-sm"
                                     data-modal-url="@Url.Action("FetchRunDetails", new { id = item.Id })">View</button>
                         </td>

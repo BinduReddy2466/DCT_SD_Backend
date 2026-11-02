@@ -1,5 +1,5 @@
 @using DCT_SD.Models.Dtos.RdConfig
-@model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.ManualValidation.ManualValidationListItemDto>
+@model ManualValidationResultsViewModel
 @{
     var q = Context.Request.Query;
     var registryOffices = (IReadOnlyList<RegistryOfficeDto>)ViewData["RegistryOffices"]!;
