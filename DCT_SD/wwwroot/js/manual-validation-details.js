@@ -166,9 +166,13 @@
           }
 
           var body = new URLSearchParams({ RdCode: rdCode, Title: title, TitleType: titleType, Plan: plan, Block: block, Lot: lot, __RequestVerificationToken: token });
-          fetch('/ManualValidation/RetrieveTitleSequence', { method: 'POST', body: body })
-            .then(function (r) { return r.json(); })
+          fetch('/ManualValidation/RetrieveTitleSequence', { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) {
+              if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+              return r.json();
+            })
             .then(function (data) {
+              if (!data) return; // session expired - already redirected above
               if (data.success) {
                 seqEl.value = data.sequence;
                 toast('Title Sequence retrieved successfully.', 'success');
@@ -179,6 +183,9 @@
                 seqEl.value = '';
                 toast(data.message || 'No Title Sequence record was found.');
               }
+            })
+            .catch(function () {
+              toast('Could not retrieve the Title Sequence. Please try again.', 'error');
             });
         });
       });
@@ -698,8 +705,9 @@
       }
 
       var formData = new FormData(form);
-      return fetch('/ManualValidation/Save/' + recordId, { method: 'POST', body: formData })
+      return fetch('/ManualValidation/Save/' + recordId, { method: 'POST', body: formData, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
         .then(function (r) {
+          if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
           // The server only ever returns JSON from this endpoint for the outcomes it expects
           // (success, or a recognized business/file-system failure - see ManualValidationController.
           // Save); anything else (an unhandled exception, a network-level failure) falls back to
@@ -712,6 +720,7 @@
           return r.json();
         })
         .then(function (data) {
+          if (!data) return false; // session expired - already redirected above
           if (!data.success) {
             toast(data.message || 'Unable to save changes.', 'error');
             // Per the acceptance criteria, a failed save must leave the physical file, DocumentsJson
@@ -810,15 +819,22 @@
           doSave(true).then(function (saved) {
             if (!saved) return;
             var body = new URLSearchParams({ __RequestVerificationToken: token });
-            fetch('/ManualValidation/ReadyForMigration/' + recordId, { method: 'POST', body: body })
-              .then(function (r) { return r.json(); })
+            fetch('/ManualValidation/ReadyForMigration/' + recordId, { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+              .then(function (r) {
+                if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+                return r.json();
+              })
               .then(function (data) {
+                if (!data) return; // session expired - already redirected above
                 if (!data.success) {
                   toast(data.message || 'Unable to mark this record as Ready for Migration.', 'error');
                   return;
                 }
                 toast(data.message, 'success');
                 setTimeout(function () { window.location.href = '/ManualValidation'; }, 900);
+              })
+              .catch(function () {
+                toast('Unable to mark this record as Ready for Migration. Please try again.', 'error');
               });
           });
         };
@@ -864,9 +880,13 @@
         return;
       }
       var body = new URLSearchParams({ remarks: val, __RequestVerificationToken: token });
-      fetch('/ManualValidation/Close/' + recordId, { method: 'POST', body: body })
-        .then(function (r) { return r.json(); })
+      fetch('/ManualValidation/Close/' + recordId, { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(function (r) {
+          if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+          return r.json();
+        })
         .then(function (data) {
+          if (!data) return; // session expired - already redirected above
           if (!data.success) {
             toast(data.message || 'Unable to close this record.', 'error');
             return;
@@ -874,6 +894,9 @@
           closeModal.hide();
           toast(data.message, 'success');
           setTimeout(function () { window.location.href = '/ManualValidation'; }, 700);
+        })
+        .catch(function () {
+          toast('Unable to close this record. Please try again.', 'error');
         });
     });
 

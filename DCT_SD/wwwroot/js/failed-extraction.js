@@ -48,9 +48,13 @@
       btn.textContent = 'Reprocessing...';
 
       var body = new URLSearchParams({ id: id, __RequestVerificationToken: token });
-      fetch('/FailedExtraction/Reprocess', { method: 'POST', body: body })
-        .then(function (r) { return r.json(); })
+      fetch('/FailedExtraction/Reprocess', { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(function (r) {
+          if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+          return r.json();
+        })
         .then(function (data) {
+          if (!data) return; // session expired - already redirected above
           if (window.showToast) window.showToast(data.message, data.success ? 'success' : 'error');
         })
         .catch(function () {

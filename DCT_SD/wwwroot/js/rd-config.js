@@ -438,7 +438,14 @@
       fetch('/RdConfig/StartFetchStream', {
         method: 'POST',
         body: new URLSearchParams({ __RequestVerificationToken: token, rootPath: rootPath }),
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
       }).then(function (response) {
+        // Without this check, an expired session made the server redirect to Login instead of
+        // responding with the stream - response.ok would be true (a redirect is followed to a
+        // 200 login page), so the code below would read the login page's HTML bytes as if they
+        // were the SSE stream body: no recognizable event ever appears in it, so the UI just
+        // hangs looking like fetching silently does nothing, with no error shown.
+        if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(response)) return;
         if (!response.ok) {
           return response.json().catch(function () { return {}; }).then(function (data) {
             handleSystemError({ message: data.message || 'Unable to start the fetching process.' });

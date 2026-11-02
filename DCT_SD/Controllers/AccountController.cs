@@ -103,19 +103,55 @@ public class AccountController : Controller
         }
     }
 
-    // Called when the user clicks "Yes" on the inactivity warning (inactivity-timer.js). That
-    // click used to be purely client-side (it only reset a local JS timer), which didn't actually
-    // keep the session alive: the real access/refresh tokens (both AccessTokenMinutes and
-    // RefreshTokenMinutes = 15 in appsettings.json) are only renewed by Program.cs's silent-refresh
-    // middleware, which only runs when an actual request reaches the server - so a user who went
-    // inactive right after their last real request, then clicked "Yes" and navigated, could still
-    // get bounced to Login: the 10-minute warning + 5-minute grace period (15 minutes total)
-    // leaves no safety margin against the tokens' own 15-minute lifetime. This endpoint gives that
-    // "Yes" click a real request to make, so the silent-refresh middleware actually runs and
-    // genuinely extends the session before the user does anything else.
+    // Called when the user clicks "Yes" on the inactivity warning (inactivity-timer.js), which
+    // fires at the 10-minute mark - i.e. while the access token (15-minute lifetime) is still
+    // technically valid. Program.cs's silent-refresh middleware only rotates tokens once the
+    // access token has actually expired, so a plain authenticated request here (the original
+    // version of this action) hit that still-valid token, did nothing, and left both tokens'
+    // absolute expiry unchanged at their original 15-minute mark - "Yes" didn't actually extend
+    // anything. Any delay between clicking Yes and the user's next real action past that original
+    // 15-minute mark then got bounced to Login, which is exactly the bug this action now fixes:
+    // it unconditionally rotates the refresh token (pushing expiry a fresh 15 minutes from now),
+    // unless the middleware already did so earlier in this same request because the access token
+    // had, in fact, already expired by the time the click reached the server.
     [HttpGet]
     [Authorize]
-    public IActionResult KeepAlive() => NoContent();
+    public async Task<IActionResult> KeepAlive(CancellationToken cancellationToken)
+    {
+        if (HttpContext.Items.ContainsKey(AuthCookieHelper.AccessTokenCookieName))
+        {
+            // The silent-refresh middleware already rotated the tokens for this request (the
+            // access token cookie it saw had already expired) - the session was just extended.
+            return NoContent();
+        }
+
+        var refreshToken = Request.Cookies[AuthCookieHelper.RefreshTokenCookieName];
+        if (string.IsNullOrEmpty(refreshToken))
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var rotated = await _authService.RotateRefreshTokenAsync(
+                refreshToken, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+            var (newAccessToken, newAccessExpiresAt) = _tokenService.CreateAccessToken(
+                rotated.User.Id, rotated.User.Username, rotated.User.RoleName, rotated.AllowedMenus);
+
+            AuthCookieHelper.SetAccessTokenCookie(Response, newAccessToken, newAccessExpiresAt);
+            AuthCookieHelper.SetRefreshTokenCookie(Response, rotated.NewRawToken, rotated.NewExpiresAtUtc);
+        }
+        catch (UnauthorizedAppException)
+        {
+            // The refresh token itself is already invalid/expired - the session is genuinely
+            // over. Clear the cookies and return a plain 401 so the client's shared
+            // handleUnauthenticatedAjax helper redirects the whole page to Login.
+            AuthCookieHelper.ClearAuthCookies(Response);
+            return Unauthorized();
+        }
+
+        return NoContent();
+    }
 
     [HttpPost]
     [ValidateAntiForgeryToken]

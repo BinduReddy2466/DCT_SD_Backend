@@ -40,15 +40,22 @@
         formData.append('file', file);
         formData.append('__RequestVerificationToken', tokenFrom(brandingUploadForm));
 
-        fetch('/Settings/UploadBrandingImage', { method: 'POST', body: formData })
-          .then(function (r) { return r.json(); })
+        fetch('/Settings/UploadBrandingImage', { method: 'POST', body: formData, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+          .then(function (r) {
+            if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+            return r.json();
+          })
           .then(function (data) {
+            if (!data) return; // session expired - already redirected above
             if (!data.success) {
               toast(data.message || 'Unable to upload this image.', 'error');
               return;
             }
             setBrandingPreview(data.imageUrl);
             toast(data.message, 'success');
+          })
+          .catch(function () {
+            toast('Unable to upload this image. Please try again.', 'error');
           })
           .finally(function () {
             brandingFileInput.value = '';
@@ -59,11 +66,18 @@
     if (brandingRemoveBtn) {
       brandingRemoveBtn.addEventListener('click', function () {
         var body = new URLSearchParams({ __RequestVerificationToken: tokenFrom(brandingUploadForm) });
-        fetch('/Settings/RemoveBrandingImage', { method: 'POST', body: body })
-          .then(function (r) { return r.json(); })
+        fetch('/Settings/RemoveBrandingImage', { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+          .then(function (r) {
+            if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+            return r.json();
+          })
           .then(function (data) {
+            if (!data) return; // session expired - already redirected above
             setBrandingPreview(null);
             toast(data.message, 'success');
+          })
+          .catch(function () {
+            toast('Unable to remove this image. Please try again.', 'error');
           });
       });
     }
@@ -144,9 +158,13 @@
           Body: bodyEl.value,
           __RequestVerificationToken: tokenFrom(emailTemplateForm),
         });
-        fetch('/Settings/SaveEmailTemplate', { method: 'POST', body: body })
-          .then(function (r) { return r.json(); })
+        fetch('/Settings/SaveEmailTemplate', { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+          .then(function (r) {
+            if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+            return r.json();
+          })
           .then(function (data) {
+            if (!data) return; // session expired - already redirected above
             if (!data.success) {
               toast(data.message || 'Unable to save this template.', 'error');
               return;
@@ -158,6 +176,9 @@
               template.body = data.template.body;
             }
             toast(data.message, 'success');
+          })
+          .catch(function () {
+            toast('Unable to save this template. Please try again.', 'error');
           });
       });
     }
@@ -166,9 +187,13 @@
     if (restoreBtn) {
       restoreBtn.addEventListener('click', function () {
         var body = new URLSearchParams({ key: activeKey, __RequestVerificationToken: tokenFrom(emailTemplateForm) });
-        fetch('/Settings/RestoreEmailTemplateDefault', { method: 'POST', body: body })
-          .then(function (r) { return r.json(); })
+        fetch('/Settings/RestoreEmailTemplateDefault', { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+          .then(function (r) {
+            if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+            return r.json();
+          })
           .then(function (data) {
+            if (!data) return; // session expired - already redirected above
             if (!data.success) {
               toast(data.message || 'Unable to restore the default template.', 'error');
               return;
@@ -181,6 +206,9 @@
             }
             renderEmailTemplate(activeKey);
             toast(data.message, 'success');
+          })
+          .catch(function () {
+            toast('Unable to restore the default template. Please try again.', 'error');
           });
       });
     }
