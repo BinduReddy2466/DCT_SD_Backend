@@ -1,6 +1,6 @@
 /* =============================================================================
-   Rollback for DCT_SD_HistLog_Full.sql - drops the 11 _Log tables, 11 _Hist
-   tables, and 33 triggers this script creates. These are brand-new objects
+   Rollback for DCT_SD_HistLog_Full.sql - drops the 16 _Log tables, 16 _Hist
+   tables, and 48 triggers this script creates. These are brand-new objects
    (the environment had only main tables beforehand), so rollback is a
    straight DROP, not a column-level restore. Safe to re-run.
    ============================================================================= */
@@ -127,6 +127,61 @@ IF OBJECT_ID('dbo.trg_FailedExtractionRecords_D', 'TR') IS NOT NULL DROP TRIGGER
 GO
 IF OBJECT_ID('dbo.FailedExtractionRecords_Hist', 'U') IS NOT NULL DROP TABLE dbo.FailedExtractionRecords_Hist;
 IF OBJECT_ID('dbo.FailedExtractionRecords_Log', 'U') IS NOT NULL DROP TABLE dbo.FailedExtractionRecords_Log;
+GO
+
+-------------------------------------------------------------------------------
+-- BrandingSettings
+-------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.trg_BrandingSettings_I', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_BrandingSettings_I;
+IF OBJECT_ID('dbo.trg_BrandingSettings_U', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_BrandingSettings_U;
+IF OBJECT_ID('dbo.trg_BrandingSettings_D', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_BrandingSettings_D;
+GO
+IF OBJECT_ID('dbo.BrandingSettings_Hist', 'U') IS NOT NULL DROP TABLE dbo.BrandingSettings_Hist;
+IF OBJECT_ID('dbo.BrandingSettings_Log', 'U') IS NOT NULL DROP TABLE dbo.BrandingSettings_Log;
+GO
+
+-------------------------------------------------------------------------------
+-- EmailTemplates
+-------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.trg_EmailTemplates_I', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_EmailTemplates_I;
+IF OBJECT_ID('dbo.trg_EmailTemplates_U', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_EmailTemplates_U;
+IF OBJECT_ID('dbo.trg_EmailTemplates_D', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_EmailTemplates_D;
+GO
+IF OBJECT_ID('dbo.EmailTemplates_Hist', 'U') IS NOT NULL DROP TABLE dbo.EmailTemplates_Hist;
+IF OBJECT_ID('dbo.EmailTemplates_Log', 'U') IS NOT NULL DROP TABLE dbo.EmailTemplates_Log;
+GO
+
+-------------------------------------------------------------------------------
+-- DocumentTypes
+-------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.trg_DocumentTypes_I', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_DocumentTypes_I;
+IF OBJECT_ID('dbo.trg_DocumentTypes_U', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_DocumentTypes_U;
+IF OBJECT_ID('dbo.trg_DocumentTypes_D', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_DocumentTypes_D;
+GO
+IF OBJECT_ID('dbo.DocumentTypes_Hist', 'U') IS NOT NULL DROP TABLE dbo.DocumentTypes_Hist;
+IF OBJECT_ID('dbo.DocumentTypes_Log', 'U') IS NOT NULL DROP TABLE dbo.DocumentTypes_Log;
+GO
+
+-------------------------------------------------------------------------------
+-- OcrExtractionEntries
+-------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.trg_OcrExtractionEntries_I', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_OcrExtractionEntries_I;
+IF OBJECT_ID('dbo.trg_OcrExtractionEntries_U', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_OcrExtractionEntries_U;
+IF OBJECT_ID('dbo.trg_OcrExtractionEntries_D', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_OcrExtractionEntries_D;
+GO
+IF OBJECT_ID('dbo.OcrExtractionEntries_Hist', 'U') IS NOT NULL DROP TABLE dbo.OcrExtractionEntries_Hist;
+IF OBJECT_ID('dbo.OcrExtractionEntries_Log', 'U') IS NOT NULL DROP TABLE dbo.OcrExtractionEntries_Log;
+GO
+
+-------------------------------------------------------------------------------
+-- ImageExtractionStaging
+-------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.trg_ImageExtractionStaging_I', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_ImageExtractionStaging_I;
+IF OBJECT_ID('dbo.trg_ImageExtractionStaging_U', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_ImageExtractionStaging_U;
+IF OBJECT_ID('dbo.trg_ImageExtractionStaging_D', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_ImageExtractionStaging_D;
+GO
+IF OBJECT_ID('dbo.ImageExtractionStaging_Hist', 'U') IS NOT NULL DROP TABLE dbo.ImageExtractionStaging_Hist;
+IF OBJECT_ID('dbo.ImageExtractionStaging_Log', 'U') IS NOT NULL DROP TABLE dbo.ImageExtractionStaging_Log;
 GO
 
 
