@@ -24,8 +24,13 @@
        with no HttpContext at all - either of those would otherwise fail
        the trigger, and with it the entire INSERT/UPDATE/DELETE on the main
        table, the instant this column stopped accepting NULL.
-     - RecordId INT NULL - a plain copy of T's own PK, NOT FK-constrained,
-       so Hist/Log rows survive deletion of the main record.
+     - Id INT NULL - a plain copy of T's own Primary Key column, using the
+       exact same column name as the main table (per the client's own
+       earlier-project reference pattern, e.g. Configurations.ConfigID
+       mirrored into Configurations_Hist/_Log as ConfigID too - renamed here
+       from an earlier draft's generic "RecordId" to close that naming gap).
+       NOT FK-constrained, so Hist/Log rows survive deletion of the main
+       record.
      - One column per T business column, using T's own data type but always
        NULL (no defaults) - populated only by the trigger below. ROWVERSION
        columns and PERSISTED computed hash columns (used only to index an
@@ -38,15 +43,16 @@
 
    Indexing (per the client's mandatory indexing guideline, reviewed and
    applied on 2026-11-03): every T_Log gets two non-clustered indexes -
-   IX_T_Log_01 on RecordId (the main table's own Primary Key column,
-   mirrored here, so Log rows for a given record are directly seekable) and
-   IX_T_Log_02 on (Log_Date, Log_UserID) in that order. Every T_Hist gets
-   three - IX_T_Hist_01 on RecordId (same reasoning as the Log index),
-   IX_T_Hist_02 on (Hist_Date, Hist_UserID) in that order, and IX_T_Hist_03
-   on Hist_RefNo. (Earlier drafts of this script had only one Log index,
-   numbered _01, on (Log_Date, Log_UserID), and only two Hist indexes, with
-   Hist_RefNo numbered _01 - renumbered here to make room for the new
-   RecordId index as _01 on both, per the guideline's own numbering.)
+   IX_T_Log_01 on Id (the main table's own Primary Key column, mirrored
+   here under its own original name, so Log rows for a given record are
+   directly seekable) and IX_T_Log_02 on (Log_Date, Log_UserID) in that
+   order. Every T_Hist gets three - IX_T_Hist_01 on Id (same reasoning as
+   the Log index), IX_T_Hist_02 on (Hist_Date, Hist_UserID) in that order,
+   and IX_T_Hist_03 on Hist_RefNo. (Earlier drafts of this script had only
+   one Log index, numbered _01, on (Log_Date, Log_UserID), and only two
+   Hist indexes, with Hist_RefNo numbered _01 - renumbered here to make
+   room for the new Id index as _01 on both, per the guideline's own
+   numbering.)
 
    Permissions (per guideline b.3/b.4, applied 2026-11-03, matching the
    existing RecordHistory/AuditLog precedent in Section 21 of dct_sd_main.sql
@@ -104,7 +110,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_Users_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_Users_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         FirstName NVARCHAR(100) NULL,
         LastName NVARCHAR(100) NULL,
         Username NVARCHAR(150) NULL,
@@ -126,7 +132,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Log_01' AND object_id = OBJECT_ID('dbo.Users_Log'))
-    CREATE NONCLUSTERED INDEX IX_Users_Log_01 ON dbo.Users_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_Users_Log_01 ON dbo.Users_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Log_02' AND object_id = OBJECT_ID('dbo.Users_Log'))
     CREATE NONCLUSTERED INDEX IX_Users_Log_02 ON dbo.Users_Log (Log_Date, Log_UserID);
 GO
@@ -144,7 +150,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_Users_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_Users_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         FirstName NVARCHAR(100) NULL,
         LastName NVARCHAR(100) NULL,
         Username NVARCHAR(150) NULL,
@@ -166,7 +172,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Hist_01' AND object_id = OBJECT_ID('dbo.Users_Hist'))
-    CREATE NONCLUSTERED INDEX IX_Users_Hist_01 ON dbo.Users_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_Users_Hist_01 ON dbo.Users_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Hist_02' AND object_id = OBJECT_ID('dbo.Users_Hist'))
     CREATE NONCLUSTERED INDEX IX_Users_Hist_02 ON dbo.Users_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Hist_03' AND object_id = OBJECT_ID('dbo.Users_Hist'))
@@ -181,7 +187,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
+    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.FirstName, i.LastName, i.Username, i.PasswordHash, i.RoleName, i.MenuPermissionsCsv, i.Status, i.FailedLoginAttempts, i.LastLoginAt, i.IsDeleted, i.DeletedAt, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy, i.LockoutEndUtc FROM inserted i;
 END
 ');
@@ -195,10 +201,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
+    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.FirstName, i.LastName, i.Username, i.PasswordHash, i.RoleName, i.MenuPermissionsCsv, i.Status, i.FailedLoginAttempts, i.LastLoginAt, i.IsDeleted, i.DeletedAt, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy, i.LockoutEndUtc FROM inserted i;
 
-    INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
+    INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
     SELECT @UserId, @IPAddr, i.Username,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -216,10 +222,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
+    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc FROM deleted d;
 
-    INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
+    INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
     SELECT @UserId, @IPAddr, d.Username,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -243,7 +249,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_RefreshTokens_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_RefreshTokens_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         UserId INT NULL,
         TokenHash NVARCHAR(128) NULL,
         CreatedAt DATETIME2 NULL,
@@ -256,7 +262,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Log_01' AND object_id = OBJECT_ID('dbo.RefreshTokens_Log'))
-    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Log_01 ON dbo.RefreshTokens_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Log_01 ON dbo.RefreshTokens_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Log_02' AND object_id = OBJECT_ID('dbo.RefreshTokens_Log'))
     CREATE NONCLUSTERED INDEX IX_RefreshTokens_Log_02 ON dbo.RefreshTokens_Log (Log_Date, Log_UserID);
 GO
@@ -274,7 +280,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_RefreshTokens_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_RefreshTokens_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         UserId INT NULL,
         TokenHash NVARCHAR(128) NULL,
         CreatedAt DATETIME2 NULL,
@@ -287,7 +293,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Hist_01' AND object_id = OBJECT_ID('dbo.RefreshTokens_Hist'))
-    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Hist_01 ON dbo.RefreshTokens_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Hist_01 ON dbo.RefreshTokens_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Hist_02' AND object_id = OBJECT_ID('dbo.RefreshTokens_Hist'))
     CREATE NONCLUSTERED INDEX IX_RefreshTokens_Hist_02 ON dbo.RefreshTokens_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Hist_03' AND object_id = OBJECT_ID('dbo.RefreshTokens_Hist'))
@@ -302,7 +308,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
+    INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.UserId, i.TokenHash, i.CreatedAt, i.ExpiresAt, i.RevokedAt, i.ReplacedByTokenHash, i.CreatedByIp FROM inserted i;
 END
 ');
@@ -316,10 +322,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
+    INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.UserId, i.TokenHash, i.CreatedAt, i.ExpiresAt, i.RevokedAt, i.ReplacedByTokenHash, i.CreatedByIp FROM inserted i;
 
-    INSERT INTO dbo.RefreshTokens_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
+    INSERT INTO dbo.RefreshTokens_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
     SELECT @UserId, @IPAddr, i.TokenHash,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -337,10 +343,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
+    INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.UserId, d.TokenHash, d.CreatedAt, d.ExpiresAt, d.RevokedAt, d.ReplacedByTokenHash, d.CreatedByIp FROM deleted d;
 
-    INSERT INTO dbo.RefreshTokens_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
+    INSERT INTO dbo.RefreshTokens_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
     SELECT @UserId, @IPAddr, d.TokenHash,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -364,7 +370,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_AppSettings_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_AppSettings_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         Category NVARCHAR(30) NULL,
         [Key] NVARCHAR(64) NULL,
         Label NVARCHAR(128) NULL,
@@ -378,7 +384,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Log_01' AND object_id = OBJECT_ID('dbo.AppSettings_Log'))
-    CREATE NONCLUSTERED INDEX IX_AppSettings_Log_01 ON dbo.AppSettings_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_AppSettings_Log_01 ON dbo.AppSettings_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Log_02' AND object_id = OBJECT_ID('dbo.AppSettings_Log'))
     CREATE NONCLUSTERED INDEX IX_AppSettings_Log_02 ON dbo.AppSettings_Log (Log_Date, Log_UserID);
 GO
@@ -396,7 +402,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_AppSettings_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_AppSettings_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         Category NVARCHAR(30) NULL,
         [Key] NVARCHAR(64) NULL,
         Label NVARCHAR(128) NULL,
@@ -410,7 +416,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Hist_01' AND object_id = OBJECT_ID('dbo.AppSettings_Hist'))
-    CREATE NONCLUSTERED INDEX IX_AppSettings_Hist_01 ON dbo.AppSettings_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_AppSettings_Hist_01 ON dbo.AppSettings_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Hist_02' AND object_id = OBJECT_ID('dbo.AppSettings_Hist'))
     CREATE NONCLUSTERED INDEX IX_AppSettings_Hist_02 ON dbo.AppSettings_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Hist_03' AND object_id = OBJECT_ID('dbo.AppSettings_Hist'))
@@ -425,7 +431,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.Category, i.[Key], i.Label, i.DataJson, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 END
 ');
@@ -439,10 +445,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.Category, i.[Key], i.Label, i.DataJson, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 
-    INSERT INTO dbo.AppSettings_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.AppSettings_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, CONCAT(i.Category, N'':'', i.[Key]),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -460,10 +466,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.Category, d.[Key], d.Label, d.DataJson, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy FROM deleted d;
 
-    INSERT INTO dbo.AppSettings_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.AppSettings_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, CONCAT(d.Category, N'':'', d.[Key]),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -487,7 +493,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_CodeLookups_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_CodeLookups_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         LookupType NVARCHAR(30) NULL,
         Code NVARCHAR(150) NULL,
         Name NVARCHAR(MAX) NULL,
@@ -502,7 +508,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Log_01' AND object_id = OBJECT_ID('dbo.CodeLookups_Log'))
-    CREATE NONCLUSTERED INDEX IX_CodeLookups_Log_01 ON dbo.CodeLookups_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_CodeLookups_Log_01 ON dbo.CodeLookups_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Log_02' AND object_id = OBJECT_ID('dbo.CodeLookups_Log'))
     CREATE NONCLUSTERED INDEX IX_CodeLookups_Log_02 ON dbo.CodeLookups_Log (Log_Date, Log_UserID);
 GO
@@ -520,7 +526,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_CodeLookups_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_CodeLookups_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         LookupType NVARCHAR(30) NULL,
         Code NVARCHAR(150) NULL,
         Name NVARCHAR(MAX) NULL,
@@ -535,7 +541,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Hist_01' AND object_id = OBJECT_ID('dbo.CodeLookups_Hist'))
-    CREATE NONCLUSTERED INDEX IX_CodeLookups_Hist_01 ON dbo.CodeLookups_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_CodeLookups_Hist_01 ON dbo.CodeLookups_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Hist_02' AND object_id = OBJECT_ID('dbo.CodeLookups_Hist'))
     CREATE NONCLUSTERED INDEX IX_CodeLookups_Hist_02 ON dbo.CodeLookups_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Hist_03' AND object_id = OBJECT_ID('dbo.CodeLookups_Hist'))
@@ -550,7 +556,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.LookupType, i.Code, i.Name, i.DataJson, i.IsActive, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 END
 ');
@@ -564,10 +570,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.LookupType, i.Code, i.Name, i.DataJson, i.IsActive, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 
-    INSERT INTO dbo.CodeLookups_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.CodeLookups_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, CONCAT(i.LookupType, N'':'', i.Code),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -585,10 +591,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.LookupType, d.Code, d.Name, d.DataJson, d.IsActive, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy FROM deleted d;
 
-    INSERT INTO dbo.CodeLookups_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
+    INSERT INTO dbo.CodeLookups_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
     SELECT @UserId, @IPAddr, CONCAT(d.LookupType, N'':'', d.Code),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -612,7 +618,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_FetchRuns_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_FetchRuns_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         SourcePath NVARCHAR(MAX) NULL,
         Status INT NULL,
         TotalCount INT NULL,
@@ -633,7 +639,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Log_01' AND object_id = OBJECT_ID('dbo.FetchRuns_Log'))
-    CREATE NONCLUSTERED INDEX IX_FetchRuns_Log_01 ON dbo.FetchRuns_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_FetchRuns_Log_01 ON dbo.FetchRuns_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Log_02' AND object_id = OBJECT_ID('dbo.FetchRuns_Log'))
     CREATE NONCLUSTERED INDEX IX_FetchRuns_Log_02 ON dbo.FetchRuns_Log (Log_Date, Log_UserID);
 GO
@@ -651,7 +657,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_FetchRuns_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_FetchRuns_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         SourcePath NVARCHAR(MAX) NULL,
         Status INT NULL,
         TotalCount INT NULL,
@@ -672,7 +678,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Hist_01' AND object_id = OBJECT_ID('dbo.FetchRuns_Hist'))
-    CREATE NONCLUSTERED INDEX IX_FetchRuns_Hist_01 ON dbo.FetchRuns_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_FetchRuns_Hist_01 ON dbo.FetchRuns_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Hist_02' AND object_id = OBJECT_ID('dbo.FetchRuns_Hist'))
     CREATE NONCLUSTERED INDEX IX_FetchRuns_Hist_02 ON dbo.FetchRuns_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Hist_03' AND object_id = OBJECT_ID('dbo.FetchRuns_Hist'))
@@ -687,7 +693,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
+    INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.SourcePath, i.Status, i.TotalCount, i.ProcessedCount, i.LastProcessedFolderPath, i.LastProcessedAt, i.ExecutedByUserId, i.ExecutedByUsername, i.StartedAt, i.CompletedAt, i.RecordKind, i.FromPath, i.Remarks, i.SummaryMessage, i.RootPath FROM inserted i;
 END
 ');
@@ -701,10 +707,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
+    INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.SourcePath, i.Status, i.TotalCount, i.ProcessedCount, i.LastProcessedFolderPath, i.LastProcessedAt, i.ExecutedByUserId, i.ExecutedByUsername, i.StartedAt, i.CompletedAt, i.RecordKind, i.FromPath, i.Remarks, i.SummaryMessage, i.RootPath FROM inserted i;
 
-    INSERT INTO dbo.FetchRuns_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
+    INSERT INTO dbo.FetchRuns_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
     SELECT @UserId, @IPAddr, CONCAT(i.RecordKind, N'':'', CONVERT(NVARCHAR(30), i.StartedAt, 126)),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -722,10 +728,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
+    INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.SourcePath, d.Status, d.TotalCount, d.ProcessedCount, d.LastProcessedFolderPath, d.LastProcessedAt, d.ExecutedByUserId, d.ExecutedByUsername, d.StartedAt, d.CompletedAt, d.RecordKind, d.FromPath, d.Remarks, d.SummaryMessage, d.RootPath FROM deleted d;
 
-    INSERT INTO dbo.FetchRuns_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
+    INSERT INTO dbo.FetchRuns_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
     SELECT @UserId, @IPAddr, CONCAT(d.RecordKind, N'':'', CONVERT(NVARCHAR(30), d.StartedAt, 126)),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -749,7 +755,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_OcrExtractionRecords_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_OcrExtractionRecords_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         RequestNumber NVARCHAR(30) NULL,
         FetchRunId INT NULL,
         RdCode NVARCHAR(20) NULL,
@@ -768,7 +774,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Log_01' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Log'))
-    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Log_01 ON dbo.OcrExtractionRecords_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Log_01 ON dbo.OcrExtractionRecords_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Log_02' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Log'))
     CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Log_02 ON dbo.OcrExtractionRecords_Log (Log_Date, Log_UserID);
 GO
@@ -786,7 +792,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_OcrExtractionRecords_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_OcrExtractionRecords_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         RequestNumber NVARCHAR(30) NULL,
         FetchRunId INT NULL,
         RdCode NVARCHAR(20) NULL,
@@ -805,7 +811,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Hist_01' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Hist'))
-    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Hist_01 ON dbo.OcrExtractionRecords_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Hist_01 ON dbo.OcrExtractionRecords_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Hist_02' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Hist'))
     CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Hist_02 ON dbo.OcrExtractionRecords_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Hist_03' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Hist'))
@@ -820,7 +826,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.FetchRunId, i.RdCode, i.RdName, i.FolderPath, i.EntryNumbersCsv, i.TitleNumber, i.TitleType, i.DocumentCount, i.ExtractionStatus, i.ExtractionDateTime, i.DocumentsJson, i.EntryNumberRange FROM inserted i;
 END
 ');
@@ -834,10 +840,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.FetchRunId, i.RdCode, i.RdName, i.FolderPath, i.EntryNumbersCsv, i.TitleNumber, i.TitleType, i.DocumentCount, i.ExtractionStatus, i.ExtractionDateTime, i.DocumentsJson, i.EntryNumberRange FROM inserted i;
 
-    INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
     SELECT @UserId, @IPAddr, i.RequestNumber,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -855,10 +861,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange FROM deleted d;
 
-    INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
     SELECT @UserId, @IPAddr, d.RequestNumber,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -882,7 +888,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_ManualValidationRequests_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_ManualValidationRequests_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         RequestNumber NVARCHAR(30) NULL,
         OcrExtractionRecordId INT NULL,
         RdCode NVARCHAR(20) NULL,
@@ -911,7 +917,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Log_01' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Log'))
-    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Log_01 ON dbo.ManualValidationRequests_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Log_01 ON dbo.ManualValidationRequests_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Log_02' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Log'))
     CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Log_02 ON dbo.ManualValidationRequests_Log (Log_Date, Log_UserID);
 GO
@@ -929,7 +935,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_ManualValidationRequests_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_ManualValidationRequests_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         RequestNumber NVARCHAR(30) NULL,
         OcrExtractionRecordId INT NULL,
         RdCode NVARCHAR(20) NULL,
@@ -958,7 +964,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Hist_01' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Hist'))
-    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Hist_01 ON dbo.ManualValidationRequests_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Hist_01 ON dbo.ManualValidationRequests_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Hist_02' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Hist'))
     CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Hist_02 ON dbo.ManualValidationRequests_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Hist_03' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Hist'))
@@ -973,7 +979,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
+    INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MissingFieldsCsv, i.DocumentsJson, i.ExtractionDate, i.UpdatedByUserId, i.UpdatedByUsername, i.UpdatedAt, i.LockedByUserId, i.LockedByUsername, i.LockedAt, i.MigratedAt, i.Status, i.EntryNumberRange FROM inserted i;
 END
 ');
@@ -987,10 +993,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
+    INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MissingFieldsCsv, i.DocumentsJson, i.ExtractionDate, i.UpdatedByUserId, i.UpdatedByUsername, i.UpdatedAt, i.LockedByUserId, i.LockedByUsername, i.LockedAt, i.MigratedAt, i.Status, i.EntryNumberRange FROM inserted i;
 
-    INSERT INTO dbo.ManualValidationRequests_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
+    INSERT INTO dbo.ManualValidationRequests_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
     SELECT @UserId, @IPAddr, i.RequestNumber,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -1008,10 +1014,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
+    INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MissingFieldsCsv, d.DocumentsJson, d.ExtractionDate, d.UpdatedByUserId, d.UpdatedByUsername, d.UpdatedAt, d.LockedByUserId, d.LockedByUsername, d.LockedAt, d.MigratedAt, d.Status, d.EntryNumberRange FROM deleted d;
 
-    INSERT INTO dbo.ManualValidationRequests_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
+    INSERT INTO dbo.ManualValidationRequests_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
     SELECT @UserId, @IPAddr, d.RequestNumber,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -1035,7 +1041,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_MigrationRecords_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_MigrationRecords_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         RequestNumber NVARCHAR(30) NULL,
         OcrExtractionRecordId INT NULL,
         MigrationDate DATETIME2 NULL,
@@ -1056,7 +1062,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Log_01' AND object_id = OBJECT_ID('dbo.MigrationRecords_Log'))
-    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Log_01 ON dbo.MigrationRecords_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Log_01 ON dbo.MigrationRecords_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Log_02' AND object_id = OBJECT_ID('dbo.MigrationRecords_Log'))
     CREATE NONCLUSTERED INDEX IX_MigrationRecords_Log_02 ON dbo.MigrationRecords_Log (Log_Date, Log_UserID);
 GO
@@ -1074,7 +1080,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_MigrationRecords_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_MigrationRecords_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         RequestNumber NVARCHAR(30) NULL,
         OcrExtractionRecordId INT NULL,
         MigrationDate DATETIME2 NULL,
@@ -1095,7 +1101,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Hist_01' AND object_id = OBJECT_ID('dbo.MigrationRecords_Hist'))
-    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Hist_01 ON dbo.MigrationRecords_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Hist_01 ON dbo.MigrationRecords_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Hist_02' AND object_id = OBJECT_ID('dbo.MigrationRecords_Hist'))
     CREATE NONCLUSTERED INDEX IX_MigrationRecords_Hist_02 ON dbo.MigrationRecords_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Hist_03' AND object_id = OBJECT_ID('dbo.MigrationRecords_Hist'))
@@ -1110,7 +1116,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus FROM inserted i;
 END
 ');
@@ -1124,10 +1130,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus FROM inserted i;
 
-    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
+    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
     SELECT @UserId, @IPAddr, i.RequestNumber,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -1145,10 +1151,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus FROM deleted d;
 
-    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
+    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
     SELECT @UserId, @IPAddr, d.RequestNumber,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -1172,7 +1178,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_MigrationDocuments_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_MigrationDocuments_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         MigrationRecordId INT NULL,
         CodeLookupId INT NULL,
         DocumentName NVARCHAR(MAX) NULL,
@@ -1187,7 +1193,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Log_01' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Log'))
-    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Log_01 ON dbo.MigrationDocuments_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Log_01 ON dbo.MigrationDocuments_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Log_02' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Log'))
     CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Log_02 ON dbo.MigrationDocuments_Log (Log_Date, Log_UserID);
 GO
@@ -1205,7 +1211,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_MigrationDocuments_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_MigrationDocuments_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         MigrationRecordId INT NULL,
         CodeLookupId INT NULL,
         DocumentName NVARCHAR(MAX) NULL,
@@ -1220,7 +1226,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Hist_01' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Hist'))
-    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Hist_01 ON dbo.MigrationDocuments_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Hist_01 ON dbo.MigrationDocuments_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Hist_02' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Hist'))
     CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Hist_02 ON dbo.MigrationDocuments_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Hist_03' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Hist'))
@@ -1235,7 +1241,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
+    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.MigrationRecordId, i.CodeLookupId, i.DocumentName, i.FileName, i.Status, i.ExistingFileName, i.PerformedByUserId, i.PerformedByUsername, i.ActionDate FROM inserted i;
 END
 ');
@@ -1249,10 +1255,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
+    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.MigrationRecordId, i.CodeLookupId, i.DocumentName, i.FileName, i.Status, i.ExistingFileName, i.PerformedByUserId, i.PerformedByUsername, i.ActionDate FROM inserted i;
 
-    INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
+    INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
     SELECT @UserId, @IPAddr, i.FileName,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -1270,10 +1276,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
+    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate FROM deleted d;
 
-    INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
+    INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
     SELECT @UserId, @IPAddr, d.FileName,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -1297,7 +1303,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_EmptyFolderRecords_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_EmptyFolderRecords_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         RdCode NVARCHAR(20) NULL,
         RdName NVARCHAR(150) NULL,
         FolderName NVARCHAR(MAX) NULL,
@@ -1309,7 +1315,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Log_01' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Log'))
-    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Log_01 ON dbo.EmptyFolderRecords_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Log_01 ON dbo.EmptyFolderRecords_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Log_02' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Log'))
     CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Log_02 ON dbo.EmptyFolderRecords_Log (Log_Date, Log_UserID);
 GO
@@ -1327,7 +1333,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_EmptyFolderRecords_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_EmptyFolderRecords_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         RdCode NVARCHAR(20) NULL,
         RdName NVARCHAR(150) NULL,
         FolderName NVARCHAR(MAX) NULL,
@@ -1339,7 +1345,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Hist_01' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Hist'))
-    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Hist_01 ON dbo.EmptyFolderRecords_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Hist_01 ON dbo.EmptyFolderRecords_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Hist_02' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Hist'))
     CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Hist_02 ON dbo.EmptyFolderRecords_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Hist_03' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Hist'))
@@ -1354,7 +1360,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
+    INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.RdCode, i.RdName, i.FolderName, i.FolderPath, i.Status, i.FetchDateTime FROM inserted i;
 END
 ');
@@ -1368,10 +1374,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
+    INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RdCode, i.RdName, i.FolderName, i.FolderPath, i.Status, i.FetchDateTime FROM inserted i;
 
-    INSERT INTO dbo.EmptyFolderRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
+    INSERT INTO dbo.EmptyFolderRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
     SELECT @UserId, @IPAddr, i.FolderPath,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -1389,10 +1395,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
+    INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RdCode, d.RdName, d.FolderName, d.FolderPath, d.Status, d.FetchDateTime FROM deleted d;
 
-    INSERT INTO dbo.EmptyFolderRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
+    INSERT INTO dbo.EmptyFolderRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
     SELECT @UserId, @IPAddr, d.FolderPath,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
@@ -1416,7 +1422,7 @@ BEGIN
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_FailedExtractionRecords_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
         Log_Date      DATETIME2     NOT NULL CONSTRAINT DF_FailedExtractionRecords_Log_Date DEFAULT (SYSUTCDATETIME()),
         Log_Activity  CHAR(1)       NOT NULL,
-        RecordId      INT           NULL,
+        Id            INT           NULL,
         RdCode NVARCHAR(20) NULL,
         RdName NVARCHAR(150) NULL,
         FolderName NVARCHAR(MAX) NULL,
@@ -1428,7 +1434,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Log_01' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Log'))
-    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Log_01 ON dbo.FailedExtractionRecords_Log (RecordId);
+    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Log_01 ON dbo.FailedExtractionRecords_Log (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Log_02' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Log'))
     CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Log_02 ON dbo.FailedExtractionRecords_Log (Log_Date, Log_UserID);
 GO
@@ -1446,7 +1452,7 @@ BEGIN
         Hist_RefNo     NVARCHAR(150) NULL,
         OldValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_FailedExtractionRecords_Hist_Old CHECK (OldValuesJson IS NULL OR ISJSON(OldValuesJson) = 1),
         NewValuesJson  NVARCHAR(MAX) NULL CONSTRAINT CK_FailedExtractionRecords_Hist_New CHECK (NewValuesJson IS NULL OR ISJSON(NewValuesJson) = 1),
-        RecordId       INT           NULL,
+        Id             INT           NULL,
         RdCode NVARCHAR(20) NULL,
         RdName NVARCHAR(150) NULL,
         FolderName NVARCHAR(MAX) NULL,
@@ -1458,7 +1464,7 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Hist_01' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Hist'))
-    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Hist_01 ON dbo.FailedExtractionRecords_Hist (RecordId);
+    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Hist_01 ON dbo.FailedExtractionRecords_Hist (Id);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Hist_02' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Hist'))
     CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Hist_02 ON dbo.FailedExtractionRecords_Hist (Hist_Date, Hist_UserID);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Hist_03' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Hist'))
@@ -1473,7 +1479,7 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
+    INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
     SELECT @UserId, @IPAddr, ''I'', i.Id, i.RdCode, i.RdName, i.FolderName, i.FolderPath, i.FailureReason, i.ExtractionDateTime FROM inserted i;
 END
 ');
@@ -1487,10 +1493,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
+    INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RdCode, i.RdName, i.FolderName, i.FolderPath, i.FailureReason, i.ExtractionDateTime FROM inserted i;
 
-    INSERT INTO dbo.FailedExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
+    INSERT INTO dbo.FailedExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
     SELECT @UserId, @IPAddr, i.FolderPath,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
@@ -1508,10 +1514,10 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
+    INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RdCode, d.RdName, d.FolderName, d.FolderPath, d.FailureReason, d.ExtractionDateTime FROM deleted d;
 
-    INSERT INTO dbo.FailedExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, RecordId, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
+    INSERT INTO dbo.FailedExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
     SELECT @UserId, @IPAddr, d.FolderPath,
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
