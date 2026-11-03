@@ -11,6 +11,19 @@
    For every applicable main table T, T_Log and T_Hist each have:
      - The standard audit columns (Log_ID/Hist_ID, UserID, AppName, IPAddr,
        HostName, Date, Activity/RefNo), per guideline d.5/d.6/d.7/d.8.
+       Log_UserID/Hist_UserID are NVARCHAR(50) NOT NULL (changed from
+       INT NULL on 2026-11-03, per explicit client instruction) - the
+       trigger falls back to the literal '0' (ISNULL) whenever
+       SESSION_CONTEXT('AppUserId') has no value, matching this codebase's
+       own existing "no authenticated user" sentinel (ICurrentUserService.
+       UserId ?? 0, e.g. RdConfigService.cs). This fallback is required,
+       not optional, now that the column is NOT NULL: SESSION_CONTEXT('App
+       UserId') is unset on at least two real paths - the Login request
+       itself (RefreshTokens is written before any authenticated
+       HttpContext.User exists) and any startup/seed-data insert that runs
+       with no HttpContext at all - either of those would otherwise fail
+       the trigger, and with it the entire INSERT/UPDATE/DELETE on the main
+       table, the instant this column stopped accepting NULL.
      - RecordId INT NULL - a plain copy of T's own PK, NOT FK-constrained,
        so Hist/Log rows survive deletion of the main record.
      - One column per T business column, using T's own data type but always
@@ -22,6 +35,31 @@
        for columns that have Image DataType" exception.
      - T_Hist additionally keeps OldValuesJson/NewValuesJson (a JSON
        before/after snapshot pair), in addition to the discrete columns.
+
+   Indexing (per the client's mandatory indexing guideline, reviewed and
+   applied on 2026-11-03): every T_Log gets two non-clustered indexes -
+   IX_T_Log_01 on RecordId (the main table's own Primary Key column,
+   mirrored here, so Log rows for a given record are directly seekable) and
+   IX_T_Log_02 on (Log_Date, Log_UserID) in that order. Every T_Hist gets
+   three - IX_T_Hist_01 on RecordId (same reasoning as the Log index),
+   IX_T_Hist_02 on (Hist_Date, Hist_UserID) in that order, and IX_T_Hist_03
+   on Hist_RefNo. (Earlier drafts of this script had only one Log index,
+   numbered _01, on (Log_Date, Log_UserID), and only two Hist indexes, with
+   Hist_RefNo numbered _01 - renumbered here to make room for the new
+   RecordId index as _01 on both, per the guideline's own numbering.)
+
+   Permissions (per guideline b.3/b.4, applied 2026-11-03, matching the
+   existing RecordHistory/AuditLog precedent in Section 21 of dct_sd_main.sql
+   exactly): every T_Log gets GRANT SELECT only to [DCTSDUser] - no INSERT,
+   UPDATE or DELETE to any user, since only the trigger (as table owner)
+   ever writes to it. Every T_Hist gets GRANT SELECT, INSERT to [DCTSDUser]
+   - still no UPDATE or DELETE to any user. [DCTSDUser] is the same single
+   technical user Section 21 already grants the main tables to; these GRANT
+   statements require that user to already exist (created manually by CMRE),
+   same precondition as Section 21 itself. All 22 GRANT statements are
+   consolidated in one block at the very end of this script (mirroring
+   Section 21's own layout in dct_sd_main.sql - one permissions block after
+   every table/trigger already exists - rather than interleaved per table).
 
    Log is a lightweight "who/when/what operation" ledger - one row per
    INSERT/UPDATE/DELETE, mirroring the resulting row state (inserted for
@@ -60,7 +98,7 @@ BEGIN
     CREATE TABLE dbo.Users_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_Users_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_Users_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_Users_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -88,7 +126,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Log_01' AND object_id = OBJECT_ID('dbo.Users_Log'))
-    CREATE NONCLUSTERED INDEX IX_Users_Log_01 ON dbo.Users_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_Users_Log_01 ON dbo.Users_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Log_02' AND object_id = OBJECT_ID('dbo.Users_Log'))
+    CREATE NONCLUSTERED INDEX IX_Users_Log_02 ON dbo.Users_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.Users_Hist', 'U') IS NULL
@@ -96,7 +136,7 @@ BEGIN
     CREATE TABLE dbo.Users_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_Users_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_Users_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_Users_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -126,9 +166,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Hist_01' AND object_id = OBJECT_ID('dbo.Users_Hist'))
-    CREATE NONCLUSTERED INDEX IX_Users_Hist_01 ON dbo.Users_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_Users_Hist_01 ON dbo.Users_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Hist_02' AND object_id = OBJECT_ID('dbo.Users_Hist'))
     CREATE NONCLUSTERED INDEX IX_Users_Hist_02 ON dbo.Users_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Hist_03' AND object_id = OBJECT_ID('dbo.Users_Hist'))
+    CREATE NONCLUSTERED INDEX IX_Users_Hist_03 ON dbo.Users_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_Users_I', 'TR') IS NULL
@@ -136,7 +178,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_Users_I ON dbo.Users AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
@@ -150,7 +192,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_Users_U ON dbo.Users AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
@@ -171,7 +213,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_Users_D ON dbo.Users AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
@@ -195,7 +237,7 @@ BEGIN
     CREATE TABLE dbo.RefreshTokens_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_RefreshTokens_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_RefreshTokens_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_RefreshTokens_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -214,7 +256,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Log_01' AND object_id = OBJECT_ID('dbo.RefreshTokens_Log'))
-    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Log_01 ON dbo.RefreshTokens_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Log_01 ON dbo.RefreshTokens_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Log_02' AND object_id = OBJECT_ID('dbo.RefreshTokens_Log'))
+    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Log_02 ON dbo.RefreshTokens_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.RefreshTokens_Hist', 'U') IS NULL
@@ -222,7 +266,7 @@ BEGIN
     CREATE TABLE dbo.RefreshTokens_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_RefreshTokens_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_RefreshTokens_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_RefreshTokens_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -243,9 +287,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Hist_01' AND object_id = OBJECT_ID('dbo.RefreshTokens_Hist'))
-    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Hist_01 ON dbo.RefreshTokens_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Hist_01 ON dbo.RefreshTokens_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Hist_02' AND object_id = OBJECT_ID('dbo.RefreshTokens_Hist'))
     CREATE NONCLUSTERED INDEX IX_RefreshTokens_Hist_02 ON dbo.RefreshTokens_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_RefreshTokens_Hist_03' AND object_id = OBJECT_ID('dbo.RefreshTokens_Hist'))
+    CREATE NONCLUSTERED INDEX IX_RefreshTokens_Hist_03 ON dbo.RefreshTokens_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_RefreshTokens_I', 'TR') IS NULL
@@ -253,7 +299,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_RefreshTokens_I ON dbo.RefreshTokens AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
@@ -267,7 +313,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_RefreshTokens_U ON dbo.RefreshTokens AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
@@ -288,7 +334,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_RefreshTokens_D ON dbo.RefreshTokens AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.RefreshTokens_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
@@ -312,7 +358,7 @@ BEGIN
     CREATE TABLE dbo.AppSettings_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_AppSettings_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_AppSettings_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_AppSettings_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -332,7 +378,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Log_01' AND object_id = OBJECT_ID('dbo.AppSettings_Log'))
-    CREATE NONCLUSTERED INDEX IX_AppSettings_Log_01 ON dbo.AppSettings_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_AppSettings_Log_01 ON dbo.AppSettings_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Log_02' AND object_id = OBJECT_ID('dbo.AppSettings_Log'))
+    CREATE NONCLUSTERED INDEX IX_AppSettings_Log_02 ON dbo.AppSettings_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.AppSettings_Hist', 'U') IS NULL
@@ -340,7 +388,7 @@ BEGIN
     CREATE TABLE dbo.AppSettings_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_AppSettings_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_AppSettings_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_AppSettings_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -362,9 +410,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Hist_01' AND object_id = OBJECT_ID('dbo.AppSettings_Hist'))
-    CREATE NONCLUSTERED INDEX IX_AppSettings_Hist_01 ON dbo.AppSettings_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_AppSettings_Hist_01 ON dbo.AppSettings_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Hist_02' AND object_id = OBJECT_ID('dbo.AppSettings_Hist'))
     CREATE NONCLUSTERED INDEX IX_AppSettings_Hist_02 ON dbo.AppSettings_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_AppSettings_Hist_03' AND object_id = OBJECT_ID('dbo.AppSettings_Hist'))
+    CREATE NONCLUSTERED INDEX IX_AppSettings_Hist_03 ON dbo.AppSettings_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_AppSettings_I', 'TR') IS NULL
@@ -372,7 +422,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_AppSettings_I ON dbo.AppSettings AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
@@ -386,7 +436,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_AppSettings_U ON dbo.AppSettings AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
@@ -407,7 +457,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_AppSettings_D ON dbo.AppSettings AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.AppSettings_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
@@ -431,7 +481,7 @@ BEGIN
     CREATE TABLE dbo.CodeLookups_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_CodeLookups_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_CodeLookups_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_CodeLookups_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -452,7 +502,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Log_01' AND object_id = OBJECT_ID('dbo.CodeLookups_Log'))
-    CREATE NONCLUSTERED INDEX IX_CodeLookups_Log_01 ON dbo.CodeLookups_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_CodeLookups_Log_01 ON dbo.CodeLookups_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Log_02' AND object_id = OBJECT_ID('dbo.CodeLookups_Log'))
+    CREATE NONCLUSTERED INDEX IX_CodeLookups_Log_02 ON dbo.CodeLookups_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.CodeLookups_Hist', 'U') IS NULL
@@ -460,7 +512,7 @@ BEGIN
     CREATE TABLE dbo.CodeLookups_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_CodeLookups_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_CodeLookups_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_CodeLookups_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -483,9 +535,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Hist_01' AND object_id = OBJECT_ID('dbo.CodeLookups_Hist'))
-    CREATE NONCLUSTERED INDEX IX_CodeLookups_Hist_01 ON dbo.CodeLookups_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_CodeLookups_Hist_01 ON dbo.CodeLookups_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Hist_02' AND object_id = OBJECT_ID('dbo.CodeLookups_Hist'))
     CREATE NONCLUSTERED INDEX IX_CodeLookups_Hist_02 ON dbo.CodeLookups_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_CodeLookups_Hist_03' AND object_id = OBJECT_ID('dbo.CodeLookups_Hist'))
+    CREATE NONCLUSTERED INDEX IX_CodeLookups_Hist_03 ON dbo.CodeLookups_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_CodeLookups_I', 'TR') IS NULL
@@ -493,7 +547,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_CodeLookups_I ON dbo.CodeLookups AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
@@ -507,7 +561,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_CodeLookups_U ON dbo.CodeLookups AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
@@ -528,7 +582,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_CodeLookups_D ON dbo.CodeLookups AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.CodeLookups_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
@@ -552,7 +606,7 @@ BEGIN
     CREATE TABLE dbo.FetchRuns_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_FetchRuns_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_FetchRuns_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_FetchRuns_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -579,7 +633,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Log_01' AND object_id = OBJECT_ID('dbo.FetchRuns_Log'))
-    CREATE NONCLUSTERED INDEX IX_FetchRuns_Log_01 ON dbo.FetchRuns_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_FetchRuns_Log_01 ON dbo.FetchRuns_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Log_02' AND object_id = OBJECT_ID('dbo.FetchRuns_Log'))
+    CREATE NONCLUSTERED INDEX IX_FetchRuns_Log_02 ON dbo.FetchRuns_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.FetchRuns_Hist', 'U') IS NULL
@@ -587,7 +643,7 @@ BEGIN
     CREATE TABLE dbo.FetchRuns_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_FetchRuns_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_FetchRuns_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_FetchRuns_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -616,9 +672,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Hist_01' AND object_id = OBJECT_ID('dbo.FetchRuns_Hist'))
-    CREATE NONCLUSTERED INDEX IX_FetchRuns_Hist_01 ON dbo.FetchRuns_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_FetchRuns_Hist_01 ON dbo.FetchRuns_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Hist_02' AND object_id = OBJECT_ID('dbo.FetchRuns_Hist'))
     CREATE NONCLUSTERED INDEX IX_FetchRuns_Hist_02 ON dbo.FetchRuns_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FetchRuns_Hist_03' AND object_id = OBJECT_ID('dbo.FetchRuns_Hist'))
+    CREATE NONCLUSTERED INDEX IX_FetchRuns_Hist_03 ON dbo.FetchRuns_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_FetchRuns_I', 'TR') IS NULL
@@ -626,7 +684,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_FetchRuns_I ON dbo.FetchRuns AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
@@ -640,7 +698,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_FetchRuns_U ON dbo.FetchRuns AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
@@ -661,7 +719,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_FetchRuns_D ON dbo.FetchRuns AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.FetchRuns_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
@@ -685,7 +743,7 @@ BEGIN
     CREATE TABLE dbo.OcrExtractionRecords_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_OcrExtractionRecords_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_OcrExtractionRecords_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_OcrExtractionRecords_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -710,7 +768,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Log_01' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Log'))
-    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Log_01 ON dbo.OcrExtractionRecords_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Log_01 ON dbo.OcrExtractionRecords_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Log_02' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Log'))
+    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Log_02 ON dbo.OcrExtractionRecords_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.OcrExtractionRecords_Hist', 'U') IS NULL
@@ -718,7 +778,7 @@ BEGIN
     CREATE TABLE dbo.OcrExtractionRecords_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_OcrExtractionRecords_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_OcrExtractionRecords_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_OcrExtractionRecords_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -745,9 +805,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Hist_01' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Hist'))
-    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Hist_01 ON dbo.OcrExtractionRecords_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Hist_01 ON dbo.OcrExtractionRecords_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Hist_02' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Hist'))
     CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Hist_02 ON dbo.OcrExtractionRecords_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_OcrExtractionRecords_Hist_03' AND object_id = OBJECT_ID('dbo.OcrExtractionRecords_Hist'))
+    CREATE NONCLUSTERED INDEX IX_OcrExtractionRecords_Hist_03 ON dbo.OcrExtractionRecords_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_OcrExtractionRecords_I', 'TR') IS NULL
@@ -755,7 +817,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_OcrExtractionRecords_I ON dbo.OcrExtractionRecords AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
@@ -769,7 +831,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_OcrExtractionRecords_U ON dbo.OcrExtractionRecords AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
@@ -790,7 +852,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_OcrExtractionRecords_D ON dbo.OcrExtractionRecords AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
@@ -814,7 +876,7 @@ BEGIN
     CREATE TABLE dbo.ManualValidationRequests_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_ManualValidationRequests_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_ManualValidationRequests_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_ManualValidationRequests_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -849,7 +911,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Log_01' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Log'))
-    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Log_01 ON dbo.ManualValidationRequests_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Log_01 ON dbo.ManualValidationRequests_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Log_02' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Log'))
+    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Log_02 ON dbo.ManualValidationRequests_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.ManualValidationRequests_Hist', 'U') IS NULL
@@ -857,7 +921,7 @@ BEGIN
     CREATE TABLE dbo.ManualValidationRequests_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_ManualValidationRequests_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_ManualValidationRequests_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_ManualValidationRequests_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -894,9 +958,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Hist_01' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Hist'))
-    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Hist_01 ON dbo.ManualValidationRequests_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Hist_01 ON dbo.ManualValidationRequests_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Hist_02' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Hist'))
     CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Hist_02 ON dbo.ManualValidationRequests_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_ManualValidationRequests_Hist_03' AND object_id = OBJECT_ID('dbo.ManualValidationRequests_Hist'))
+    CREATE NONCLUSTERED INDEX IX_ManualValidationRequests_Hist_03 ON dbo.ManualValidationRequests_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_ManualValidationRequests_I', 'TR') IS NULL
@@ -904,7 +970,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_ManualValidationRequests_I ON dbo.ManualValidationRequests AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
@@ -918,7 +984,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_ManualValidationRequests_U ON dbo.ManualValidationRequests AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
@@ -939,7 +1005,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_ManualValidationRequests_D ON dbo.ManualValidationRequests AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.ManualValidationRequests_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
@@ -963,7 +1029,7 @@ BEGIN
     CREATE TABLE dbo.MigrationRecords_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_MigrationRecords_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_MigrationRecords_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_MigrationRecords_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -990,7 +1056,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Log_01' AND object_id = OBJECT_ID('dbo.MigrationRecords_Log'))
-    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Log_01 ON dbo.MigrationRecords_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Log_01 ON dbo.MigrationRecords_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Log_02' AND object_id = OBJECT_ID('dbo.MigrationRecords_Log'))
+    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Log_02 ON dbo.MigrationRecords_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.MigrationRecords_Hist', 'U') IS NULL
@@ -998,7 +1066,7 @@ BEGIN
     CREATE TABLE dbo.MigrationRecords_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_MigrationRecords_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_MigrationRecords_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_MigrationRecords_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -1027,9 +1095,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Hist_01' AND object_id = OBJECT_ID('dbo.MigrationRecords_Hist'))
-    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Hist_01 ON dbo.MigrationRecords_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Hist_01 ON dbo.MigrationRecords_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Hist_02' AND object_id = OBJECT_ID('dbo.MigrationRecords_Hist'))
     CREATE NONCLUSTERED INDEX IX_MigrationRecords_Hist_02 ON dbo.MigrationRecords_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Hist_03' AND object_id = OBJECT_ID('dbo.MigrationRecords_Hist'))
+    CREATE NONCLUSTERED INDEX IX_MigrationRecords_Hist_03 ON dbo.MigrationRecords_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_MigrationRecords_I', 'TR') IS NULL
@@ -1037,7 +1107,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_MigrationRecords_I ON dbo.MigrationRecords AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
@@ -1051,7 +1121,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_MigrationRecords_U ON dbo.MigrationRecords AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
@@ -1072,7 +1142,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_MigrationRecords_D ON dbo.MigrationRecords AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
@@ -1096,7 +1166,7 @@ BEGIN
     CREATE TABLE dbo.MigrationDocuments_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_MigrationDocuments_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_MigrationDocuments_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_MigrationDocuments_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -1117,7 +1187,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Log_01' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Log'))
-    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Log_01 ON dbo.MigrationDocuments_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Log_01 ON dbo.MigrationDocuments_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Log_02' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Log'))
+    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Log_02 ON dbo.MigrationDocuments_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.MigrationDocuments_Hist', 'U') IS NULL
@@ -1125,7 +1197,7 @@ BEGIN
     CREATE TABLE dbo.MigrationDocuments_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_MigrationDocuments_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_MigrationDocuments_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_MigrationDocuments_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -1148,9 +1220,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Hist_01' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Hist'))
-    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Hist_01 ON dbo.MigrationDocuments_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Hist_01 ON dbo.MigrationDocuments_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Hist_02' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Hist'))
     CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Hist_02 ON dbo.MigrationDocuments_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationDocuments_Hist_03' AND object_id = OBJECT_ID('dbo.MigrationDocuments_Hist'))
+    CREATE NONCLUSTERED INDEX IX_MigrationDocuments_Hist_03 ON dbo.MigrationDocuments_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_MigrationDocuments_I', 'TR') IS NULL
@@ -1158,7 +1232,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_MigrationDocuments_I ON dbo.MigrationDocuments AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
@@ -1172,7 +1246,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_MigrationDocuments_U ON dbo.MigrationDocuments AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
@@ -1193,7 +1267,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_MigrationDocuments_D ON dbo.MigrationDocuments AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
@@ -1217,7 +1291,7 @@ BEGIN
     CREATE TABLE dbo.EmptyFolderRecords_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_EmptyFolderRecords_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_EmptyFolderRecords_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_EmptyFolderRecords_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -1235,7 +1309,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Log_01' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Log'))
-    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Log_01 ON dbo.EmptyFolderRecords_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Log_01 ON dbo.EmptyFolderRecords_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Log_02' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Log'))
+    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Log_02 ON dbo.EmptyFolderRecords_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.EmptyFolderRecords_Hist', 'U') IS NULL
@@ -1243,7 +1319,7 @@ BEGIN
     CREATE TABLE dbo.EmptyFolderRecords_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_EmptyFolderRecords_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_EmptyFolderRecords_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_EmptyFolderRecords_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -1263,9 +1339,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Hist_01' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Hist'))
-    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Hist_01 ON dbo.EmptyFolderRecords_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Hist_01 ON dbo.EmptyFolderRecords_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Hist_02' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Hist'))
     CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Hist_02 ON dbo.EmptyFolderRecords_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_EmptyFolderRecords_Hist_03' AND object_id = OBJECT_ID('dbo.EmptyFolderRecords_Hist'))
+    CREATE NONCLUSTERED INDEX IX_EmptyFolderRecords_Hist_03 ON dbo.EmptyFolderRecords_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_EmptyFolderRecords_I', 'TR') IS NULL
@@ -1273,7 +1351,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_EmptyFolderRecords_I ON dbo.EmptyFolderRecords AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
@@ -1287,7 +1365,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_EmptyFolderRecords_U ON dbo.EmptyFolderRecords AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
@@ -1308,7 +1386,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_EmptyFolderRecords_D ON dbo.EmptyFolderRecords AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.EmptyFolderRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
@@ -1332,7 +1410,7 @@ BEGIN
     CREATE TABLE dbo.FailedExtractionRecords_Log
     (
         Log_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_FailedExtractionRecords_Log PRIMARY KEY,
-        Log_UserID    INT           NULL,
+        Log_UserID    NVARCHAR(50)  NOT NULL,
         Log_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_FailedExtractionRecords_Log_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Log_IPAddr    NVARCHAR(64)  NULL,
         Log_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_FailedExtractionRecords_Log_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -1350,7 +1428,9 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Log_01' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Log'))
-    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Log_01 ON dbo.FailedExtractionRecords_Log (Log_Date, Log_UserID);
+    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Log_01 ON dbo.FailedExtractionRecords_Log (RecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Log_02' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Log'))
+    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Log_02 ON dbo.FailedExtractionRecords_Log (Log_Date, Log_UserID);
 GO
 
 IF OBJECT_ID('dbo.FailedExtractionRecords_Hist', 'U') IS NULL
@@ -1358,7 +1438,7 @@ BEGIN
     CREATE TABLE dbo.FailedExtractionRecords_Hist
     (
         Hist_ID        INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_FailedExtractionRecords_Hist PRIMARY KEY,
-        Hist_UserID    INT           NULL,
+        Hist_UserID    NVARCHAR(50)  NOT NULL,
         Hist_AppName   NVARCHAR(30)  NULL CONSTRAINT DF_FailedExtractionRecords_Hist_AppName DEFAULT (LEFT(APP_NAME(), 30)),
         Hist_IPAddr    NVARCHAR(64)  NULL,
         Hist_HostName  NVARCHAR(30)  NULL CONSTRAINT DF_FailedExtractionRecords_Hist_HostName DEFAULT (LEFT(HOST_NAME(), 30)),
@@ -1378,9 +1458,11 @@ END;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Hist_01' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Hist'))
-    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Hist_01 ON dbo.FailedExtractionRecords_Hist (Hist_RefNo);
+    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Hist_01 ON dbo.FailedExtractionRecords_Hist (RecordId);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Hist_02' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Hist'))
     CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Hist_02 ON dbo.FailedExtractionRecords_Hist (Hist_Date, Hist_UserID);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_FailedExtractionRecords_Hist_03' AND object_id = OBJECT_ID('dbo.FailedExtractionRecords_Hist'))
+    CREATE NONCLUSTERED INDEX IX_FailedExtractionRecords_Hist_03 ON dbo.FailedExtractionRecords_Hist (Hist_RefNo);
 GO
 
 IF OBJECT_ID('dbo.trg_FailedExtractionRecords_I', 'TR') IS NULL
@@ -1388,7 +1470,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_FailedExtractionRecords_I ON dbo.FailedExtractionRecords AFTER INSERT AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
@@ -1402,7 +1484,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_FailedExtractionRecords_U ON dbo.FailedExtractionRecords AFTER UPDATE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
@@ -1423,7 +1505,7 @@ EXEC('
 CREATE TRIGGER dbo.trg_FailedExtractionRecords_D ON dbo.FailedExtractionRecords AFTER DELETE AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @UserId INT = TRY_CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
     INSERT INTO dbo.FailedExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, RecordId, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
@@ -1439,4 +1521,33 @@ END
 ');
 GO
 
+-------------------------------------------------------------------------------
+-- Permissions (per guideline b.3/b.4 - see header) - one consolidated block
+-- after every _Log/_Hist table and trigger above already exists, mirroring
+-- Section 21's own layout in dct_sd_main.sql. Requires [DCTSDUser] to
+-- already exist (created manually by CMRE), same precondition as Section 21.
+-------------------------------------------------------------------------------
+GRANT SELECT ON dbo.Users_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.RefreshTokens_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.AppSettings_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.CodeLookups_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.FetchRuns_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.OcrExtractionRecords_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.ManualValidationRequests_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.MigrationRecords_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.MigrationDocuments_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.EmptyFolderRecords_Log TO [DCTSDUser];
+GRANT SELECT ON dbo.FailedExtractionRecords_Log TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.Users_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.RefreshTokens_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.AppSettings_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.CodeLookups_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.FetchRuns_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.OcrExtractionRecords_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.ManualValidationRequests_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.MigrationRecords_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.MigrationDocuments_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.EmptyFolderRecords_Hist TO [DCTSDUser];
+GRANT SELECT, INSERT ON dbo.FailedExtractionRecords_Hist TO [DCTSDUser];
+GO
 
