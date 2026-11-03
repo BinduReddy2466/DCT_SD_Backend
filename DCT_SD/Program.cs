@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using DCT_SD.Configuration;
@@ -9,6 +10,24 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
+
+// Pins every request-handling thread's culture to Invariant, regardless of the host OS's own
+// regional settings - this app has no multi-locale support (no RequestLocalization is configured
+// anywhere), so it was already implicitly relying on whatever CultureInfo.CurrentCulture happened
+// to default to. On the Linux dev VM that default is en-US, where ASP.NET Core's built-in
+// DateTime? model binder (e.g. ManualValidationSearchRequestDto.DateFrom/DateTo, bound from an
+// <input type="date">, which always posts ISO "yyyy-MM-dd") parses correctly. Some cultures -
+// notably ones with a non-Gregorian default calendar, like ar-SA (Umm al-Qura) - fail to parse
+// that same "yyyy-MM-dd" string at all (DateTime.TryParse returns false), silently leaving
+// DateFrom/DateTo null; every "if (request.DateFrom.HasValue)" guard (ManualValidationService,
+// and every other module's own Date From/To filter) then just skips the filter entirely instead
+// of filtering or failing - exactly "all records show up instead of the expected empty result",
+// and would only reproduce on a host whose configured culture differs from the dev VM's, such as
+// IIS running under a different Windows Server regional setting. Setting this explicitly, instead
+// of leaving it to whatever the host happens to default to, makes every date filter in the app
+// behave identically on every environment.
+CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
+CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 
 var builder = WebApplication.CreateBuilder(args);
 

@@ -40,8 +40,9 @@ public interface IRdFetchApiClient
     Task<ExternalFailedExtractionReprocessResponse> ReprocessFailedExtractionAsync(string folderPath, int? executedByUserId, CancellationToken cancellationToken = default);
 
     /// Additional to the existing Manual Validation Save flow (POST /manual-validation/merge-entry)
-    /// - fired only when a Save changes the group's Entry Number, so the external service can
-    /// re-associate/merge its own records under the resulting (rd_code, entry_number) pair.
-    /// Never replaces or precedes the existing Save itself; see ManualValidationService.SaveAsync.
+    /// - fired whenever a Save leaves the record with a non-blank EntryNumberRange, so the
+    /// external service can re-associate/merge its own records under the resulting (rd_code,
+    /// entry_number) pair; a blank/whitespace EntryNumberRange never fires this call. Never
+    /// replaces or precedes the existing Save itself; see ManualValidationService.SaveAsync.
     Task<ExternalMergeEntryResponse> MergeEntryAsync(string rdCode, string entryNumber, string requestNumber, CancellationToken cancellationToken = default);
 }

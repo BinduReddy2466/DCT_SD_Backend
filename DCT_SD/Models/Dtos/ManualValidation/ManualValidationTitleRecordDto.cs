@@ -2,7 +2,7 @@ namespace DCT_SD.Models.Dtos.ManualValidation;
 
 // One Title Record = exactly one underlying ManualValidationRequests row (RecordId), contributing
 // its own Title/TitleType/Plan/Block/Lot/TitleSequence to a Details view that may combine several
-// rows sharing the same EntryNumbersCsv. Every row in the group is its own Title Record here -
+// rows sharing the same EntryNumberRange. Every row in the group is its own Title Record here -
 // never merged or overwritten into another - so a group of 2 rows always yields exactly 2 of these.
 public class ManualValidationTitleRecordDto
 {

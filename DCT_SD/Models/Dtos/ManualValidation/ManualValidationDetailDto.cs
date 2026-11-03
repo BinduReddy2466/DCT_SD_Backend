@@ -16,7 +16,7 @@ public class ManualValidationDetailDto
     public string Status { get; set; } = string.Empty;
     public IReadOnlyList<string> MissingFields { get; set; } = Array.Empty<string>();
 
-    // One entry per ManualValidationRequests row sharing this record's exact EntryNumbersCsv
+    // One entry per ManualValidationRequests row sharing this record's exact EntryNumberRange
     // (always at least 1 - the opened record itself, when it has no group siblings). Title/
     // TitleType/Plan/Block/Lot/TitleSequence above still describe the opened record alone (kept
     // for backward compatibility); this is the source of truth for rendering "Title Record N".

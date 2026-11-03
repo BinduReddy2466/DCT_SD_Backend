@@ -49,10 +49,16 @@ public class ManualValidationService : IManualValidationService
             query = query.Where(r => r.RequestNumber.ToLower().Contains(term));
         }
 
+        // The "Entry Number" search box and the Results list column both filter/display
+        // EntryNumberRange now (2026-11-03, per client request) - not EntryNumbersCsv - so a
+        // search always matches the same value the grouping itself and the list column show,
+        // instead of searching one field while rows are grouped/displayed by a different one.
+        // The request/query-string field name stays EntryNumbersCsv (no URL/JS contract change);
+        // only which database column it searches against has moved.
         if (!string.IsNullOrWhiteSpace(request.EntryNumbersCsv))
         {
             var term = request.EntryNumbersCsv.Trim().ToLower();
-            query = query.Where(r => r.EntryNumbersCsv != null && r.EntryNumbersCsv.ToLower().Contains(term));
+            query = query.Where(r => r.EntryNumberRange != null && r.EntryNumberRange.ToLower().Contains(term));
         }
 
         if (!string.IsNullOrWhiteSpace(request.Title))
@@ -169,7 +175,11 @@ public class ManualValidationService : IManualValidationService
         RequestNumber = r.RequestNumber,
         RdCode = r.RdCode,
         RdName = r.RdName,
-        EntryNumbersCsv = r.EntryNumbersCsv,
+        // The Results list's "ENTRY NUMBER" column shows EntryNumberRange now (2026-11-03, per
+        // client request), not EntryNumbersCsv - the DTO property keeps its existing name
+        // (EntryNumbersCsv) to avoid an unrelated rename across the view/JS, but the value it
+        // carries is EntryNumberRange, the same field the row grouping above is based on.
+        EntryNumbersCsv = r.EntryNumberRange,
         Title = r.Title,
         TitleType = r.TitleType?.ToString(),
         Status = r.Status.ToString(),
@@ -222,11 +232,21 @@ public class ManualValidationService : IManualValidationService
         // RD Code / RD Name / Entry Number are shown once in General Information, not per Title
         // Record, so an edit there applies to every row in the group. RdCode is overwritten
         // uniformly here, which keeps the group's RdCode half of the (RdCode, EntryNumberRange)
-        // key consistent; EntryNumberRange itself is never written by this app (it is populated
-        // externally) and was already identical across every row in the group - that is precisely
-        // why they grouped together - so it needs no update here to stay coherent.
+        // key consistent.
+        //
+        // The "Entry Number" field (posted as request.EntryNumbersCsv - the form/DTO property
+        // name is unchanged to avoid an unrelated rename across the view/JS) is now written into
+        // EntryNumberRange, not EntryNumbersCsv (2026-11-03, per client request: the Details page
+        // displays and edits EntryNumberRange directly, since that's the same field the grouping
+        // itself uses - editing "Entry Number" now directly changes which group a record belongs
+        // to, instead of changing a separate display-only field that never affected grouping).
+        // EntryNumberRange is NOT NULL in the database, so a cleared field is written as "" (an
+        // empty string still satisfies "blank/whitespace means independent" in GetGroupRecordsAsync/
+        // GroupMatchingRecords), never null. EntryNumbersCsv itself is no longer written by this
+        // Save - it keeps whatever value it already had (set only at record-creation time by the
+        // external extraction pipeline).
         var newRdCode = request.RdCode?.Trim();
-        var newEntryNumbersCsv = request.EntryNumbersCsv?.Trim();
+        var newEntryNumberRange = request.EntryNumbersCsv?.Trim() ?? string.Empty;
         var newRdName = string.IsNullOrWhiteSpace(newRdCode)
             ? null
             : await _context.CodeLookups.AsNoTracking()
@@ -234,22 +254,17 @@ public class ManualValidationService : IManualValidationService
                 .Select(c => c.Name)
                 .FirstOrDefaultAsync(cancellationToken);
 
-        // Captured before the mutation loop below overwrites record.EntryNumbersCsv, so the
-        // merge-entry comparison after SaveChangesAsync (further down) still sees the true
-        // pre-edit value instead of comparing the new value against itself.
-        var originalEntryNumbersCsvForMerge = record.EntryNumbersCsv;
-
         foreach (var r in group)
         {
             var originalRdCode = r.RdCode;
-            var originalEntryNumbersCsv = r.EntryNumbersCsv;
+            var originalEntryNumberRange = r.EntryNumberRange;
 
             r.RdCode = newRdCode;
-            r.EntryNumbersCsv = newEntryNumbersCsv;
+            r.EntryNumberRange = newEntryNumberRange;
             r.RdName = newRdName;
 
             AddFieldChange(ChangesFor(r.Id), "RD Code", originalRdCode, r.RdCode);
-            AddFieldChange(ChangesFor(r.Id), "Entry Number", originalEntryNumbersCsv, r.EntryNumbersCsv);
+            AddFieldChange(ChangesFor(r.Id), "Entry Number", originalEntryNumberRange, r.EntryNumberRange);
         }
 
         // Required change: once a record flagged "Target RD Not Identified" (the status the
@@ -412,7 +427,20 @@ public class ManualValidationService : IManualValidationService
         // would flush that original DocumentsJson back over whatever the external service had
         // just written, silently reverting it. A failure here is logged by RdFetchApiClient
         // itself and swallowed - it must never fail a Save that has already succeeded.
-        if (!string.Equals(originalEntryNumbersCsvForMerge, newEntryNumbersCsv, StringComparison.Ordinal))
+        //
+        // Matching key fixed to RdCode + EntryNumberRange (2026-11-03), consistent with
+        // GetGroupRecordsAsync - this used to compare/query on EntryNumbersCsv, which was correct
+        // back when EntryNumbersCsv WAS the grouping key, but became stale once the grouping key
+        // changed to EntryNumberRange without this block being updated to match (the regression).
+        // EntryNumberRange is now written by this Save itself (the mutation loop above, from the
+        // "Entry Number" field), so this check always runs against the record's just-saved value,
+        // not a stale pre-edit snapshot. A blank/whitespace EntryNumberRange means this record is
+        // never part of any group (same rule as GetGroupRecordsAsync), so it can never have a
+        // merge candidate and the whole block is skipped for it. Otherwise, any active row outside
+        // this record's own group that already shares the same (RdCode, EntryNumberRange) is a
+        // genuine merge candidate - this is always re-checked fresh here, never inferred from
+        // "did a specific field change".
+        if (!string.IsNullOrWhiteSpace(record.EntryNumberRange))
         {
             // The external service's own match query excludes any row that is currently locked
             // (LockedByUserId not null) - both this record (locked by the current user for the
@@ -420,18 +448,21 @@ public class ManualValidationService : IManualValidationService
             // pre-existing row it needs to merge into, if that one happens to be locked too (e.g.
             // left open in another tab). Left as-is, either lock makes the external service unable
             // to find/merge into the match, so every lock on a plausible match (this record, plus
-            // any other active row sharing the new RdCode + EntryNumbersCsv) is released here, the
-            // call is made, then all of them are restored afterward - everyone's "being reviewed"
-            // state must be exactly what it was once this finishes, same as before this call.
+            // any other active row sharing the new RdCode + EntryNumberRange) is released here,
+            // the call is made, then all of them are restored afterward - everyone's "being
+            // reviewed" state must be exactly what it was once this finishes, same as before this
+            // call. groupIds (not just record.Id) is excluded, since every sibling in this
+            // record's own group trivially shares the same EntryNumberRange already and is never
+            // itself a merge candidate.
             var lockedByUserId = record.LockedByUserId;
             var lockedByUsername = record.LockedByUsername;
             var lockedAt = record.LockedAt;
 
             var candidateTargets = await _context.ManualValidationRequests
-                .Where(r => r.Id != record.Id
+                .Where(r => !groupIds.Contains(r.Id)
                     && r.MigratedAt == null
                     && r.RdCode == newRdCode
-                    && r.EntryNumbersCsv == newEntryNumbersCsv
+                    && r.EntryNumberRange == record.EntryNumberRange
                     && r.LockedByUserId != null)
                 .ToListAsync(cancellationToken);
             var candidateLockState = candidateTargets
@@ -452,7 +483,7 @@ public class ManualValidationService : IManualValidationService
 
             try
             {
-                await _rdFetchApiClient.MergeEntryAsync(newRdCode ?? string.Empty, newEntryNumbersCsv ?? string.Empty, record.RequestNumber, cancellationToken);
+                await _rdFetchApiClient.MergeEntryAsync(newRdCode ?? string.Empty, record.EntryNumberRange ?? string.Empty, record.RequestNumber, cancellationToken);
             }
             catch (BusinessValidationException)
             {
@@ -1042,9 +1073,10 @@ public class ManualValidationService : IManualValidationService
     // in ascending Id order (so "Title Record 1" is always the earliest-created row) - the group
     // key is the (RdCode, EntryNumberRange) pair, never EntryNumberRange alone (the same range
     // can legitimately recur under a different RD) and never RdCode alone (one RD has many
-    // unrelated ranges), and never RequestNumber or Id. EntryNumbersCsv is a separate,
-    // independently-edited field and is never compared, used as a fallback, or otherwise made
-    // part of this key. A blank/whitespace EntryNumberRange (NULL included) never groups, even
+    // unrelated ranges), and never RequestNumber or Id. EntryNumbersCsv (the DB column, distinct
+    // from the Details page's "Entry Number" field, which reads/writes EntryNumberRange - see
+    // SaveAsync) is never compared, used as a fallback, or otherwise made part of this key. A
+    // blank/whitespace EntryNumberRange (NULL included) never groups, even
     // with another blank/whitespace row: a record with no range always forms a group of one
     // (itself) - two records both missing a range are identified independently by Id, never
     // assumed to belong together. RdCode must also be present for a match; either side being
@@ -1090,7 +1122,7 @@ public class ManualValidationService : IManualValidationService
         var missing = new List<string>();
         if (string.IsNullOrWhiteSpace(r.RdCode)) missing.Add("rdCode");
         if (string.IsNullOrWhiteSpace(r.RdName)) missing.Add("rdName");
-        if (string.IsNullOrWhiteSpace(r.EntryNumbersCsv)) missing.Add("entry");
+        if (string.IsNullOrWhiteSpace(r.EntryNumberRange)) missing.Add("entry");
         if (string.IsNullOrWhiteSpace(r.Title)) missing.Add("title");
         if (r.TitleType is null) missing.Add("titleType");
         if (string.IsNullOrWhiteSpace(r.Plan)) missing.Add("plan");
@@ -1123,7 +1155,11 @@ public class ManualValidationService : IManualValidationService
             RequestNumber = primary.RequestNumber,
             RdCode = primary.RdCode,
             RdName = primary.RdName,
-            EntryNumbersCsv = primary.EntryNumbersCsv,
+            // Details page's editable "Entry Number" field reads/writes EntryNumberRange now
+            // (2026-11-03, per client request) - see the Save-side comment in SaveAsync. The DTO
+            // property keeps its existing name (EntryNumbersCsv) to avoid an unrelated rename
+            // across Details.cshtml/manual-validation-details.js.
+            EntryNumbersCsv = primary.EntryNumberRange,
             Title = primary.Title,
             TitleType = primary.TitleType?.ToString(),
             Plan = primary.Plan,

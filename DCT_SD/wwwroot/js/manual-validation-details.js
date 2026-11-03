@@ -18,7 +18,7 @@
     var documentTypes = JSON.parse((document.getElementById('mvDocumentTypesData') || {}).textContent || '[]');
 
     // One or more Title Record rows (see Details.cshtml's Title Record(s) table) - every row
-    // sharing the opened record's exact EntryNumbersCsv, combined server-side into this one
+    // sharing the opened record's exact EntryNumberRange, combined server-side into this one
     // Details view. Always at least 1 (the opened record itself when it has no group siblings),
     // so a record with no grouping siblings behaves exactly as it always has.
     var titleRecordRows = Array.prototype.slice.call(document.querySelectorAll('[data-title-record-row]'));

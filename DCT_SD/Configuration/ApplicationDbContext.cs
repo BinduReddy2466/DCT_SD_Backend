@@ -54,6 +54,16 @@ public class ApplicationDbContext : DbContext
             return;
         }
 
+        // SESSION_CONTEXT/sp_set_session_context is SQL Server-only syntax - the production
+        // provider is always SqlServer, so this never skips anything in production. It exists so
+        // unit tests can run this same SaveChangesAsync override against EF Core's InMemory
+        // provider (which has no connection to open and no SQL dialect to execute this against)
+        // without needing a separate test-only DbContext subclass.
+        if (!Database.IsSqlServer())
+        {
+            return;
+        }
+
         var userIdClaim = _httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         var userId = int.TryParse(userIdClaim, out var id) ? id : (int?)null;
         var ipAddr = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
