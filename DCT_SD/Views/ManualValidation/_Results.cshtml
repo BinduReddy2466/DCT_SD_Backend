@@ -31,7 +31,7 @@
                     <tr>
                         <td class="font-monospace small">@(item.RdCode ?? "—")</td>
                         <td>@(item.RdName ?? "—")</td>
-                        <td class="cell-wrap">@(item.EntryNumbersCsv ?? "—")</td>
+                        <td class="cell-wrap" title="@(item.EntryNumbersCsv ?? "—")">@(item.EntryNumbersCsv is null ? "—" : TextTruncate.ForDisplay(item.EntryNumbersCsv))</td>
                         @* Acceptance criteria requires the Extraction Status cell to read exactly
                            "Incomplete Extraction." (trailing period) - applied here, display-only.
                            The shared StatusDisplay map is intentionally left unchanged: it also

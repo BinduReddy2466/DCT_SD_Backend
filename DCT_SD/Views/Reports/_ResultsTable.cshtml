@@ -44,6 +44,17 @@
                                 // shown broken across multiple lines here either.
                                 <td><div class="text-truncate" style="max-width: 320px;" title="@cell">@display</div></td>
                             }
+                            else if (header is "Entry Number" or "Entry No.")
+                            {
+                                // "Entry Number" (Manual Validation) / "Entry No." (Migration
+                                // Monitoring) can be a comma-separated EntryNumberRange with
+                                // hundreds of entries (see ManualValidationService.cs) - same
+                                // truncate-with-tooltip treatment as Remarks above, so a single
+                                // long value can't blow a row out to fill the page here either,
+                                // matching the real Manual Validation/Migrations list pages
+                                // (_Results.cshtml, via Helpers.TextTruncate).
+                                <td><div class="text-truncate" style="max-width: 260px;" title="@cell">@display</div></td>
+                            }
                             else
                             {
                                 @* white-space: pre-line matches the Fetch History page's own Fetch

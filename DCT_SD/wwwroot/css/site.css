@@ -805,7 +805,10 @@ a:hover { color: var(--bs-link-hover-color); }
 }
 
 /* Wraps a long, unbroken value onto multiple lines within its cell instead of stretching the
-   column or overflowing. */
+   column or overflowing. Callers whose value could be arbitrarily long (e.g. a comma-separated
+   EntryNumberRange with hundreds of entries) truncate the displayed text itself (see
+   Helpers.TextTruncate) rather than relying on CSS alone to cap it - -webkit-line-clamp does not
+   reliably apply inside a <td> across browsers, so it isn't used here. */
 .cell-wrap {
   white-space: normal;
   overflow-wrap: anywhere;
