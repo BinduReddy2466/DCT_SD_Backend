@@ -46,7 +46,7 @@ public class FailedExtractionService : IFailedExtractionService
 
         if (request.DateFrom.HasValue)
         {
-            query = query.Where(r => r.ExtractionDateTime >= request.DateFrom.Value);
+            query = query.Where(r => r.ExtractionDateTime >= DateRangeFilter.StartOfDayUtc(request.DateFrom.Value));
         }
 
         if (request.DateTo.HasValue)

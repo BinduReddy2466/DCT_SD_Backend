@@ -59,7 +59,7 @@ public class UserService : IUserService
 
         if (request.DateFrom.HasValue)
         {
-            query = query.Where(u => u.CreatedAt >= request.DateFrom.Value);
+            query = query.Where(u => u.CreatedAt >= DateRangeFilter.StartOfDayUtc(request.DateFrom.Value));
         }
 
         if (request.DateTo.HasValue)

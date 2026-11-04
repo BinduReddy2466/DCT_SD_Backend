@@ -62,7 +62,7 @@ public class RdConfigService : IRdConfigService
 
         if (request.DateFrom.HasValue)
         {
-            query = query.Where(h => h.StartedAt >= request.DateFrom.Value);
+            query = query.Where(h => h.StartedAt >= DateRangeFilter.StartOfDayUtc(request.DateFrom.Value));
         }
 
         if (request.DateTo.HasValue)
@@ -242,7 +242,7 @@ public class RdConfigService : IRdConfigService
 
         if (request.DateFrom.HasValue)
         {
-            query = query.Where(r => r.StartedAt >= request.DateFrom.Value);
+            query = query.Where(r => r.StartedAt >= DateRangeFilter.StartOfDayUtc(request.DateFrom.Value));
         }
 
         if (request.DateTo.HasValue)

@@ -33,7 +33,7 @@ public class EmptyFolderService : IEmptyFolderService
 
         if (request.DateFrom.HasValue)
         {
-            query = query.Where(r => r.FetchDateTime >= request.DateFrom.Value);
+            query = query.Where(r => r.FetchDateTime >= DateRangeFilter.StartOfDayUtc(request.DateFrom.Value));
         }
 
         if (request.DateTo.HasValue)

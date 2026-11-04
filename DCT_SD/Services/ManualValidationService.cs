@@ -74,7 +74,7 @@ public class ManualValidationService : IManualValidationService
 
         if (request.DateFrom.HasValue)
         {
-            query = query.Where(r => r.ExtractionDate >= request.DateFrom.Value);
+            query = query.Where(r => r.ExtractionDate >= DateRangeFilter.StartOfDayUtc(request.DateFrom.Value));
         }
 
         if (request.DateTo.HasValue)

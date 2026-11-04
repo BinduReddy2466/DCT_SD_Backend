@@ -54,7 +54,7 @@ public class MigrationService : IMigrationService
 
         if (request.DateFrom.HasValue)
         {
-            query = query.Where(r => r.MigrationDate >= request.DateFrom.Value);
+            query = query.Where(r => r.MigrationDate >= DateRangeFilter.StartOfDayUtc(request.DateFrom.Value));
         }
 
         if (request.DateTo.HasValue)
