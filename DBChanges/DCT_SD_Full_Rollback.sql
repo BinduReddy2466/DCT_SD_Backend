@@ -217,3 +217,13 @@ IF OBJECT_ID('dbo.ImageExtractionStaging_Hist', 'U') IS NOT NULL DROP TABLE dbo.
 IF OBJECT_ID('dbo.ImageExtractionStaging_Log', 'U') IS NOT NULL DROP TABLE dbo.ImageExtractionStaging_Log;
 IF OBJECT_ID('dbo.ImageExtractionStaging', 'U') IS NOT NULL DROP TABLE dbo.ImageExtractionStaging;
 GO
+
+-------------------------------------------------------------------------------
+-- ufn_Get* functions (dropped last: Log_AppName/Log_HostName/Log_IPAddr and
+-- Hist_AppName/Hist_HostName/Hist_IPAddr DEFAULT constraints on the tables
+-- above reference these)
+-------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.ufn_GetAppName', 'FN') IS NOT NULL DROP FUNCTION dbo.ufn_GetAppName;
+IF OBJECT_ID('dbo.ufn_GetHostName', 'FN') IS NOT NULL DROP FUNCTION dbo.ufn_GetHostName;
+IF OBJECT_ID('dbo.ufn_GetIPAddress', 'FN') IS NOT NULL DROP FUNCTION dbo.ufn_GetIPAddress;
+GO
