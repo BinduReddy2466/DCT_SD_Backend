@@ -1036,7 +1036,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.FirstName, i.LastName, i.Username, i.PasswordHash, i.RoleName, i.MenuPermissionsCsv, i.Status, i.FailedLoginAttempts, i.LastLoginAt, i.IsDeleted, i.DeletedAt, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy, i.LockoutEndUtc FROM inserted i;
 
     INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
-    SELECT @UserId, @IPAddr, i.Username,
+    SELECT @UserId, @IPAddr, LEFT(i.Username, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc
@@ -1057,7 +1057,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc FROM deleted d;
 
     INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
-    SELECT @UserId, @IPAddr, d.Username,
+    SELECT @UserId, @IPAddr, LEFT(d.Username, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc
@@ -1157,7 +1157,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.UserId, i.TokenHash, i.CreatedAt, i.ExpiresAt, i.RevokedAt, i.ReplacedByTokenHash, i.CreatedByIp FROM inserted i;
 
     INSERT INTO dbo.RefreshTokens_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
-    SELECT @UserId, @IPAddr, i.TokenHash,
+    SELECT @UserId, @IPAddr, LEFT(i.TokenHash, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.UserId, d.TokenHash, d.CreatedAt, d.ExpiresAt, d.RevokedAt, d.ReplacedByTokenHash, d.CreatedByIp
@@ -1178,7 +1178,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.UserId, d.TokenHash, d.CreatedAt, d.ExpiresAt, d.RevokedAt, d.ReplacedByTokenHash, d.CreatedByIp FROM deleted d;
 
     INSERT INTO dbo.RefreshTokens_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, UserId, TokenHash, CreatedAt, ExpiresAt, RevokedAt, ReplacedByTokenHash, CreatedByIp)
-    SELECT @UserId, @IPAddr, d.TokenHash,
+    SELECT @UserId, @IPAddr, LEFT(d.TokenHash, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.UserId, d.TokenHash, d.CreatedAt, d.ExpiresAt, d.RevokedAt, d.ReplacedByTokenHash, d.CreatedByIp
@@ -1280,7 +1280,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.Category, i.[Key], i.Label, i.DataJson, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 
     INSERT INTO dbo.AppSettings_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, CONCAT(i.Category, N'':'', i.[Key]),
+    SELECT @UserId, @IPAddr, LEFT(CONCAT(i.Category, N'':'', i.[Key]), 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.Category, d.[Key], d.Label, d.DataJson, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -1301,7 +1301,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.Category, d.[Key], d.Label, d.DataJson, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy FROM deleted d;
 
     INSERT INTO dbo.AppSettings_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, Category, [Key], Label, DataJson, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, CONCAT(d.Category, N'':'', d.[Key]),
+    SELECT @UserId, @IPAddr, LEFT(CONCAT(d.Category, N'':'', d.[Key]), 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.Category, d.[Key], d.Label, d.DataJson, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -1405,7 +1405,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.LookupType, i.Code, i.Name, i.DataJson, i.IsActive, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 
     INSERT INTO dbo.CodeLookups_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, CONCAT(i.LookupType, N'':'', i.Code),
+    SELECT @UserId, @IPAddr, LEFT(CONCAT(i.LookupType, N'':'', i.Code), 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.LookupType, d.Code, d.Name, d.DataJson, d.IsActive, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -1426,7 +1426,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.LookupType, d.Code, d.Name, d.DataJson, d.IsActive, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy FROM deleted d;
 
     INSERT INTO dbo.CodeLookups_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, LookupType, Code, Name, DataJson, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, CONCAT(d.LookupType, N'':'', d.Code),
+    SELECT @UserId, @IPAddr, LEFT(CONCAT(d.LookupType, N'':'', d.Code), 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.LookupType, d.Code, d.Name, d.DataJson, d.IsActive, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -1542,7 +1542,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.SourcePath, i.Status, i.TotalCount, i.ProcessedCount, i.LastProcessedFolderPath, i.LastProcessedAt, i.ExecutedByUserId, i.ExecutedByUsername, i.StartedAt, i.CompletedAt, i.RecordKind, i.FromPath, i.Remarks, i.SummaryMessage, i.RootPath FROM inserted i;
 
     INSERT INTO dbo.FetchRuns_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
-    SELECT @UserId, @IPAddr, CONCAT(i.RecordKind, N'':'', CONVERT(NVARCHAR(30), i.StartedAt, 126)),
+    SELECT @UserId, @IPAddr, LEFT(CONCAT(i.RecordKind, N'':'', CONVERT(NVARCHAR(30), i.StartedAt, 126)), 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.SourcePath, d.Status, d.TotalCount, d.ProcessedCount, d.LastProcessedFolderPath, d.LastProcessedAt, d.ExecutedByUserId, d.ExecutedByUsername, d.StartedAt, d.CompletedAt, d.RecordKind, d.FromPath, d.Remarks, d.SummaryMessage, d.RootPath
@@ -1563,7 +1563,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.SourcePath, d.Status, d.TotalCount, d.ProcessedCount, d.LastProcessedFolderPath, d.LastProcessedAt, d.ExecutedByUserId, d.ExecutedByUsername, d.StartedAt, d.CompletedAt, d.RecordKind, d.FromPath, d.Remarks, d.SummaryMessage, d.RootPath FROM deleted d;
 
     INSERT INTO dbo.FetchRuns_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, SourcePath, Status, TotalCount, ProcessedCount, LastProcessedFolderPath, LastProcessedAt, ExecutedByUserId, ExecutedByUsername, StartedAt, CompletedAt, RecordKind, FromPath, Remarks, SummaryMessage, RootPath)
-    SELECT @UserId, @IPAddr, CONCAT(d.RecordKind, N'':'', CONVERT(NVARCHAR(30), d.StartedAt, 126)),
+    SELECT @UserId, @IPAddr, LEFT(CONCAT(d.RecordKind, N'':'', CONVERT(NVARCHAR(30), d.StartedAt, 126)), 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.SourcePath, d.Status, d.TotalCount, d.ProcessedCount, d.LastProcessedFolderPath, d.LastProcessedAt, d.ExecutedByUserId, d.ExecutedByUsername, d.StartedAt, d.CompletedAt, d.RecordKind, d.FromPath, d.Remarks, d.SummaryMessage, d.RootPath
@@ -1675,7 +1675,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.FetchRunId, i.RdCode, i.RdName, i.FolderPath, i.EntryNumbersCsv, i.TitleNumber, i.TitleType, i.DocumentCount, i.ExtractionStatus, i.ExtractionDateTime, i.DocumentsJson, i.EntryNumberRange FROM inserted i;
 
     INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
-    SELECT @UserId, @IPAddr, i.RequestNumber,
+    SELECT @UserId, @IPAddr, LEFT(i.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange
@@ -1696,7 +1696,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange FROM deleted d;
 
     INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
-    SELECT @UserId, @IPAddr, d.RequestNumber,
+    SELECT @UserId, @IPAddr, LEFT(d.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange
@@ -1828,7 +1828,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MissingFieldsCsv, i.DocumentsJson, i.ExtractionDate, i.UpdatedByUserId, i.UpdatedByUsername, i.UpdatedAt, i.LockedByUserId, i.LockedByUsername, i.LockedAt, i.MigratedAt, i.Status, i.EntryNumberRange FROM inserted i;
 
     INSERT INTO dbo.ManualValidationRequests_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
-    SELECT @UserId, @IPAddr, i.RequestNumber,
+    SELECT @UserId, @IPAddr, LEFT(i.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MissingFieldsCsv, d.DocumentsJson, d.ExtractionDate, d.UpdatedByUserId, d.UpdatedByUsername, d.UpdatedAt, d.LockedByUserId, d.LockedByUsername, d.LockedAt, d.MigratedAt, d.Status, d.EntryNumberRange
@@ -1849,7 +1849,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MissingFieldsCsv, d.DocumentsJson, d.ExtractionDate, d.UpdatedByUserId, d.UpdatedByUsername, d.UpdatedAt, d.LockedByUserId, d.LockedByUsername, d.LockedAt, d.MigratedAt, d.Status, d.EntryNumberRange FROM deleted d;
 
     INSERT INTO dbo.ManualValidationRequests_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MissingFieldsCsv, DocumentsJson, ExtractionDate, UpdatedByUserId, UpdatedByUsername, UpdatedAt, LockedByUserId, LockedByUsername, LockedAt, MigratedAt, Status, EntryNumberRange)
-    SELECT @UserId, @IPAddr, d.RequestNumber,
+    SELECT @UserId, @IPAddr, LEFT(d.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MissingFieldsCsv, d.DocumentsJson, d.ExtractionDate, d.UpdatedByUserId, d.UpdatedByUsername, d.UpdatedAt, d.LockedByUserId, d.LockedByUsername, d.LockedAt, d.MigratedAt, d.Status, d.EntryNumberRange
@@ -1965,7 +1965,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus FROM inserted i;
 
     INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
-    SELECT @UserId, @IPAddr, i.RequestNumber,
+    SELECT @UserId, @IPAddr, LEFT(i.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus
@@ -1986,7 +1986,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus FROM deleted d;
 
     INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
-    SELECT @UserId, @IPAddr, d.RequestNumber,
+    SELECT @UserId, @IPAddr, LEFT(d.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus
@@ -2090,7 +2090,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.MigrationRecordId, i.CodeLookupId, i.DocumentName, i.FileName, i.Status, i.ExistingFileName, i.PerformedByUserId, i.PerformedByUsername, i.ActionDate FROM inserted i;
 
     INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
-    SELECT @UserId, @IPAddr, i.FileName,
+    SELECT @UserId, @IPAddr, LEFT(i.FileName, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate
@@ -2111,7 +2111,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate FROM deleted d;
 
     INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
-    SELECT @UserId, @IPAddr, d.FileName,
+    SELECT @UserId, @IPAddr, LEFT(d.FileName, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate
@@ -2209,7 +2209,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RdCode, i.RdName, i.FolderName, i.FolderPath, i.Status, i.FetchDateTime FROM inserted i;
 
     INSERT INTO dbo.EmptyFolderRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
-    SELECT @UserId, @IPAddr, i.FolderPath,
+    SELECT @UserId, @IPAddr, LEFT(i.FolderPath, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.RdCode, d.RdName, d.FolderName, d.FolderPath, d.Status, d.FetchDateTime
@@ -2230,7 +2230,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RdCode, d.RdName, d.FolderName, d.FolderPath, d.Status, d.FetchDateTime FROM deleted d;
 
     INSERT INTO dbo.EmptyFolderRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RdCode, RdName, FolderName, FolderPath, Status, FetchDateTime)
-    SELECT @UserId, @IPAddr, d.FolderPath,
+    SELECT @UserId, @IPAddr, LEFT(d.FolderPath, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.RdCode, d.RdName, d.FolderName, d.FolderPath, d.Status, d.FetchDateTime
@@ -2328,7 +2328,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.RdCode, i.RdName, i.FolderName, i.FolderPath, i.FailureReason, i.ExtractionDateTime FROM inserted i;
 
     INSERT INTO dbo.FailedExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
-    SELECT @UserId, @IPAddr, i.FolderPath,
+    SELECT @UserId, @IPAddr, LEFT(i.FolderPath, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.RdCode, d.RdName, d.FolderName, d.FolderPath, d.FailureReason, d.ExtractionDateTime
@@ -2349,7 +2349,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.RdCode, d.RdName, d.FolderName, d.FolderPath, d.FailureReason, d.ExtractionDateTime FROM deleted d;
 
     INSERT INTO dbo.FailedExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RdCode, RdName, FolderName, FolderPath, FailureReason, ExtractionDateTime)
-    SELECT @UserId, @IPAddr, d.FolderPath,
+    SELECT @UserId, @IPAddr, LEFT(d.FolderPath, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.RdCode, d.RdName, d.FolderName, d.FolderPath, d.FailureReason, d.ExtractionDateTime
@@ -2445,7 +2445,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.ImagePath, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 
     INSERT INTO dbo.BrandingSettings_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, ImagePath, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, i.ImagePath,
+    SELECT @UserId, @IPAddr, LEFT(i.ImagePath, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.ImagePath, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -2466,7 +2466,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.ImagePath, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy FROM deleted d;
 
     INSERT INTO dbo.BrandingSettings_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, ImagePath, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, d.ImagePath,
+    SELECT @UserId, @IPAddr, LEFT(d.ImagePath, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.ImagePath, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -2570,7 +2570,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.[Key], i.Label, i.Recipients, i.Subject, i.Body, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 
     INSERT INTO dbo.EmailTemplates_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, [Key], Label, Recipients, Subject, Body, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, i.[Key],
+    SELECT @UserId, @IPAddr, LEFT(i.[Key], 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.[Key], d.Label, d.Recipients, d.Subject, d.Body, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -2591,7 +2591,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.[Key], d.Label, d.Recipients, d.Subject, d.Body, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy FROM deleted d;
 
     INSERT INTO dbo.EmailTemplates_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, [Key], Label, Recipients, Subject, Body, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, d.[Key],
+    SELECT @UserId, @IPAddr, LEFT(d.[Key], 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.[Key], d.Label, d.Recipients, d.Subject, d.Body, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -2691,7 +2691,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.DocumentCode, i.DocumentName, i.IsActive, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy FROM inserted i;
 
     INSERT INTO dbo.DocumentTypes_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, DocumentCode, DocumentName, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, i.DocumentCode,
+    SELECT @UserId, @IPAddr, LEFT(i.DocumentCode, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.DocumentCode, d.DocumentName, d.IsActive, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -2712,7 +2712,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.DocumentCode, d.DocumentName, d.IsActive, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy FROM deleted d;
 
     INSERT INTO dbo.DocumentTypes_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, DocumentCode, DocumentName, IsActive, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy)
-    SELECT @UserId, @IPAddr, d.DocumentCode,
+    SELECT @UserId, @IPAddr, LEFT(d.DocumentCode, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.DocumentCode, d.DocumentName, d.IsActive, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy
@@ -2802,7 +2802,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.OcrExtractionRecordId, i.EntryNumber FROM inserted i;
 
     INSERT INTO dbo.OcrExtractionEntries_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, OcrExtractionRecordId, EntryNumber)
-    SELECT @UserId, @IPAddr, CONCAT(i.OcrExtractionRecordId, N'':'', i.EntryNumber),
+    SELECT @UserId, @IPAddr, LEFT(CONCAT(i.OcrExtractionRecordId, N'':'', i.EntryNumber), 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.OcrExtractionRecordId, d.EntryNumber
@@ -2823,7 +2823,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.OcrExtractionRecordId, d.EntryNumber FROM deleted d;
 
     INSERT INTO dbo.OcrExtractionEntries_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, OcrExtractionRecordId, EntryNumber)
-    SELECT @UserId, @IPAddr, CONCAT(d.OcrExtractionRecordId, N'':'', d.EntryNumber),
+    SELECT @UserId, @IPAddr, LEFT(CONCAT(d.OcrExtractionRecordId, N'':'', d.EntryNumber), 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.OcrExtractionRecordId, d.EntryNumber
@@ -2929,7 +2929,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''U'', i.Id, i.FetchRunId, i.FolderPath, i.ImagePath, i.DocumentTypeName, i.TitleNumber, i.TitleType, i.[Plan], i.Block, i.Lot, i.ClassifiedAt FROM inserted i;
 
     INSERT INTO dbo.ImageExtractionStaging_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FetchRunId, FolderPath, ImagePath, DocumentTypeName, TitleNumber, TitleType, [Plan], Block, Lot, ClassifiedAt)
-    SELECT @UserId, @IPAddr, i.ImagePath,
+    SELECT @UserId, @IPAddr, LEFT(i.ImagePath, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
            d.Id, d.FetchRunId, d.FolderPath, d.ImagePath, d.DocumentTypeName, d.TitleNumber, d.TitleType, d.[Plan], d.Block, d.Lot, d.ClassifiedAt
@@ -2950,7 +2950,7 @@ BEGIN
     SELECT @UserId, @IPAddr, ''D'', d.Id, d.FetchRunId, d.FolderPath, d.ImagePath, d.DocumentTypeName, d.TitleNumber, d.TitleType, d.[Plan], d.Block, d.Lot, d.ClassifiedAt FROM deleted d;
 
     INSERT INTO dbo.ImageExtractionStaging_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FetchRunId, FolderPath, ImagePath, DocumentTypeName, TitleNumber, TitleType, [Plan], Block, Lot, ClassifiedAt)
-    SELECT @UserId, @IPAddr, d.ImagePath,
+    SELECT @UserId, @IPAddr, LEFT(d.ImagePath, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
            d.Id, d.FetchRunId, d.FolderPath, d.ImagePath, d.DocumentTypeName, d.TitleNumber, d.TitleType, d.[Plan], d.Block, d.Lot, d.ClassifiedAt
