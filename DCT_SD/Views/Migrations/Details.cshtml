@@ -4,179 +4,315 @@
 @{
     var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     var documentsJson = JsonSerializer.Serialize(Model.Documents, jsonOptions);
+    var registryOfficesJson = JsonSerializer.Serialize((IReadOnlyList<DCT_SD.Models.Dtos.RdConfig.RegistryOfficeDto>)ViewData["RegistryOffices"]!, jsonOptions);
+    var documentTypesJson = JsonSerializer.Serialize((IReadOnlyList<DCT_SD.Models.Dtos.ManualValidation.DocumentTypeDto>)ViewData["DocumentTypes"]!, jsonOptions);
+
+    var isSystemMigration = Model.MigrationType == "SystemMigration";
+    // Model.MigrationStatus is already the final display text (MigrationService.DisplayMigrationStatus).
+    var migrationStatusDisplay = Model.MigrationStatus;
+    var migrationTypeDisplay = isSystemMigration ? "System Migration" : Model.MigrationType == "ManualValidation" ? "Manual Validation" : null;
+    // Mutually exclusive with Ready for Migration below - a System Migration row held out of the
+    // queue by Target RD Not Identified/pending corrections must use that button first, not jump
+    // straight to a synchronous Initiate Migration call.
+    var canInitiateMigration = (Model.ProcessingStatus is null or "RetryPending") && !Model.CanMarkReadyForMigration;
+    var canReprocess = Model.ProcessingStatus == "Failed";
+
+    var sdStatusDisplay = string.IsNullOrEmpty(Model.SdStatus) ? null : StatusDisplay.SdStatusToDisplay(Model.SdStatus);
 
     var fields = new (string Label, string? Value, bool IsChip)[]
     {
-        ("Request ID", Model.RequestNumber, true),
-        ("RD Code", Model.RdCode, false),
-        ("RD Name", Model.RdName, false),
+        ("Migration Date", Model.MigrationDate.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt"), false),
         ("Entry Number", Model.EntryNumbersCsv, false),
-        ("Title Number", Model.Title, false),
-        ("Title Type", Model.TitleType, false),
-        ("Title Sequence", Model.TitleSequence, false),
-        ("Plan Number", Model.Plan, false),
-        ("Block Number", Model.Block, false),
-        ("Lot Number", Model.Lot, false),
-        ("Migration Date and Time", Model.MigrationDate.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt"), false),
-        ("Migration Status", StatusDisplay.MigrationStatusToDisplay(Model.MigrationStatus), false),
+        ("Range Entry Number", Model.RangeEntryNumber, false),
+        ("Target System Validation", Model.TargetSystemValidation, false),
+        ("Migration Status", migrationStatusDisplay, false),
+        ("Supporting Document Status", sdStatusDisplay, false),
+        ("Target System Activation Status", Model.TargetSystemActivationStatus, false),
+        ("Reason for Failing", Model.ReasonForFailing, false),
+        ("Migration Type", migrationTypeDisplay, false),
+        ("Processed By", Model.ProcessedBy, false),
     };
 }
 
-<a href="@Url.Action("Index")" class="d-inline-flex align-items-center gap-2 mb-3 text-decoration-none">&lsaquo; Back to Migration Monitoring</a>
+<!-- Not a user-facing form - just carries the antiforgery token plus the two fields Save submits
+     (RdCode, DocumentCorrectionsJson), read via FormData exactly like Manual Validation's
+     #mvDetailsForm. Deliberately NOT wrapped around the rest of the page's markup, so it can sit
+     alongside (not nested inside) initiateMigrationForm below. -->
+<form id="migrationDetailsForm" class="d-none">
+    @Html.AntiForgeryToken()
+    <input type="hidden" id="migrationRdCode" name="RdCode" value="@Model.RdCode" />
+    <input type="hidden" id="migrationDocumentCorrectionsJson" name="DocumentCorrectionsJson" value="" />
+</form>
 
-<div class="row g-3">
-    <div class="col-12 col-xl-3">
-        <div class="card p-4 h-100">
-            <h6 class="text-muted text-uppercase small fw-semibold mb-3">Extracted Data</h6>
-            @foreach (var f in fields)
-            {
-                <div class="mb-3">
-                    <div class="field-label">@f.Label</div>
-                    @if (f.IsChip)
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <a href="@Url.Action("Index")" class="d-inline-flex align-items-center gap-2 text-decoration-none">&lsaquo; Back to Migration Monitoring</a>
+    <div class="d-flex gap-2">
+        @if (Model.CanMarkReadyForMigration)
+        {
+            <button type="button" class="btn btn-gold" id="migrationReadyForMigrationBtn" data-target-rd-not-identified="@Model.IsTargetRdNotIdentified.ToString().ToLowerInvariant()">Ready for Migration</button>
+        }
+        @if (canInitiateMigration)
+        {
+            <button type="button" class="btn btn-navy" id="initiateMigrationBtn">Initiate Migration</button>
+        }
+        @if (canReprocess)
+        {
+            <button type="button" class="btn btn-navy" id="reprocessBtn">Reprocess</button>
+        }
+    </div>
+</div>
+
+<form method="post" action="@Url.Action("InitiateMigration")" id="initiateMigrationForm" class="d-none">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="id" value="@Model.Id" />
+</form>
+
+<!-- Entry Record Details is the page's primary record-identifying data - a full-width compact
+     grid (not a tall single-column list) so it, and as much of the rest of the page as possible,
+     stays above the fold instead of pushing Associated Title Records/Action History out of view. -->
+<div class="row g-3 mb-3">
+    <div class="col-12">
+        <div class="card p-4">
+            <h6 class="text-muted text-uppercase small fw-semibold mb-3">Entry Record Details</h6>
+            <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-xl-6 g-3">
+                <div class="col">
+                    <div class="field-label">RD Code</div>
+                    @if (Model.IsTargetRdNotIdentified)
                     {
-                        <div class="chip-mono mt-1 d-inline-block">@f.Value</div>
+                        <div class="mt-1" id="migrationRdCodeComboboxHost"></div>
                     }
                     else
                     {
-                        <div class="mt-1 fw-medium">@(string.IsNullOrWhiteSpace(f.Value) ? "—" : f.Value)</div>
+                        <div class="mt-1 fw-medium cell-wrap">@(string.IsNullOrWhiteSpace(Model.RdCode) ? "—" : Model.RdCode)</div>
                     }
                 </div>
-            }
+                <div class="col">
+                    <div class="field-label">RD Name</div>
+                    <div class="mt-1 fw-medium cell-wrap" id="migrationRdNameText">@(string.IsNullOrWhiteSpace(Model.RdName) ? "—" : Model.RdName)</div>
+                </div>
+                @foreach (var f in fields)
+                {
+                    <div class="col">
+                        <div class="field-label">@f.Label</div>
+                        @if (f.IsChip)
+                        {
+                            <div class="chip-mono mt-1 d-inline-block">@f.Value</div>
+                        }
+                        else
+                        {
+                            <div class="mt-1 fw-medium cell-wrap">@(string.IsNullOrWhiteSpace(f.Value) ? "—" : f.Value)</div>
+                        }
+                    </div>
+                }
+            </div>
         </div>
     </div>
+</div>
 
-    <div class="col-12 col-xl-6">
-        <div class="card p-4 d-flex flex-column" data-compare-url-base="@Url.Action("Compare", new { id = Model.Id })">
+<div class="row g-3">
+    <div class="col-12 col-xl-6" id="migrationViewerCol">
+        <div class="card p-4 d-flex flex-column" style="height: 62vh;" data-compare-url-base="@Url.Action("Compare", new { id = Model.Id })" data-document-image-url-base="@Url.Action("DocumentImage", new { id = Model.Id })">
             @if (Model.Documents.Count == 0)
             {
-                <div class="flex-1 d-flex align-items-center justify-content-center text-muted py-5">No Supporting Documents Found</div>
+                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Image Viewer</h6>
+                <div class="flex-fill d-flex align-items-center justify-content-center text-muted py-5">No Supporting Documents Found</div>
             }
             else
             {
-                <div class="mb-3 d-flex flex-wrap align-items-center gap-2">
-                    <div class="d-flex flex-wrap gap-2" id="migrationViewerHeaderLeft"></div>
-                    <div class="ms-auto small text-muted" id="migrationViewerHeaderRight"></div>
+                <!-- Scrolls internally (rather than spilling past the card) whenever the toolbar +
+                     image + Insert-as-New/Confirm-Duplicate footer together need more room than the
+                     card's fixed height allows, e.g. at shorter viewport heights. -->
+                <div class="flex-fill d-flex flex-column" style="min-height: 0; overflow-y: auto;">
+                <!-- Title + "DCT-SD Image"/"Compare" + "Image X of Y" combined into one row
+                     (mirrors Manual Validation's Image Viewer header: title left, context right)
+                     instead of 3 separate stacked rows, so less vertical chrome sits above the
+                     image itself. -->
+                <div class="mb-2 d-flex flex-wrap align-items-center justify-content-between gap-2">
+                    <h6 class="text-muted text-uppercase small fw-semibold mb-0">Image Viewer</h6>
+                    <div class="d-flex flex-wrap align-items-center gap-2">
+                        <div class="d-flex flex-wrap gap-2" id="migrationViewerHeaderLeft"></div>
+                        <span class="small text-muted" id="migrationViewerHeaderRight"></span>
+                    </div>
                 </div>
 
-                <div class="mb-3 d-flex gap-1">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="migrationPrevBtn">&lsaquo; Prev</button>
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="migrationNextBtn">Next &rsaquo;</button>
+                <!-- Prev/Next is shared across the single- and dual-pane views below (navigation
+                     is a property of the document list, not of either view). The actual
+                     buttons/ids are a single DOM node (#migrationPrevNextGroup) that
+                     migration-details.js's setViewerWidth relocates: into the single-pane
+                     toolbar's own row below (matching Manual Validation's Image Viewer, which
+                     puts Prev/Next in the same row as zoom/rotate/pan/reset - there's only ever
+                     one image there) while a single image is showing, or kept here in its own row
+                     above both panes - since it doesn't belong to either individual DCT-SD/
+                     PHILARIS-RD pane - while the dual view is active. Starts hidden; the initial
+                     render() call places it correctly before the user ever sees the page. -->
+                <div id="migrationPrevNextRow" class="mb-2 d-flex flex-wrap justify-content-center gap-2 d-none">
+                    <div class="btn-group" role="group" id="migrationPrevNextGroup">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="migrationPrevBtn">&lsaquo; Prev</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="migrationNextBtn">Next &rsaquo;</button>
+                    </div>
                 </div>
 
-                <div id="migrationSingleViewerWrap">
-                    <div id="migrationViewerSingle" data-doc-viewer data-enable-wheel-zoom="true">
-                        <div class="chip-mono mb-3 d-inline-block" data-viewer-filename></div>
-                        <div class="mb-3 d-flex flex-wrap gap-2">
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="fit">Fit</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                <div id="migrationSingleViewerWrap" class="flex-fill d-flex flex-column" style="min-height: 0;">
+                    <div id="migrationViewerSingle" class="flex-fill d-flex flex-column" style="min-height: 0;" data-doc-viewer data-enable-wheel-zoom="true">
+                        <!-- Matches Manual Validation's Image Viewer toolbar exactly: zoomIn/
+                             zoomOut/editable zoom-percentage input/rotateLeft/rotateRight/
+                             togglePan/reset in one btn-group, Prev/Next appended into this same
+                             row (not a separate static "100%" button + "Fit" button, and not a
+                             separate row above) - see migration-details.js's setViewerWidth. -->
+                        <div class="mb-2 d-flex flex-wrap justify-content-center gap-2" id="migrationSingleToolbarRow">
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                                <input type="text" inputmode="numeric" class="btn btn-outline-secondary btn-sm text-center" data-viewer-zoom-input value="100%" style="width: 4.2rem; padding-left: .25rem; padding-right: .25rem;" aria-label="Zoom percentage" />
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="reset">Reset</button>
+                            </div>
                         </div>
-                        <div class="doc-viewer-frame d-flex align-items-center justify-content-center" data-viewer-frame style="min-height: 320px; height: 55vh; overflow: hidden;">
-                            <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                        <div class="doc-viewer-frame flex-fill d-flex align-items-center justify-content-center" data-viewer-frame style="min-height: 0; overflow: hidden;">
+                            <img data-viewer-image draggable="false" style="width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain;" />
+                        </div>
+                        <div class="mt-2 text-center">
+                            <span class="chip-mono small d-inline-block" data-viewer-filename></span>
                         </div>
                     </div>
                 </div>
 
-                <div id="migrationDualViewerWrap" class="d-none row g-3">
-                    <div class="col-12 col-md-6 d-flex flex-column">
-                        <div class="fw-semibold small mb-2">DCT-SD Image</div>
-                        <div id="migrationViewerLeft" data-doc-viewer data-enable-wheel-zoom="true">
-                            <div class="chip-mono mb-2 d-inline-block" data-viewer-filename></div>
-                            <div class="mb-2 d-flex flex-wrap gap-2">
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="fit">Fit</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                <!-- flex-wrap: nowrap overrides Bootstrap's .row default (flex-wrap: wrap), which
+                     otherwise lets this row's own height be driven by its children's intrinsic
+                     content size (the image) instead of being constrained by the fixed-height card
+                     above it - causing the DCT-SD/PHILARIS-RD images (and the footer below them) to
+                     overflow past the card's bottom edge. -->
+                <!-- Widened to a g-5 gutter (vs. g-3 elsewhere) plus a visible divider on the
+                     right pane - the two panes also only ever appear while migrationViewerCol/
+                     migrationSupportingDocsCol are temporarily widened to col-12 (see
+                     migration-details.js), so each pane has real room for its own full toolbar
+                     without wrapping, instead of squeezing two into a single col-xl-6 card. -->
+                <div id="migrationDualViewerWrap" class="d-none flex-fill row g-5" style="min-height: 0; flex-wrap: nowrap;">
+                    <div class="col-12 col-md-6 d-flex flex-column" style="min-height: 0;">
+                        <div class="fw-semibold small mb-2 text-center">DCT-SD Image</div>
+                        <div id="migrationViewerLeft" class="flex-fill d-flex flex-column" style="min-height: 0;" data-doc-viewer data-enable-wheel-zoom="true">
+                            <div class="mb-2 d-flex flex-wrap justify-content-center gap-2">
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                                    <input type="text" inputmode="numeric" class="btn btn-outline-secondary btn-sm text-center" data-viewer-zoom-input value="100%" style="width: 4.2rem; padding-left: .25rem; padding-right: .25rem;" aria-label="Zoom percentage" />
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="reset">Reset</button>
+                                </div>
                             </div>
-                            <div class="doc-viewer-frame d-flex align-items-center justify-content-center" data-viewer-frame style="height: 45vh; overflow: hidden;">
-                                <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                            <div class="doc-viewer-frame flex-fill d-flex align-items-center justify-content-center" data-viewer-frame style="min-height: 0; overflow: hidden;">
+                                <img data-viewer-image draggable="false" style="width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain;" />
+                            </div>
+                            <div class="mt-2 text-center">
+                                <span class="chip-mono small d-inline-block" data-viewer-filename></span>
                             </div>
                         </div>
                     </div>
-                    <div class="col-12 col-md-6 d-flex flex-column">
-                        <div class="fw-semibold small mb-2">PHILARIS-RD Image</div>
-                        <div id="migrationViewerRight" data-doc-viewer data-enable-wheel-zoom="true">
-                            <div class="chip-mono mb-2 d-inline-block" data-viewer-filename></div>
-                            <div class="mb-2 d-flex flex-wrap gap-2">
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="actualSize">100%</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="fit">Fit</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
-                                <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                    <div class="col-12 col-md-6 d-flex flex-column border-start ps-4" style="min-height: 0;">
+                        <div class="fw-semibold small mb-2 text-center">PHILARIS-RD Image</div>
+                        <div id="migrationViewerRight" class="flex-fill d-flex flex-column" style="min-height: 0;" data-doc-viewer data-enable-wheel-zoom="true">
+                            <div class="mb-2 d-flex flex-wrap justify-content-center gap-2">
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomIn">+</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="zoomOut">&minus;</button>
+                                    <input type="text" inputmode="numeric" class="btn btn-outline-secondary btn-sm text-center" data-viewer-zoom-input value="100%" style="width: 4.2rem; padding-left: .25rem; padding-right: .25rem;" aria-label="Zoom percentage" />
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateLeft">&#8634;</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="rotateRight">&#8635;</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="togglePan">&#10021;</button>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" data-viewer-action="reset">Reset</button>
+                                </div>
                             </div>
-                            <div class="doc-viewer-frame d-flex align-items-center justify-content-center" data-viewer-frame style="height: 45vh; overflow: hidden;">
-                                <img data-viewer-image draggable="false" style="max-width: 100%; max-height: 100%;" />
+                            <div class="doc-viewer-frame flex-fill d-flex align-items-center justify-content-center" data-viewer-frame style="min-height: 0; overflow: hidden;">
+                                <img data-viewer-image draggable="false" style="width: 100%; height: 100%; min-width: 0; min-height: 0; object-fit: contain;" />
+                            </div>
+                            <div class="mt-2 text-center">
+                                <span class="chip-mono small d-inline-block" data-viewer-filename></span>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div id="migrationViewerFooter" class="mt-3"></div>
+                </div>
             }
         </div>
     </div>
 
-    <div class="col-12 col-xl-3">
-        <div class="card p-4 h-100">
+    <div class="col-12 col-xl-6" id="migrationSupportingDocsCol">
+        <div class="card p-4 d-flex flex-column" style="height: 62vh;">
             <h6 class="text-muted text-uppercase small fw-semibold mb-3">Supporting Documents</h6>
             @if (Model.Documents.Count == 0)
             {
-                <div class="text-center text-muted py-4">No Supporting Documents Found</div>
+                <div class="flex-fill d-flex align-items-center justify-content-center text-muted">No Supporting Documents Found</div>
             }
             else
             {
-                <div class="table-responsive table-frame" style="max-height: 420px; overflow-y: auto;">
+                <div class="table-responsive table-frame flex-fill" style="min-height: 0; min-width: 0; overflow-y: auto;">
                     <table class="table table-hover align-middle mb-0">
                         <thead>
                             <tr>
                                 <th style="width: 2.5rem;">#</th>
-                                <th>Document Name</th>
-                                <th>Filename</th>
-                                <th>Supporting Document Status</th>
+                                <th>Document Type</th>
+                                <th>Image File Name</th>
+                                <th>Source Image File Path</th>
+                                <th>Target Image File Path</th>
+                                <th>Target System Validation</th>
+                                <th>Migration Status</th>
+                                <th>Reason for Failing</th>
                             </tr>
                         </thead>
-                        <tbody id="migrationDocumentList">
-                            @for (var i = 0; i < Model.Documents.Count; i++)
+                        <tbody id="migrationDocumentList"></tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-1">
+    <div class="col-12 col-xl-6">
+        <div class="card p-4 d-flex flex-column" style="height: 34vh;">
+            <h6 class="text-muted text-uppercase small fw-semibold mb-3">Associated Title Records</h6>
+            @if (Model.TitleRecords.Count == 0)
+            {
+                <div class="flex-fill d-flex align-items-center justify-content-center text-muted">No Associated Title Records Found</div>
+            }
+            else
+            {
+                <div class="table-responsive table-frame flex-fill" style="min-height: 0; min-width: 0; overflow-y: auto;">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Title Number</th>
+                                <th>Title Sequence</th>
+                                <th>Target System Validation</th>
+                                <th>Migration Status</th>
+                                <th>Reason for Failing</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in Model.TitleRecords)
                             {
-                                var doc = Model.Documents[i];
-                                var showActionTooltip = doc.Status == "Overwritten" || doc.Status == "InsertedAsNew";
-                                string? actionTooltip = null;
-                                if (showActionTooltip)
-                                {
-                                    var tooltipLines = new List<string>
-                                    {
-                                        "Performed By: " + (doc.PerformedBy ?? "—"),
-                                        "Action Date and Time: " + (doc.ActionDate.HasValue ? doc.ActionDate.Value.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt") : "—"),
-                                    };
-                                    if (doc.Status == "Overwritten")
-                                    {
-                                        tooltipLines.Add("Existing PHILARIS-RD Image File Name: " + (doc.ExistingFileName ?? "—"));
-                                    }
-                                    actionTooltip = string.Join("<br />", tooltipLines);
-                                }
-                                <tr role="button" data-doc-index="@i" style="cursor: pointer;">
-                                    <td>@(i + 1)</td>
-                                    <td class="small">@doc.DocumentName</td>
-                                    <td class="small text-muted">@doc.FileName</td>
+                                var titleStatusDisplay = t.MigrationStatus;
+                                <tr class="@(t.Id == Model.Id ? "table-active" : "")">
+                                    <td>@(string.IsNullOrWhiteSpace(t.Title) ? "—" : t.Title)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(t.TitleSequence) ? "—" : t.TitleSequence)</td>
+                                    <td>@(t.TargetSystemValidation ?? "—")</td>
                                     <td>
-                                        @if (showActionTooltip)
+                                        @if (string.IsNullOrEmpty(titleStatusDisplay))
                                         {
-                                            <status-badge status="@StatusDisplay.MigrationDocStatusToDisplay(doc.Status)" data-bs-toggle="tooltip" data-bs-html="true" data-bs-placement="top" title="@actionTooltip"></status-badge>
+                                            @:—
                                         }
                                         else
                                         {
-                                            <status-badge status="@StatusDisplay.MigrationDocStatusToDisplay(doc.Status)"></status-badge>
+                                            <status-badge status="@titleStatusDisplay"></status-badge>
                                         }
                                     </td>
+                                    <td class="cell-wrap">@(t.ReasonForFailing ?? "—")</td>
                                 </tr>
                             }
                         </tbody>
@@ -185,28 +321,108 @@
             }
         </div>
     </div>
+
+    <div class="col-12 col-xl-6">
+        <div class="card p-4 d-flex flex-column" style="height: 34vh;">
+            <h6 class="text-muted text-uppercase small fw-semibold mb-3">Action History</h6>
+            <div id="migrationActionHistoryContainer" class="flex-fill d-flex flex-column" style="min-height: 0;">
+                @await Html.PartialAsync("_ActionHistoryTable", Model.ActionHistory)
+            </div>
+        </div>
+    </div>
 </div>
 
-<div class="mt-3 d-flex justify-content-end">
-    <a href="@Url.Action("Index")" class="btn btn-navy">Close</a>
+@if (Model.ManualValidationOrigin is not null)
+{
+    var mv = Model.ManualValidationOrigin;
+    <div class="row g-3 mt-1">
+        <div class="col-12">
+            <div class="card p-4">
+                <h6 class="text-muted text-uppercase small fw-semibold mb-3">Manual Validation Record</h6>
+                <div class="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-xl-6 g-3">
+                    <div class="col">
+                        <div class="field-label">Title Number</div>
+                        <div class="mt-1 fw-medium cell-wrap">@(string.IsNullOrWhiteSpace(mv.Title) ? "—" : mv.Title)</div>
+                    </div>
+                    <div class="col">
+                        <div class="field-label">Title Type</div>
+                        <div class="mt-1 fw-medium cell-wrap">@(string.IsNullOrWhiteSpace(mv.TitleType) ? "—" : mv.TitleType)</div>
+                    </div>
+                    <div class="col">
+                        <div class="field-label">Plan Number</div>
+                        <div class="mt-1 fw-medium cell-wrap">@(string.IsNullOrWhiteSpace(mv.Plan) ? "—" : mv.Plan)</div>
+                    </div>
+                    <div class="col">
+                        <div class="field-label">Block Number</div>
+                        <div class="mt-1 fw-medium cell-wrap">@(string.IsNullOrWhiteSpace(mv.Block) ? "—" : mv.Block)</div>
+                    </div>
+                    <div class="col">
+                        <div class="field-label">Lot Number</div>
+                        <div class="mt-1 fw-medium cell-wrap">@(string.IsNullOrWhiteSpace(mv.Lot) ? "—" : mv.Lot)</div>
+                    </div>
+                    <div class="col">
+                        <div class="field-label">Title Sequence</div>
+                        <div class="mt-1 fw-medium cell-wrap">@(string.IsNullOrWhiteSpace(mv.TitleSequence) ? "—" : mv.TitleSequence)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="mt-3 d-flex justify-content-end gap-2">
+    <button type="button" class="btn btn-outline-secondary px-4" id="migrationCloseBtn">Close</button>
+    <button type="button" class="btn btn-navy px-4" id="migrationSaveBtn">Save</button>
 </div>
 
-<form method="post" action="@Url.Action("Overwrite")" id="overwriteForm" class="d-inline"
-      data-confirm-message="Are you sure you want to overwrite the existing supporting document image in PHILARIS-RD?" data-confirm-label="Yes" data-confirm-cancel-label="No">
-    @Html.AntiForgeryToken()
-    <input type="hidden" name="id" value="@Model.Id" />
-    <input type="hidden" name="documentId" id="overwriteDocumentId" />
-</form>
-<form method="post" action="@Url.Action("InsertAsNew")" id="insertAsNewForm" class="d-inline"
-      data-confirm-message="Are you sure you want to migrate this supporting document image as a new image in PHILARIS-RD?" data-confirm-label="Yes" data-confirm-cancel-label="No">
-    @Html.AntiForgeryToken()
-    <input type="hidden" name="id" value="@Model.Id" />
-    <input type="hidden" name="documentId" id="insertAsNewDocumentId" />
-</form>
+<!-- Insert as New Image / Confirm Duplicate share this one Remarks-validated confirmation dialog -
+     migration-details.js sets the title/message/confirm-label and which endpoint to POST before
+     showing it. -->
+<div class="modal fade" id="migrationRemarksModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title font-display" id="migrationRemarksModalTitle">Confirm</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2" id="migrationRemarksModalMessage"></p>
+                <textarea class="form-control" id="migrationRemarksText" rows="3" placeholder="Remarks (minimum 10 characters)"></textarea>
+                <p class="text-danger small mt-1 d-none" id="migrationRemarksError">Remarks is required and must be at least 10 characters.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-navy" id="migrationRemarksConfirmBtn" disabled>Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="migrationUnsavedModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title font-display">You have unsaved changes</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">Do you want to save your changes before closing?</p>
+                <div class="d-flex flex-column gap-2">
+                    <button type="button" class="btn btn-navy" id="migrationSaveAndCloseBtn">Save and Close</button>
+                    <button type="button" class="btn btn-outline-secondary" id="migrationDiscardAndCloseBtn">Close Without Saving</button>
+                    <button type="button" class="btn btn-link text-muted" data-bs-dismiss="modal">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 @section Scripts {
     <script id="migrationDocumentsData" type="application/json">@Html.Raw(documentsJson)</script>
+    <script id="migrationRegistryOfficesData" type="application/json">@Html.Raw(registryOfficesJson)</script>
+    <script id="migrationDocumentTypesData" type="application/json">@Html.Raw(documentTypesJson)</script>
     <script src="~/js/placeholder-image.js"></script>
     <script src="~/js/doc-viewer.js"></script>
+    <script src="~/js/searchable-combobox.js"></script>
     <script src="~/js/migration-details.js"></script>
 }

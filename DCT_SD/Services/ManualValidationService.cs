@@ -6,6 +6,7 @@ using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
 using DCT_SD.Models;
 using DCT_SD.Models.Dtos.ManualValidation;
+using DCT_SD.Models.Dtos.SdAutoConversion;
 using DCT_SD.Models.Entities;
 using DCT_SD.Models.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -24,19 +25,26 @@ public class ManualValidationService : IManualValidationService
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IRdFetchApiClient _rdFetchApiClient;
+    private readonly ISdAutoConversionClient _sdAutoConversionClient;
     private readonly ILogger<ManualValidationService> _logger;
 
-    public ManualValidationService(ApplicationDbContext context, ICurrentUserService currentUserService, IRdFetchApiClient rdFetchApiClient, ILogger<ManualValidationService> logger)
+    public ManualValidationService(ApplicationDbContext context, ICurrentUserService currentUserService, IRdFetchApiClient rdFetchApiClient, ISdAutoConversionClient sdAutoConversionClient, ILogger<ManualValidationService> logger)
     {
         _context = context;
         _currentUserService = currentUserService;
         _rdFetchApiClient = rdFetchApiClient;
+        _sdAutoConversionClient = sdAutoConversionClient;
         _logger = logger;
     }
 
-    private IQueryable<ManualValidationRequest> BuildSearchQuery(ManualValidationSearchRequestDto request)
+    private IQueryable<ManualValidationRequest> BuildSearchQuery(ManualValidationSearchRequestDto request, bool excludeReadyForMigration = false)
     {
         var query = _context.ManualValidationRequests.AsNoTracking().Where(r => r.MigratedAt == null);
+
+        if (excludeReadyForMigration)
+        {
+            query = query.Where(r => r.Status != ManualValidationStatus.ReadyForMigration);
+        }
 
         if (!string.IsNullOrWhiteSpace(request.RdCode))
         {
@@ -100,7 +108,7 @@ public class ManualValidationService : IManualValidationService
             .Select(g => g.OrderBy(r => r.Id).ToList())
             .ToList();
 
-    public async Task<PagedResult<ManualValidationListItemDto>> SearchAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default)
+    public async Task<PagedResult<ManualValidationListItemDto>> SearchAsync(ManualValidationSearchRequestDto request, bool excludeReadyForMigration = false, CancellationToken cancellationToken = default)
     {
         // Every filter above still runs server-side exactly as before; only the grouping/paging
         // step below happens in memory, over the already-filtered set. Manual Validation is a
@@ -108,7 +116,7 @@ public class ManualValidationService : IManualValidationService
         // amount of extra memory for grouping logic that's simple to read and audit - the same
         // pragmatic in-memory-filter approach already used elsewhere in this service (see
         // RetrieveTitleSequenceAsync).
-        var matchingRecords = await BuildSearchQuery(request).ToListAsync(cancellationToken);
+        var matchingRecords = await BuildSearchQuery(request, excludeReadyForMigration).ToListAsync(cancellationToken);
         var groups = GroupMatchingRecords(matchingRecords);
 
         var pageNumber = request.PageNumber < 1 ? 1 : request.PageNumber;
@@ -134,9 +142,9 @@ public class ManualValidationService : IManualValidationService
         };
     }
 
-    public async Task<List<ManualValidationListItemDto>> SearchAllAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default)
+    public async Task<List<ManualValidationListItemDto>> SearchAllAsync(ManualValidationSearchRequestDto request, bool excludeReadyForMigration = false, CancellationToken cancellationToken = default)
     {
-        var matchingRecords = await BuildSearchQuery(request).ToListAsync(cancellationToken);
+        var matchingRecords = await BuildSearchQuery(request, excludeReadyForMigration).ToListAsync(cancellationToken);
         var groups = GroupMatchingRecords(matchingRecords);
 
         return groups
@@ -912,22 +920,36 @@ public class ManualValidationService : IManualValidationService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    // Replaces the old "Migrate" action. This only flags the record as ready - it deliberately
-    // never sets MigratedAt (that would remove it from the Manual Validation list/queries, the
-    // same way the old Migrate action used to) and never touches MigrationRecords/Migration
-    // Monitoring, which this app has no existing write path into at all (that table is populated
-    // entirely by an external process). The actual migration mechanism is expected to pick up
-    // ReadyForMigration records on its own, outside this app.
+    // Replaces the old "Migrate" action. Flags the record as ready, then creates its one
+    // MigrationRecords row (MigrationType=ManualValidation) so the Entry Record immediately
+    // becomes visible on Migration Monitoring - this app's only other writer into that table,
+    // MigrationService.SyncEligibleOcrExtractionRecordsAsync, follows the exact same "create the
+    // tracking row, leave the real outcome fields null until they're actually known" shape.
+    // MigrationStatus/SdStatus/TargetSystemValidation/
+    // TargetSystemActivationStatus stay at their "awaiting outcome" values (ReadyForMigration /
+    // null / null / null) here - nothing in this app performs the actual migration for Manual
+    // Validation records, so there is no real outcome to report yet; whatever mechanism completes
+    // that migration is expected to update this same row afterward, same as it always has.
+    // Deliberately never sets MigratedAt itself (that's reserved for when a real migration
+    // outcome exists) and only ever touches the single selected record - sibling Title Records
+    // sharing this record's EntryNumberRange, and all Supporting Documents, are left untouched.
     public async Task MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
     {
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
         // Same mandatory-fields gate the old Migrate action used - reused as-is, since a record
-        // that isn't fully validated still shouldn't be flagged ready for the next stage.
+        // that isn't fully validated still shouldn't be flagged ready for the next stage. This
+        // also guarantees RdCode/RdName/EntryNumberRange/Title/TitleType/Plan/Block/Lot/
+        // TitleSequence are all non-blank below, since every one of them is checked here.
         if (ComputeMissingFields(record).Length > 0)
         {
             throw new BusinessValidationException("Please complete all mandatory fields before marking this record as Ready for Migration.");
+        }
+
+        if (await _context.MigrationRecords.AnyAsync(m => m.RequestNumber == record.RequestNumber, cancellationToken))
+        {
+            throw new ConflictException("This Entry Record has already been marked Ready for Migration.");
         }
 
         var originalStatus = record.Status;
@@ -953,7 +975,84 @@ public class ManualValidationService : IManualValidationService
             CreatedAt = DateTime.UtcNow,
         });
 
-        await _context.SaveChangesAsync(cancellationToken);
+        // Pre-resolved once (not per entry number/document) - used below to populate each new
+        // MigrationDocument's CodeLookupId immediately, same shape as
+        // MigrationService.GetDocumentTypeLookupAsync.
+        var documentTypeLookup = await _context.CodeLookups.AsNoTracking()
+            .Where(c => c.LookupType == CodeLookupTypes.DocumentType)
+            .ToDictionaryAsync(c => c.Code, c => c.Id, cancellationToken);
+        var documentItems = ParseDocumentItems(record.DocumentsJson);
+
+        // One MigrationRecords row per entry number (client requirement, 2026-11-12: "Migration
+        // Tracking should be per entry number") - everything else copied identically into each row,
+        // only EntryNumbersCsv itself differs per iteration.
+        foreach (var entryNumber in EntryNumberCsvParser.Split(record.EntryNumbersCsv))
+        {
+            var migrationRecord = new MigrationRecord
+            {
+                RequestNumber = record.RequestNumber,
+                OcrExtractionRecordId = record.OcrExtractionRecordId,
+                MigrationDate = DateTime.UtcNow,
+                RdCode = record.RdCode!,
+                RdName = record.RdName!,
+                EntryNumbersCsv = entryNumber,
+                Title = record.Title,
+                TitleType = record.TitleType,
+                Plan = record.Plan,
+                Block = record.Block,
+                Lot = record.Lot,
+                TitleSequence = record.TitleSequence,
+                MigrationStatus = Models.Enums.MigrationStatus.ReadyForMigration,
+                MigrationType = Models.Enums.MigrationType.ManualValidation,
+                ProcessedByUserId = _currentUserService.UserId,
+                ProcessedByUsername = displayName,
+                // Verbatim copy - preserves the original JSON structure exactly as Manual Validation
+                // produced it. ProcessingStatus is deliberately left null here (not Pending): unlike
+                // System Migration's automatic 6-hourly batch, nothing processes a Manual Validation
+                // row until a user explicitly clicks "Initiate Migration" on its Migration Details
+                // page (see MigrationService.InitiateMigrationAsync), so null means "not yet
+                // initiated" rather than "queued".
+                DocumentJson = record.DocumentsJson,
+                // Copied directly from this record's own (possibly user-corrected via Save)
+                // EntryNumberRange - see MigrationRecord.RangeEntryNumber's own comment for why this
+                // is no longer looked up indirectly through OcrExtractionRecordId.
+                RangeEntryNumber = record.EntryNumberRange,
+            };
+
+            // One MigrationDocuments row per supporting document, created immediately - not
+            // deferred until the SD Auto Conversion API responds (client requirement, 2026-11-12:
+            // the API response must UPDATE these rows, never INSERT new ones). CodeLookupId is
+            // left null exactly when DocumentName is still "OTHERS" (never resolves in the
+            // lookup), so an already-classified document is correctly never treated as "Others"
+            // from the moment it's created - see MigrationService.InitiateMigrationAsync, which
+            // sources submission from these rows directly instead of re-parsing DocumentsJson.
+            foreach (var item in documentItems)
+            {
+                var documentName = item.DocumentId ?? item.DocumentTypeCode ?? string.Empty;
+                migrationRecord.Documents.Add(new MigrationDocument
+                {
+                    DocumentName = documentName,
+                    FileName = item.RenamedFileName,
+                    SourceImagePath = item.ImagePath,
+                    CodeLookupId = documentTypeLookup.TryGetValue(documentName, out var codeLookupId) ? codeLookupId : null,
+                    Status = MigrationDocumentStatus.Pending,
+                });
+            }
+
+            _context.MigrationRecords.Add(migrationRecord);
+        }
+
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // UK_MigrationRecords_01 (unique RequestNumber) caught a concurrent duplicate
+            // submission - the pre-check above already covers the common case; this is the
+            // defense-in-depth backstop for a genuine race between two near-simultaneous clicks.
+            throw new ConflictException("This Entry Record has already been marked Ready for Migration.");
+        }
     }
 
     // Matching is staged per the acceptance criteria:
@@ -963,105 +1062,70 @@ public class ManualValidationService : IManualValidationService
     //   3. If still ambiguous after that (a genuinely Repeating Title Number), return every
     //      remaining candidate for the caller to show a manual-selection window instead of
     //      picking one arbitrarily.
-    // RD Code isn't part of CodeLookups.Code's existing composite key/DataJson for any row in
-    // the live data today, so it's only enforced against rows whose DataJson actually records
-    // one - rows without it are never excluded on that basis, which keeps every existing
-    // Title Sequence lookup working exactly as it does today.
+    // Calls the external GetTitleSequence API (PHILARIS-RD - the same external system as SD Auto
+    // Conversion, see ISdAutoConversionClient) instead of matching against local CodeLookups
+    // data. A single match is persisted immediately to the Title Record row identified by
+    // request.RecordId, so the retrieved value survives even if the user never clicks this
+    // page's own Save button afterward (explicit instruction, 2026-11-12). More than one match is
+    // a genuine "Repeating Title Number" - every candidate is returned, not yet persisted, for the
+    // user to pick from via SelectTitleSequenceAsync.
     public async Task<TitleSequenceDto> RetrieveTitleSequenceAsync(RetrieveTitleSequenceRequestDto request, CancellationToken cancellationToken = default)
     {
-        if (!Enum.TryParse<TitleType>(request.TitleType, true, out var titleType))
-        {
-            throw new NotFoundException("No Title Sequence record was found.");
-        }
-
         var rdCode = request.RdCode.Trim();
-        var title = request.Title.Trim();
-        var plan = request.Plan.Trim();
-        var block = request.Block.Trim();
-        var lot = request.Lot.Trim();
+        var titleType = request.TitleType.Trim();
+        var titleNo = request.Title.Trim();
 
-        var rows = await _context.CodeLookups.AsNoTracking()
-            .Where(c => c.LookupType == CodeLookupTypes.TitleSequence && c.IsActive)
-            .ToListAsync(cancellationToken);
-
-        var parsed = rows
-            .Select(r => (Row: r, Data: DeserializeTitleSequenceData(r.DataJson)))
-            .Where(x => x.Data is not null)
-            .ToList();
-
-        var stage1 = parsed.Where(x =>
-            string.Equals(x.Data!.Title?.Trim(), title, StringComparison.OrdinalIgnoreCase)
-            && x.Data.TitleType == (int)titleType
-            && (string.IsNullOrWhiteSpace(x.Data.RdCode) || string.Equals(x.Data.RdCode!.Trim(), rdCode, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-
-        if (stage1.Count == 0)
+        if (titleNo.Length == 0 || titleType.Length == 0)
         {
             throw new NotFoundException("No Title Sequence record was found.");
         }
 
-        if (stage1.Count == 1)
+        var result = await _sdAutoConversionClient.GetTitleSequenceAsync(
+            new SdTitleSequenceRequest { RdCode = rdCode, TitleType = titleType, TitleNo = titleNo },
+            cancellationToken);
+
+        if (!result.IsSuccess)
         {
-            return new TitleSequenceDto { Sequence = stage1[0].Row.Name };
+            _logger.LogError(
+                "GetTitleSequence failed for RecordId {RecordId}, RdCode {RdCode}, TitleNo {TitleNo}: {Error}",
+                request.RecordId, rdCode, titleNo, result.ErrorMessage);
+            throw new NotFoundException(result.ErrorMessage ?? "No Title Sequence record was found.");
         }
 
-        var stage2 = stage1.Where(x =>
-            string.Equals(x.Data!.Plan?.Trim(), plan, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(x.Data.Block?.Trim(), block, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(x.Data.Lot?.Trim(), lot, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (stage2.Count == 0)
+        if (result.Results.Count == 0)
         {
             throw new NotFoundException("No Title Sequence record was found.");
         }
 
-        if (stage2.Count == 1)
+        if (result.Results.Count == 1)
         {
-            return new TitleSequenceDto { Sequence = stage2[0].Row.Name };
+            var sequence = result.Results[0].TitleSeq.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await PersistTitleSequenceAsync(request.RecordId, sequence, cancellationToken);
+            return new TitleSequenceDto { Sequence = sequence };
         }
 
         return new TitleSequenceDto
         {
             IsAmbiguous = true,
-            Candidates = stage2.Select(x => new TitleSequenceCandidateDto
+            Candidates = result.Results.Select(x => new TitleSequenceCandidateDto
             {
-                RdCode = x.Data!.RdCode,
-                Title = x.Data.Title ?? title,
-                TitleType = titleType.ToString(),
-                Plan = x.Data.Plan,
-                Block = x.Data.Block,
-                Lot = x.Data.Lot,
-                Sequence = x.Row.Name,
+                RdCode = x.RdCode,
+                Title = x.TitleNo ?? titleNo,
+                TitleType = x.TitleType ?? titleType,
+                Pbl = x.Pbl,
+                Sequence = x.TitleSeq.ToString(System.Globalization.CultureInfo.InvariantCulture),
             }).ToArray(),
         };
     }
 
-    private static TitleSequenceDataJson? DeserializeTitleSequenceData(string? dataJson)
-    {
-        if (string.IsNullOrWhiteSpace(dataJson))
-        {
-            return null;
-        }
+    public Task SelectTitleSequenceAsync(int recordId, string sequence, CancellationToken cancellationToken = default) =>
+        PersistTitleSequenceAsync(recordId, sequence, cancellationToken);
 
-        try
-        {
-            return JsonSerializer.Deserialize<TitleSequenceDataJson>(dataJson, JsonOptions);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    private class TitleSequenceDataJson
+    private async Task PersistTitleSequenceAsync(int recordId, string sequence, CancellationToken cancellationToken)
     {
-        public string? RdCode { get; set; }
-        public string? Title { get; set; }
-        public int? TitleType { get; set; }
-        public string? Plan { get; set; }
-        public string? Block { get; set; }
-        public string? Lot { get; set; }
+        var record = await GetActiveRecordAsync(recordId, cancellationToken);
+        record.TitleSequence = sequence;
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<ManualValidationRequest> GetActiveRecordAsync(int id, CancellationToken cancellationToken) =>

@@ -259,7 +259,7 @@ public class ReportService : IReportService
             PageSize = pageSize,
         };
 
-        var page = await _manualValidationService.SearchAsync(request, cancellationToken);
+        var page = await _manualValidationService.SearchAsync(request, cancellationToken: cancellationToken);
         return ToPreview(ManualValidationHeaders, page, item => new[]
         {
             item.RdCode ?? string.Empty,
@@ -495,7 +495,7 @@ public class ReportService : IReportService
         // table load + in-memory regroup on every call regardless of page size, so paging through
         // it 100 rows at a time here would reload and regroup the entire matching set once per
         // page (O(n^2) for n matching rows). SearchAllAsync does that same load+group pass once.
-        var items = await _manualValidationService.SearchAllAsync(request, cancellationToken);
+        var items = await _manualValidationService.SearchAllAsync(request, cancellationToken: cancellationToken);
         if (items.Count == 0) return false;
 
         var sheet = workbook.Worksheets.Add("Report");

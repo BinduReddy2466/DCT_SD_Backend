@@ -5,4 +5,5 @@ public static class RecordHistoryTables
 {
     public const string ManualValidationRequests = "ManualValidationRequests";
     public const string FetchRuns = "FetchRuns";
+    public const string MigrationRecords = "MigrationRecords";
 }

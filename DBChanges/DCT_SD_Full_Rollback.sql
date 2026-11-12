@@ -1,6 +1,8 @@
 /* =============================================================================
-   FULL rollback - drops ALL 16 main tables, their 16 _Log tables, 16 _Hist
-   tables, and 48 triggers.
+   FULL rollback - drops ALL 16 main tables with _Log/_Hist mirrors (their 16
+   _Log tables, 16 _Hist tables, and 48 triggers), plus 3 further standalone
+   tables that have no _Log/_Hist mirror or triggers of their own
+   (AuditLog, RecordHistory, __EFMigrationsHistory).
 
    *** WARNING - THIS PERMANENTLY DELETES ALL PRODUCTION DATA ***
    This is NOT limited to the audit trail. It also drops the main tables
@@ -8,8 +10,9 @@
    OcrExtractionRecords, ManualValidationRequests, MigrationRecords,
    MigrationDocuments, EmptyFolderRecords, FailedExtractionRecords,
    BrandingSettings, EmailTemplates, DocumentTypes, OcrExtractionEntries,
-   ImageExtractionStaging) - every user account, auth token, fetch run,
-   OCR/migration/manual-validation record, etc. is destroyed and cannot be
+   ImageExtractionStaging, AuditLog, RecordHistory, __EFMigrationsHistory) -
+   every user account, auth token, fetch run, OCR/migration/manual-validation
+   record, workflow audit trail entry, etc. is destroyed and cannot be
    recovered without a database backup.
 
    Do NOT run this against a live/production environment unless the intent
@@ -216,6 +219,15 @@ GO
 IF OBJECT_ID('dbo.ImageExtractionStaging_Hist', 'U') IS NOT NULL DROP TABLE dbo.ImageExtractionStaging_Hist;
 IF OBJECT_ID('dbo.ImageExtractionStaging_Log', 'U') IS NOT NULL DROP TABLE dbo.ImageExtractionStaging_Log;
 IF OBJECT_ID('dbo.ImageExtractionStaging', 'U') IS NOT NULL DROP TABLE dbo.ImageExtractionStaging;
+GO
+
+-------------------------------------------------------------------------------
+-- AuditLog / RecordHistory / __EFMigrationsHistory  (no FK, no _Log/_Hist
+-- mirror, no triggers - standalone tables)
+-------------------------------------------------------------------------------
+IF OBJECT_ID('dbo.AuditLog', 'U') IS NOT NULL DROP TABLE dbo.AuditLog;
+IF OBJECT_ID('dbo.RecordHistory', 'U') IS NOT NULL DROP TABLE dbo.RecordHistory;
+IF OBJECT_ID('dbo.__EFMigrationsHistory', 'U') IS NOT NULL DROP TABLE dbo.__EFMigrationsHistory;
 GO
 
 -------------------------------------------------------------------------------

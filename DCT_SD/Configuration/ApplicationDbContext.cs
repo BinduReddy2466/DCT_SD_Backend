@@ -23,6 +23,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<ManualValidationRequest> ManualValidationRequests => Set<ManualValidationRequest>();
     public DbSet<MigrationRecord> MigrationRecords => Set<MigrationRecord>();
     public DbSet<MigrationDocument> MigrationDocuments => Set<MigrationDocument>();
+    public DbSet<MigrationRecordLogEntry> MigrationRecordLogEntries => Set<MigrationRecordLogEntry>();
     public DbSet<EmptyFolderRecord> EmptyFolderRecords => Set<EmptyFolderRecord>();
     public DbSet<FailedExtractionRecord> FailedExtractionRecords => Set<FailedExtractionRecord>();
     public DbSet<CodeLookup> CodeLookups => Set<CodeLookup>();

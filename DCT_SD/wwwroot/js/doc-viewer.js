@@ -265,13 +265,33 @@
       window.addEventListener('mouseup', onUp);
     });
 
+    // A broken/missing image (404, unreadable file, etc.) is replaced with a plain text message
+    // instead of the browser's default broken-image icon.
+    var errorEl = null;
+    function showLoadError() {
+      if (!errorEl) {
+        errorEl = document.createElement('div');
+        errorEl.className = 'small text-muted text-center p-3';
+        errorEl.textContent = 'This image could not be loaded.';
+        if (frame) frame.appendChild(errorEl);
+      }
+      img.style.display = 'none';
+      errorEl.style.display = '';
+    }
+
     img.addEventListener('load', function () {
+      if (errorEl) errorEl.style.display = 'none';
+      img.style.display = '';
       clampPan();
       applyTransform();
       if (pendingFitOnLoad) {
         pendingFitOnLoad = false;
         fitToScreen();
       }
+    });
+
+    img.addEventListener('error', function () {
+      if (img.src) showLoadError();
     });
 
     if (enableShrinkToFit) {

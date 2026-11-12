@@ -159,11 +159,15 @@ BEGIN
         EntryNumbersCsv     NVARCHAR(MAX)     NULL,
         TitleNumber         NVARCHAR(50)      NULL,
         TitleType           INT               NULL,
+        [Plan]              NVARCHAR(50)      NULL,
+        Block               NVARCHAR(50)      NULL,
+        Lot                 NVARCHAR(50)      NULL,
+        TitleSequence       NVARCHAR(50)      NULL,
         DocumentCount       INT               NOT NULL CONSTRAINT DF_OcrExtractionRecords_DocumentCount DEFAULT ((0)),
         ExtractionStatus    INT               NOT NULL,
         ExtractionDateTime  DATETIME2         NOT NULL CONSTRAINT DF_OcrExtractionRecords_ExtractionDateTime DEFAULT (SYSUTCDATETIME()),
         DocumentsJson       NVARCHAR(MAX)     NULL,
-        EntryNumberRange    NVARCHAR(MAX)     NOT NULL CONSTRAINT DF_OcrExtractionRecords_EntryNumberRange DEFAULT ('0'),
+        EntryNumberRange    NVARCHAR(MAX)     NULL CONSTRAINT DF_OcrExtractionRecords_EntryNumberRange DEFAULT ('0'),
         CONSTRAINT PK_OcrExtractionRecords PRIMARY KEY (Id),
         CONSTRAINT CK_OcrExtractionRecords_DocumentsJson CHECK (DocumentsJson IS NULL OR ISJSON(DocumentsJson) = 1),
         CONSTRAINT FK_OcrExtractionRecords_01 FOREIGN KEY (FetchRunId) REFERENCES dbo.FetchRuns (Id)
@@ -276,7 +280,7 @@ BEGIN
         LockedAt                DATETIME2         NULL,
         MigratedAt              DATETIME2         NULL,
         Status                  NVARCHAR(30)      NOT NULL,
-        EntryNumberRange        NVARCHAR(MAX)     NOT NULL CONSTRAINT DF_ManualValidationRequests_EntryNumberRange DEFAULT ('0'),
+        EntryNumberRange        NVARCHAR(MAX)     NULL CONSTRAINT DF_ManualValidationRequests_EntryNumberRange DEFAULT ('0'),
         CONSTRAINT PK_ManualValidationRequests PRIMARY KEY (Id),
         CONSTRAINT CK_ManualValidationRequests_DocumentsJson CHECK (DocumentsJson IS NULL OR ISJSON(DocumentsJson) = 1),
         CONSTRAINT FK_ManualValidationRequests_01 FOREIGN KEY (OcrExtractionRecordId) REFERENCES dbo.OcrExtractionRecords (Id)
@@ -307,30 +311,78 @@ BEGIN
         MigrationDate         DATETIME2         NOT NULL CONSTRAINT DF_MigrationRecords_MigrationDate DEFAULT (SYSUTCDATETIME()),
         RdCode                NVARCHAR(20)      NOT NULL,
         RdName                NVARCHAR(150)     NOT NULL,
-        EntryNumbersCsv       NVARCHAR(MAX)     NULL,
+        -- NVARCHAR(200), not MAX (unlike OcrExtractionRecords/ManualValidationRequests' own
+        -- EntryNumbersCsv columns): this one needs to be a key column in UK_MigrationRecords_01
+        -- below, which NVARCHAR(MAX) cannot be. Matches MigrationRecordConfiguration.cs's
+        -- HasMaxLength(200), which this column always should have been.
+        EntryNumbersCsv       NVARCHAR(200)     NULL,
         Title                 NVARCHAR(50)      NULL,
         TitleType             INT               NULL,
         [Plan]                NVARCHAR(50)      NULL,
         Block                 NVARCHAR(50)      NULL,
         Lot                   NVARCHAR(50)      NULL,
         TitleSequence         NVARCHAR(50)      NULL,
-        MigratedToRdName      NVARCHAR(150)     NOT NULL,
-        MigrationStatus       NVARCHAR(50)      NOT NULL,
-        SdStatus              NVARCHAR(50)      NOT NULL,
+        -- Nullable (per 2026-11-09 System Migration batch work): only populated once a row
+        -- reaches ProcessingStatus = 'Completed' - see the columns below. Manual Validation /
+        -- legacy rows (populated by the external process) always have real values here, same as
+        -- before this change.
+        MigratedToRdName      NVARCHAR(150)     NULL,
+        MigrationStatus       NVARCHAR(50)      NULL,
+        SdStatus              NVARCHAR(50)      NULL,
+        -- Added 2026-11-09: identifies how this row was produced, and the System Migration
+        -- batch's own claim/attempt/retry tracking (independent of MigrationStatus/SdStatus
+        -- above, which only describe a completed migration's outcome). NULL for rows written
+        -- before this change.
+        MigrationType                 NVARCHAR(30)  NULL,
+        ProcessedByUserId             INT           NULL,
+        ProcessedByUsername           NVARCHAR(256) NULL,
+        ProcessingStatus              NVARCHAR(20)  NULL,
+        AttemptCount                  INT           NOT NULL CONSTRAINT DF_MigrationRecords_AttemptCount DEFAULT ((0)),
+        ProcessingStartedAt           DATETIME2     NULL,
+        ProcessingCompletedAt         DATETIME2     NULL,
+        LastAttemptAt                 DATETIME2     NULL,
+        LastFailureReason             NVARCHAR(500) NULL,
+        ApiResponseJson               NVARCHAR(MAX) NULL,
+        ApiResponseAt                 DATETIME2     NULL,
+        TargetSystemValidation        NVARCHAR(100) NULL,
+        TargetSystemActivationStatus  NVARCHAR(20)  NULL,
+        -- Added 2026-11-10 (Ready for Migration / SD Auto Conversion from Migration Monitoring):
+        -- holds the Entry Record's supporting-document information end to end - the original
+        -- ManualValidationRequests.DocumentsJson copied verbatim on "Ready for Migration", then
+        -- merged with the SD Auto Conversion API's own response under a separate "apiResponse"
+        -- property once that API has been called (see MigrationService.InitiateMigrationAsync).
+        -- Distinct from ApiResponseJson above, which is the System Migration batch's own raw
+        -- audit passthrough - this column is the durable combined document+response record.
+        Document_Json                 NVARCHAR(MAX) NULL,
+        -- Added 2026-11-11: copied directly from the originating row's own EntryNumberRange
+        -- (ManualValidationRequests.EntryNumberRange for a Manual Validation-origin row,
+        -- OcrExtractionRecords.EntryNumberRange for a System Migration-origin row) the moment
+        -- this row is created - not looked up indirectly via OcrExtractionRecordId at display
+        -- time, since a Manual Validation user's own correction to EntryNumberRange (Save) only
+        -- ever updates ManualValidationRequests, never the OcrExtractionRecords row it came from.
+        RangeEntryNumber              NVARCHAR(MAX) NULL,
         CONSTRAINT PK_MigrationRecords PRIMARY KEY (Id),
-        CONSTRAINT FK_MigrationRecords_01 FOREIGN KEY (OcrExtractionRecordId) REFERENCES dbo.OcrExtractionRecords (Id)
+        CONSTRAINT FK_MigrationRecords_01 FOREIGN KEY (OcrExtractionRecordId) REFERENCES dbo.OcrExtractionRecords (Id),
+        CONSTRAINT CK_MigrationRecords_ApiResponseJson CHECK (ApiResponseJson IS NULL OR ISJSON(ApiResponseJson) = 1),
+        CONSTRAINT CK_MigrationRecords_DocumentJson CHECK (Document_Json IS NULL OR ISJSON(Document_Json) = 1)
     );
 END;
 GO
 
+-- Composite, not single-column RequestNumber: as of 2026-11-12, one MigrationRecords row is
+-- created per entry number (see Helpers/EntryNumberCsvParser.cs), so several rows now legitimately
+-- share one RequestNumber - this still blocks a genuine duplicate re-processing attempt (same
+-- source, same entry number) while allowing that source's other entry numbers their own rows.
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UK_MigrationRecords_01' AND object_id = OBJECT_ID('dbo.MigrationRecords'))
-    CREATE UNIQUE NONCLUSTERED INDEX UK_MigrationRecords_01 ON dbo.MigrationRecords (RequestNumber);
+    CREATE UNIQUE NONCLUSTERED INDEX UK_MigrationRecords_01 ON dbo.MigrationRecords (RequestNumber, EntryNumbersCsv);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_01' AND object_id = OBJECT_ID('dbo.MigrationRecords'))
     CREATE NONCLUSTERED INDEX IX_MigrationRecords_01 ON dbo.MigrationRecords (MigrationDate);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_02' AND object_id = OBJECT_ID('dbo.MigrationRecords'))
     CREATE NONCLUSTERED INDEX IX_MigrationRecords_02 ON dbo.MigrationRecords (MigrationStatus);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_03' AND object_id = OBJECT_ID('dbo.MigrationRecords'))
     CREATE NONCLUSTERED INDEX IX_MigrationRecords_03 ON dbo.MigrationRecords (OcrExtractionRecordId);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_04' AND object_id = OBJECT_ID('dbo.MigrationRecords'))
+    CREATE NONCLUSTERED INDEX IX_MigrationRecords_04 ON dbo.MigrationRecords (ProcessingStatus);
 GO
 
 /* =============================================================================
@@ -351,6 +403,24 @@ BEGIN
         PerformedByUserId    INT               NULL,
         PerformedByUsername  NVARCHAR(MAX)      NULL,
         ActionDate           DATETIME2         NULL,
+        -- Added 2026-11-09: populated directly from the SD Auto Conversion API's per-image
+        -- response (destinationPath/sizeBytes/sequence), System Migration rows only.
+        DestinationPath      NVARCHAR(500)     NULL,
+        SizeBytes            BIGINT            NULL,
+        Sequence             INT               NULL,
+        -- Added 2026-11-10 (Supporting Document Image columns AC): SourceImagePath is the
+        -- submitted DCT-SD image path (the exact value sent to the SD Auto Conversion API as
+        -- SupportingDocuments[n].file); ReasonForFailing is set only for a document the API
+        -- never recognized (Status = Failed) - see Services/SystemMigrationService.cs and
+        -- Services/MigrationService.cs.
+        SourceImagePath      NVARCHAR(500)     NULL,
+        ReasonForFailing     NVARCHAR(500)     NULL,
+        -- Added 2026-11-12: per-document Target System Validation, distinct from
+        -- MigrationRecords.TargetSystemValidation (the Entry Record-level value, also reused as-is
+        -- for each sibling Title Record). Deliberately left unset by every code path today - the
+        -- external SD Auto Conversion API's documented response has no field for this at either
+        -- level; nothing populates it until that's confirmed with the API team.
+        TargetSystemValidation NVARCHAR(100)   NULL,
         CONSTRAINT PK_MigrationDocuments PRIMARY KEY (Id),
         CONSTRAINT FK_MigrationDocuments_01 FOREIGN KEY (MigrationRecordId) REFERENCES dbo.MigrationRecords (Id),
         CONSTRAINT FK_MigrationDocuments_02 FOREIGN KEY (CodeLookupId) REFERENCES dbo.CodeLookups (Id)
@@ -1595,6 +1665,10 @@ BEGIN
         EntryNumbersCsv NVARCHAR(MAX) NULL,
         TitleNumber NVARCHAR(50) NULL,
         TitleType INT NULL,
+        [Plan] NVARCHAR(50) NULL,
+        Block NVARCHAR(50) NULL,
+        Lot NVARCHAR(50) NULL,
+        TitleSequence NVARCHAR(50) NULL,
         DocumentCount INT NULL,
         ExtractionStatus INT NULL,
         ExtractionDateTime DATETIME2 NULL,
@@ -1632,6 +1706,10 @@ BEGIN
         EntryNumbersCsv NVARCHAR(MAX) NULL,
         TitleNumber NVARCHAR(50) NULL,
         TitleType INT NULL,
+        [Plan] NVARCHAR(50) NULL,
+        Block NVARCHAR(50) NULL,
+        Lot NVARCHAR(50) NULL,
+        TitleSequence NVARCHAR(50) NULL,
         DocumentCount INT NULL,
         ExtractionStatus INT NULL,
         ExtractionDateTime DATETIME2 NULL,
@@ -1657,8 +1735,8 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
-    SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.FetchRunId, i.RdCode, i.RdName, i.FolderPath, i.EntryNumbersCsv, i.TitleNumber, i.TitleType, i.DocumentCount, i.ExtractionStatus, i.ExtractionDateTime, i.DocumentsJson, i.EntryNumberRange FROM inserted i;
+    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, [Plan], Block, Lot, TitleSequence, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.FetchRunId, i.RdCode, i.RdName, i.FolderPath, i.EntryNumbersCsv, i.TitleNumber, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.DocumentCount, i.ExtractionStatus, i.ExtractionDateTime, i.DocumentsJson, i.EntryNumberRange FROM inserted i;
 END
 ');
 GO
@@ -1671,14 +1749,14 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
-    SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.FetchRunId, i.RdCode, i.RdName, i.FolderPath, i.EntryNumbersCsv, i.TitleNumber, i.TitleType, i.DocumentCount, i.ExtractionStatus, i.ExtractionDateTime, i.DocumentsJson, i.EntryNumberRange FROM inserted i;
+    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, [Plan], Block, Lot, TitleSequence, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.FetchRunId, i.RdCode, i.RdName, i.FolderPath, i.EntryNumbersCsv, i.TitleNumber, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.DocumentCount, i.ExtractionStatus, i.ExtractionDateTime, i.DocumentsJson, i.EntryNumberRange FROM inserted i;
 
-    INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, [Plan], Block, Lot, TitleSequence, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
     SELECT @UserId, @IPAddr, LEFT(i.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
-           d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange
+           d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange
     FROM inserted i JOIN deleted d ON i.Id = d.Id;
 END
 ');
@@ -1692,14 +1770,14 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
-    SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange FROM deleted d;
+    INSERT INTO dbo.OcrExtractionRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, [Plan], Block, Lot, TitleSequence, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange FROM deleted d;
 
-    INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
+    INSERT INTO dbo.OcrExtractionRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, FetchRunId, RdCode, RdName, FolderPath, EntryNumbersCsv, TitleNumber, TitleType, [Plan], Block, Lot, TitleSequence, DocumentCount, ExtractionStatus, ExtractionDateTime, DocumentsJson, EntryNumberRange)
     SELECT @UserId, @IPAddr, LEFT(d.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
-           d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange
+           d.Id, d.RequestNumber, d.FetchRunId, d.RdCode, d.RdName, d.FolderPath, d.EntryNumbersCsv, d.TitleNumber, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.DocumentCount, d.ExtractionStatus, d.ExtractionDateTime, d.DocumentsJson, d.EntryNumberRange
     FROM deleted d;
 END
 ');
@@ -1887,7 +1965,22 @@ BEGIN
         TitleSequence NVARCHAR(50) NULL,
         MigratedToRdName NVARCHAR(150) NULL,
         MigrationStatus NVARCHAR(50) NULL,
-        SdStatus NVARCHAR(50) NULL
+        SdStatus NVARCHAR(50) NULL,
+        MigrationType NVARCHAR(30) NULL,
+        ProcessedByUserId INT NULL,
+        ProcessedByUsername NVARCHAR(256) NULL,
+        ProcessingStatus NVARCHAR(20) NULL,
+        AttemptCount INT NULL,
+        ProcessingStartedAt DATETIME2 NULL,
+        ProcessingCompletedAt DATETIME2 NULL,
+        LastAttemptAt DATETIME2 NULL,
+        LastFailureReason NVARCHAR(500) NULL,
+        ApiResponseJson NVARCHAR(MAX) NULL,
+        ApiResponseAt DATETIME2 NULL,
+        TargetSystemValidation NVARCHAR(100) NULL,
+        TargetSystemActivationStatus NVARCHAR(20) NULL,
+        Document_Json NVARCHAR(MAX) NULL,
+        RangeEntryNumber NVARCHAR(MAX) NULL
     );
 END;
 GO
@@ -1926,7 +2019,22 @@ BEGIN
         TitleSequence NVARCHAR(50) NULL,
         MigratedToRdName NVARCHAR(150) NULL,
         MigrationStatus NVARCHAR(50) NULL,
-        SdStatus NVARCHAR(50) NULL
+        SdStatus NVARCHAR(50) NULL,
+        MigrationType NVARCHAR(30) NULL,
+        ProcessedByUserId INT NULL,
+        ProcessedByUsername NVARCHAR(256) NULL,
+        ProcessingStatus NVARCHAR(20) NULL,
+        AttemptCount INT NULL,
+        ProcessingStartedAt DATETIME2 NULL,
+        ProcessingCompletedAt DATETIME2 NULL,
+        LastAttemptAt DATETIME2 NULL,
+        LastFailureReason NVARCHAR(500) NULL,
+        ApiResponseJson NVARCHAR(MAX) NULL,
+        ApiResponseAt DATETIME2 NULL,
+        TargetSystemValidation NVARCHAR(100) NULL,
+        TargetSystemActivationStatus NVARCHAR(20) NULL,
+        Document_Json NVARCHAR(MAX) NULL,
+        RangeEntryNumber NVARCHAR(MAX) NULL
     );
 END;
 GO
@@ -1947,8 +2055,8 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
-    SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus FROM inserted i;
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
+    SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus, i.MigrationType, i.ProcessedByUserId, i.ProcessedByUsername, i.ProcessingStatus, i.AttemptCount, i.ProcessingStartedAt, i.ProcessingCompletedAt, i.LastAttemptAt, i.LastFailureReason, i.ApiResponseJson, i.ApiResponseAt, i.TargetSystemValidation, i.TargetSystemActivationStatus, i.Document_Json, i.RangeEntryNumber FROM inserted i;
 END
 ');
 GO
@@ -1961,14 +2069,14 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
-    SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus FROM inserted i;
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
+    SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus, i.MigrationType, i.ProcessedByUserId, i.ProcessedByUsername, i.ProcessingStatus, i.AttemptCount, i.ProcessingStartedAt, i.ProcessingCompletedAt, i.LastAttemptAt, i.LastFailureReason, i.ApiResponseJson, i.ApiResponseAt, i.TargetSystemValidation, i.TargetSystemActivationStatus, i.Document_Json, i.RangeEntryNumber FROM inserted i;
 
-    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
+    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
     SELECT @UserId, @IPAddr, LEFT(i.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
-           d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus
+           d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.Document_Json, d.RangeEntryNumber
     FROM inserted i JOIN deleted d ON i.Id = d.Id;
 END
 ');
@@ -1982,14 +2090,14 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
-    SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus FROM deleted d;
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
+    SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.Document_Json, d.RangeEntryNumber FROM deleted d;
 
-    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus)
+    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
     SELECT @UserId, @IPAddr, LEFT(d.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
-           d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus
+           d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.Document_Json, d.RangeEntryNumber
     FROM deleted d;
 END
 ');
@@ -2018,7 +2126,13 @@ BEGIN
         ExistingFileName NVARCHAR(MAX) NULL,
         PerformedByUserId INT NULL,
         PerformedByUsername NVARCHAR(MAX) NULL,
-        ActionDate DATETIME2 NULL
+        ActionDate DATETIME2 NULL,
+        DestinationPath NVARCHAR(500) NULL,
+        SizeBytes BIGINT NULL,
+        Sequence INT NULL,
+        SourceImagePath NVARCHAR(500) NULL,
+        ReasonForFailing NVARCHAR(500) NULL,
+        TargetSystemValidation NVARCHAR(100) NULL
     );
 END;
 GO
@@ -2051,7 +2165,13 @@ BEGIN
         ExistingFileName NVARCHAR(MAX) NULL,
         PerformedByUserId INT NULL,
         PerformedByUsername NVARCHAR(MAX) NULL,
-        ActionDate DATETIME2 NULL
+        ActionDate DATETIME2 NULL,
+        DestinationPath NVARCHAR(500) NULL,
+        SizeBytes BIGINT NULL,
+        Sequence INT NULL,
+        SourceImagePath NVARCHAR(500) NULL,
+        ReasonForFailing NVARCHAR(500) NULL,
+        TargetSystemValidation NVARCHAR(100) NULL
     );
 END;
 GO
@@ -2072,8 +2192,8 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
-    SELECT @UserId, @IPAddr, ''I'', i.Id, i.MigrationRecordId, i.CodeLookupId, i.DocumentName, i.FileName, i.Status, i.ExistingFileName, i.PerformedByUserId, i.PerformedByUsername, i.ActionDate FROM inserted i;
+    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate, DestinationPath, SizeBytes, Sequence, SourceImagePath, ReasonForFailing, TargetSystemValidation)
+    SELECT @UserId, @IPAddr, ''I'', i.Id, i.MigrationRecordId, i.CodeLookupId, i.DocumentName, i.FileName, i.Status, i.ExistingFileName, i.PerformedByUserId, i.PerformedByUsername, i.ActionDate, i.DestinationPath, i.SizeBytes, i.Sequence, i.SourceImagePath, i.ReasonForFailing, i.TargetSystemValidation FROM inserted i;
 END
 ');
 GO
@@ -2086,14 +2206,14 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
-    SELECT @UserId, @IPAddr, ''U'', i.Id, i.MigrationRecordId, i.CodeLookupId, i.DocumentName, i.FileName, i.Status, i.ExistingFileName, i.PerformedByUserId, i.PerformedByUsername, i.ActionDate FROM inserted i;
+    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate, DestinationPath, SizeBytes, Sequence, SourceImagePath, ReasonForFailing, TargetSystemValidation)
+    SELECT @UserId, @IPAddr, ''U'', i.Id, i.MigrationRecordId, i.CodeLookupId, i.DocumentName, i.FileName, i.Status, i.ExistingFileName, i.PerformedByUserId, i.PerformedByUsername, i.ActionDate, i.DestinationPath, i.SizeBytes, i.Sequence, i.SourceImagePath, i.ReasonForFailing, i.TargetSystemValidation FROM inserted i;
 
-    INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
+    INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate, DestinationPath, SizeBytes, Sequence, SourceImagePath, ReasonForFailing, TargetSystemValidation)
     SELECT @UserId, @IPAddr, LEFT(i.FileName, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
-           d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate
+           d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate, d.DestinationPath, d.SizeBytes, d.Sequence, d.SourceImagePath, d.ReasonForFailing, d.TargetSystemValidation
     FROM inserted i JOIN deleted d ON i.Id = d.Id;
 END
 ');
@@ -2107,14 +2227,14 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
-    SELECT @UserId, @IPAddr, ''D'', d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate FROM deleted d;
+    INSERT INTO dbo.MigrationDocuments_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate, DestinationPath, SizeBytes, Sequence, SourceImagePath, ReasonForFailing, TargetSystemValidation)
+    SELECT @UserId, @IPAddr, ''D'', d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate, d.DestinationPath, d.SizeBytes, d.Sequence, d.SourceImagePath, d.ReasonForFailing, d.TargetSystemValidation FROM deleted d;
 
-    INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate)
+    INSERT INTO dbo.MigrationDocuments_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, MigrationRecordId, CodeLookupId, DocumentName, FileName, Status, ExistingFileName, PerformedByUserId, PerformedByUsername, ActionDate, DestinationPath, SizeBytes, Sequence, SourceImagePath, ReasonForFailing, TargetSystemValidation)
     SELECT @UserId, @IPAddr, LEFT(d.FileName, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
-           d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate
+           d.Id, d.MigrationRecordId, d.CodeLookupId, d.DocumentName, d.FileName, d.Status, d.ExistingFileName, d.PerformedByUserId, d.PerformedByUsername, d.ActionDate, d.DestinationPath, d.SizeBytes, d.Sequence, d.SourceImagePath, d.ReasonForFailing, d.TargetSystemValidation
     FROM deleted d;
 END
 ');

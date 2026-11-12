@@ -1,5 +1,6 @@
 @using DCT_SD.Helpers
 @using DCT_SD.Models.Dtos.RdConfig
+@using DCT_SD.Models.Enums
 @model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.Migrations.MigrationListItemDto>
 @{
     var q = Context.Request.Query;
@@ -7,7 +8,9 @@
 }
 
 <div class="card p-4 mb-4">
-    <form data-list-page-form="migrations-results" data-list-page-page-url="@Url.Action("Index")" action="@Url.Action("Results")" method="get" class="filter-grid">
+    <form data-list-page-form="migrations-results" data-list-page-page-url="@Url.Action("Index")"
+          data-list-page-required="EntryNumbersCsv" data-list-page-required-message="Entry Number is required."
+          action="@Url.Action("Results")" method="get" class="filter-grid">
         <div>
             <label class="form-label field-label" for="RdCode">Registry of Deeds</label>
             <select class="form-select" id="RdCode" name="RdCode">
@@ -34,9 +37,15 @@
             <label class="form-label field-label" for="MigrationStatus">Migration Status</label>
             <select class="form-select" id="MigrationStatus" name="MigrationStatus">
                 <option value="">Select</option>
-                @foreach (var status in new[] { "MigratedToExisting", "MigratedAsNew" })
+                @{
+                    // The 5 consolidated values MigrationService.ConsolidatedMigrationStatus can
+                    // ever return - not the raw MigrationStatus enum, which no longer matches what
+                    // the list/details page actually display.
+                    var consolidatedStatuses = new[] { "Ready for Migration", "N/A", "Migrated", "Failed Migration", "Migrating" };
+                }
+                @foreach (var status in consolidatedStatuses)
                 {
-                    <option value="@status" selected="@(q["MigrationStatus"] == status)">@StatusDisplay.MigrationStatusToDisplay(status)</option>
+                    <option value="@status" selected="@(q["MigrationStatus"] == status)">@status</option>
                 }
             </select>
         </div>
@@ -60,3 +69,31 @@
         @await Html.PartialAsync("_Results", Model)
     </div>
 </div>
+
+<!-- Antiforgery token for the list page's own AJAX Reprocess call (migration-monitoring.js) -
+     kept outside #migrations-results so it survives list-page.js's AJAX swap of that container. -->
+<form id="migrationListAntiForgeryForm" class="d-none">@Html.AntiForgeryToken()</form>
+
+<div class="modal fade" id="migrationListReprocessModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title font-display">Reprocess Migration</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">Are you sure you want to reprocess the failed migration for this Entry Record? This action will retry the failed migration.</p>
+                <textarea class="form-control" id="migrationListReprocessRemarksText" rows="3" placeholder="Remarks"></textarea>
+                <p class="text-danger small mt-1 d-none" id="migrationListReprocessRemarksError">Remarks is required.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-navy" id="migrationListReprocessConfirmBtn" disabled>Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/migration-monitoring.js"></script>
+}

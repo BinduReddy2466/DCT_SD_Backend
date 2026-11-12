@@ -19,6 +19,10 @@ public class OcrExtractionRecordConfiguration : IEntityTypeConfiguration<OcrExtr
         builder.Property(r => r.EntryNumbersCsv).HasMaxLength(200);
         builder.Property(r => r.TitleNumber).HasMaxLength(50);
         builder.Property(r => r.TitleType).HasConversion<int?>();
+        builder.Property(r => r.Plan).HasMaxLength(50);
+        builder.Property(r => r.Block).HasMaxLength(50);
+        builder.Property(r => r.Lot).HasMaxLength(50);
+        builder.Property(r => r.TitleSequence).HasMaxLength(50);
         builder.Property(r => r.ExtractionStatus).HasConversion<int>().IsRequired();
 
         builder.HasIndex(r => r.RequestNumber).IsUnique();

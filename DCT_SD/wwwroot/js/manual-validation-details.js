@@ -108,7 +108,7 @@
           '</div>' +
           '<div class="modal-body">' +
           '<div class="table-responsive"><table class="table table-hover align-middle">' +
-          '<thead><tr><th>RD Code</th><th>Title Number</th><th>Title Type</th><th>Plan Number</th><th>Block Number</th><th>Lot Number</th><th>Title Sequence Number</th><th>Action</th></tr></thead>' +
+          '<thead><tr><th>RD Code</th><th>Title Number</th><th>Title Type</th><th>Plan/Block/Lot</th><th>Title Sequence Number</th><th>Action</th></tr></thead>' +
           '<tbody id="mvRtnCandidatesBody"></tbody>' +
           '</table></div>' +
           '</div>' +
@@ -117,7 +117,7 @@
         var tbody = document.getElementById('mvRtnCandidatesBody');
         candidates.forEach(function (c) {
           var row = document.createElement('tr');
-          [c.rdCode, c.title, c.titleType, c.plan, c.block, c.lot, c.sequence].forEach(function (value) {
+          [c.rdCode, c.title, c.titleType, c.pbl, c.sequence].forEach(function (value) {
             var td = document.createElement('td');
             td.textContent = value || '—';
             row.appendChild(td);
@@ -128,9 +128,8 @@
           selectBtn.className = 'btn btn-outline-secondary btn-sm';
           selectBtn.textContent = 'Select';
           selectBtn.addEventListener('click', function () {
-            onSelect(c.sequence);
-            rtnModal.hide();
-            toast('Title Sequence retrieved successfully.', 'success');
+            selectBtn.disabled = true;
+            onSelect(c.sequence, function () { selectBtn.disabled = false; });
           });
           actionTd.appendChild(selectBtn);
           row.appendChild(actionTd);
@@ -144,20 +143,44 @@
         var retrieveBtn = document.querySelector('[data-mv-retrieve-title-seq][data-title-record-index="' + i + '"]');
         if (!retrieveBtn) return;
 
+        var recordIdEl = document.getElementById('mvTitleRecordId_' + i);
         var titleEl = document.getElementById('mvTitle_' + i);
         var titleTypeEl = document.getElementById('mvTitleType_' + i);
-        var planEl = document.getElementById('mvPlan_' + i);
-        var blockEl = document.getElementById('mvBlock_' + i);
-        var lotEl = document.getElementById('mvLot_' + i);
         var seqEl = document.getElementById('mvTitleSeq_' + i);
+
+        // Persists a Title Sequence value to this Title Record row immediately (not just on the
+        // page's own Save) - used both by the single-match path below and by picking a candidate
+        // from the Repeating Title Number modal, since neither used to be written to the database
+        // until the user separately clicked Save.
+        var persistSequence = function (sequence, onFailure) {
+          var body = new URLSearchParams({ recordId: recordIdEl.value, sequence: sequence, __RequestVerificationToken: token });
+          fetch('/ManualValidation/SelectTitleSequence', { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) {
+              if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
+              return r.json();
+            })
+            .then(function (data) {
+              if (!data) return; // session expired - already redirected above
+              if (data.success) {
+                seqEl.value = sequence;
+                snapshot['mvTitleSeq_' + i] = sequence;
+                if (rtnModal) rtnModal.hide();
+                toast('Title Sequence retrieved successfully.', 'success');
+              } else {
+                toast(data.message || 'Could not save the Title Sequence. Please try again.', 'error');
+                if (onFailure) onFailure();
+              }
+            })
+            .catch(function () {
+              toast('Could not save the Title Sequence. Please try again.', 'error');
+              if (onFailure) onFailure();
+            });
+        };
 
         retrieveBtn.addEventListener('click', function () {
           var rdCode = fieldEls.mvRdCode.value.trim();
           var title = titleEl.value.trim();
           var titleType = titleTypeEl.value.trim();
-          var plan = planEl.value.trim();
-          var block = blockEl.value.trim();
-          var lot = lotEl.value.trim();
 
           if (!title || !titleType) {
             seqEl.value = '';
@@ -165,7 +188,7 @@
             return;
           }
 
-          var body = new URLSearchParams({ RdCode: rdCode, Title: title, TitleType: titleType, Plan: plan, Block: block, Lot: lot, __RequestVerificationToken: token });
+          var body = new URLSearchParams({ RecordId: recordIdEl.value, RdCode: rdCode, Title: title, TitleType: titleType, __RequestVerificationToken: token });
           fetch('/ManualValidation/RetrieveTitleSequence', { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
             .then(function (r) {
               if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
@@ -175,10 +198,13 @@
               if (!data) return; // session expired - already redirected above
               if (data.success) {
                 seqEl.value = data.sequence;
+                snapshot['mvTitleSeq_' + i] = data.sequence;
                 toast('Title Sequence retrieved successfully.', 'success');
               } else if (data.ambiguous) {
                 seqEl.value = '';
-                showRepeatingTitleNumberModal(data.candidates || [], function (sequence) { seqEl.value = sequence; });
+                showRepeatingTitleNumberModal(data.candidates || [], function (sequence, onFailure) {
+                  persistSequence(sequence, onFailure);
+                });
               } else {
                 seqEl.value = '';
                 toast(data.message || 'No Title Sequence record was found.');
@@ -806,8 +832,13 @@
         rfmModalEl.addEventListener('hidden.bs.modal', clearPendingRfmConfirm);
       }
 
+      function setRfmProcessing(isProcessing) {
+        readyForMigrationBtn.disabled = isProcessing;
+        rfmConfirmBtn.disabled = isProcessing;
+      }
+
       readyForMigrationBtn.addEventListener('click', function () {
-        if (!rfmModal || !rfmConfirmBtn) return;
+        if (!rfmModal || !rfmConfirmBtn || readyForMigrationBtn.disabled) return;
 
         document.getElementById('confirmDialogMessage').textContent = 'Are you sure you want to mark this Entry Record as Ready for Migration?';
         rfmConfirmBtn.className = 'btn btn-navy';
@@ -815,9 +846,11 @@
         if (rfmCancelBtn) rfmCancelBtn.textContent = 'Cancel';
         clearPendingRfmConfirm();
         rfmPendingHandler = function () {
+          if (rfmConfirmBtn.disabled) return; // already processing a previous click
+          setRfmProcessing(true);
           rfmModal.hide();
           doSave(true).then(function (saved) {
-            if (!saved) return;
+            if (!saved) { setRfmProcessing(false); return; }
             var body = new URLSearchParams({ __RequestVerificationToken: token });
             fetch('/ManualValidation/ReadyForMigration/' + recordId, { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
               .then(function (r) {
@@ -828,6 +861,7 @@
                 if (!data) return; // session expired - already redirected above
                 if (!data.success) {
                   toast(data.message || 'Unable to mark this record as Ready for Migration.', 'error');
+                  setRfmProcessing(false);
                   return;
                 }
                 toast(data.message, 'success');
@@ -835,6 +869,7 @@
               })
               .catch(function () {
                 toast('Unable to mark this record as Ready for Migration. Please try again.', 'error');
+                setRfmProcessing(false);
               });
           });
         };

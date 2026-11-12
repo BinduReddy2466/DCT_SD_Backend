@@ -724,7 +724,12 @@ a:hover { color: var(--bs-link-hover-color); }
   background: var(--color-surface-solid);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  /* overflow-x: auto (not hidden) - this class is combined with Bootstrap's .table-responsive
+     on the same element in every table view; "hidden" silently disabled that class's horizontal
+     scrolling entirely. overflow-y stays hidden so the table's top/bottom corners still clip to
+     the rounded border exactly as before. */
+  overflow-x: auto;
+  overflow-y: hidden;
   box-shadow: var(--shadow-sm);
 }
 .table-frame table {
@@ -769,6 +774,26 @@ a:hover { color: var(--bs-link-hover-color); }
   background: rgba(59, 130, 246, 0.14) !important;
 }
 .table-frame .text-muted { color: var(--color-muted) !important; }
+
+/* Migration Monitoring expandable rows (User Story 26, AC1) - the nested panel row sits
+   directly under its own Entry row, tinted/sunken to visually subordinate it, with its content
+   indented from the table's left edge. */
+.migration-expand-toggle { color: var(--color-muted); line-height: 1; }
+.migration-expand-arrow { display: inline-block; transition: transform var(--transition-fast); }
+.migration-expand-toggle[aria-expanded="true"] .migration-expand-arrow { transform: rotate(90deg); }
+.migration-expand-panel {
+  background: var(--color-surface-sunken);
+  padding-left: 2.5rem !important;
+}
+.migration-expand-panel h6 {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.migration-expand-panel table { font-size: 12px; background: transparent; }
+tr.migration-expand-row td { border-top: 0; }
 
 /* Loading state - list-page.js sets aria-busy="true" on the results container while an
    AJAX filter/pagination fetch is in flight; this dims the stale content underneath and shows a

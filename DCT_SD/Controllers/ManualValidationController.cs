@@ -32,7 +32,7 @@ public class ManualValidationController : Controller
         ViewData["ActiveMenu"] = MenuKeys.ManualValidation;
         ViewData["RegistryOffices"] = await _registryOfficeService.GetAllActiveAsync(cancellationToken);
 
-        var result = await _manualValidationService.SearchAsync(request, cancellationToken);
+        var result = await _manualValidationService.SearchAsync(request, excludeReadyForMigration: true, cancellationToken: cancellationToken);
         var hasAppliedFilters = HasAppliedFilters(request);
         return View(new ManualValidationResultsViewModel { Result = result, HasAppliedFilters = hasAppliedFilters });
     }
@@ -40,7 +40,7 @@ public class ManualValidationController : Controller
     [HttpGet]
     public async Task<IActionResult> Results([FromQuery] ManualValidationSearchRequestDto request, CancellationToken cancellationToken)
     {
-        var result = await _manualValidationService.SearchAsync(request, cancellationToken);
+        var result = await _manualValidationService.SearchAsync(request, excludeReadyForMigration: true, cancellationToken: cancellationToken);
         var hasAppliedFilters = HasAppliedFilters(request);
         return PartialView("_Results", new ManualValidationResultsViewModel { Result = result, HasAppliedFilters = hasAppliedFilters });
     }
@@ -167,8 +167,9 @@ public class ManualValidationController : Controller
         }
     }
 
-    // Replaces the old "Migrate" action - only flags the record Status as Ready for Migration and
-    // records it in Action History; never starts an actual migration.
+    // Replaces the old "Migrate" action - flags the record Status as Ready for Migration, records
+    // it in Action History, and creates its MigrationRecords row so it shows on Migration
+    // Monitoring; never starts an actual migration.
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ReadyForMigration(int id, CancellationToken cancellationToken)
@@ -178,7 +179,7 @@ public class ManualValidationController : Controller
             await _manualValidationService.MarkReadyForMigrationAsync(id, cancellationToken);
             return Json(new { success = true, message = "Record marked as Ready for Migration." });
         }
-        catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException)
+        catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException or ConflictException)
         {
             return Json(new { success = false, message = ex.Message });
         }
@@ -199,6 +200,21 @@ public class ManualValidationController : Controller
             return Json(new { success = true, sequence = result.Sequence });
         }
         catch (NotFoundException ex)
+        {
+            return Json(new { success = false, message = ex.Message });
+        }
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SelectTitleSequence(int recordId, string sequence, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _manualValidationService.SelectTitleSequenceAsync(recordId, sequence, cancellationToken);
+            return Json(new { success = true });
+        }
+        catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException or ConflictException)
         {
             return Json(new { success = false, message = ex.Message });
         }

@@ -2,42 +2,84 @@
 @model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.Migrations.MigrationListItemDto>
 
 <div class="table-responsive table-frame">
-    <table class="table table-hover align-middle">
+    <table class="table table-hover align-middle" id="migrationsResultsTable">
         <thead>
             <tr>
-                <th>Request ID</th>
+                <th style="width: 2.5rem;"></th>
                 <th>Migration Date</th>
+                <th>RD Code</th>
                 <th>RD</th>
                 <th class="cell-wrap">Entry No.</th>
-                <th>Title No.</th>
-                <th>Title Type</th>
+                <th>Range Entry No.</th>
+                <th>Target System Validation</th>
                 <th>Migration Status</th>
+                <th>Reason for Failing</th>
                 <th>SD Status</th>
-                <th>Migrated To</th>
+                <th>Target System Activation Status</th>
+                <th>Migration Type</th>
+                <th>Processed By</th>
                 <th>Action</th>
             </tr>
         </thead>
         <tbody>
             @if (Model.Items.Count == 0)
             {
-                <tr><td colspan="10" class="text-center text-muted py-4">No records found.</td></tr>
+                <tr><td colspan="14" class="text-center text-muted py-4">No records found.</td></tr>
             }
             else
             {
                 @foreach (var item in Model.Items)
                 {
-                    <tr>
-                        <td><span class="chip-mono">@item.RequestNumber</span></td>
-                        <td>@item.MigrationDate.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
-                        <td>@item.RdName</td>
-                        <td class="cell-wrap">@(item.EntryNumbersCsv ?? "—")</td>
-                        <td class="font-monospace small">@(item.Title ?? "—")</td>
-                        <td>@(item.TitleType ?? "—")</td>
-                        <td><status-badge status="@StatusDisplay.MigrationStatusToDisplay(item.MigrationStatus)"></status-badge></td>
-                        <td><status-badge status="@StatusDisplay.SdStatusToDisplay(item.SdStatus)"></status-badge></td>
-                        <td>@item.MigratedTo</td>
+                    var isSystemMigration = item.MigrationType == "SystemMigration";
+                    // item.MigrationStatus is already the final display text (MigrationService.DisplayMigrationStatus).
+                    var migrationStatusDisplay = item.MigrationStatus;
+                    <tr data-entry-row="@item.Id">
                         <td>
-                            <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "Migrations", new { id = item.Id })">View</a>
+                            <button type="button" class="btn btn-sm btn-link p-0 migration-expand-toggle" data-expand-toggle="@item.Id" aria-expanded="false" aria-label="Expand row">
+                                <span class="migration-expand-arrow">&#9656;</span>
+                            </button>
+                        </td>
+                        <td>@item.MigrationDate.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
+                        <td>@item.RdCode</td>
+                        <td>@item.RdName</td>
+                        <td class="cell-wrap" title="@(item.EntryNumbersCsv ?? "—")">@(item.EntryNumbersCsv is null ? "—" : TextTruncate.ForDisplay(item.EntryNumbersCsv))</td>
+                        <td>@(item.RangeEntryNumber ?? "N/A")</td>
+                        <td>@(item.TargetSystemValidation ?? "—")</td>
+                        <td>
+                            @if (string.IsNullOrEmpty(migrationStatusDisplay))
+                            {
+                                @:—
+                            }
+                            else
+                            {
+                                <status-badge status="@migrationStatusDisplay"></status-badge>
+                            }
+                        </td>
+                        <td class="cell-wrap">@(item.ReasonForFailing ?? "—")</td>
+                        <td><status-badge status="@StatusDisplay.SdStatusToDisplay(item.SdStatus)"></status-badge></td>
+                        <td>@(item.TargetSystemActivationStatus ?? "—")</td>
+                        <td>@(isSystemMigration ? "System Migration" : item.MigrationType == "ManualValidation" ? "Manual Validation" : "—")</td>
+                        <td>@(item.ProcessedBy ?? "—")</td>
+                        <td>
+                            @if (!item.CanView)
+                            {
+                                <a class="btn btn-outline-secondary btn-sm disabled" aria-disabled="true" tabindex="-1" href="#">View</a>
+                            }
+                            else
+                            {
+                                <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "Migrations", new { id = item.Id })">View</a>
+                            }
+                            @if (migrationStatusDisplay == "Failed Migration")
+                            {
+                                <button type="button" class="btn btn-outline-secondary btn-sm ms-1" data-list-reprocess-btn data-entry-id="@item.Id">Reprocess</button>
+                            }
+                        </td>
+                    </tr>
+                    <tr class="migration-expand-row d-none" data-expand-panel-for="@item.Id">
+                        <td colspan="14" class="p-0 border-0">
+                            <div class="migration-expand-panel p-3" data-expand-panel-body data-expand-url="@Url.Action("Expand", new { id = item.Id })">
+                                <div class="text-muted small">Loading…</div>
+                            </div>
                         </td>
                     </tr>
                 }
@@ -46,4 +88,7 @@
     </table>
 </div>
 
-@await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })
+@if (Model.Items.Count > 0)
+{
+    @await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })
+}

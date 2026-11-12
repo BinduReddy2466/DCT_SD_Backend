@@ -17,6 +17,10 @@ public class MigrationDocumentConfiguration : IEntityTypeConfiguration<Migration
         builder.Property(d => d.Status).HasConversion<int>().IsRequired();
         builder.Property(d => d.ExistingFileName).HasMaxLength(260);
         builder.Property(d => d.PerformedByUsername).HasMaxLength(256);
+        builder.Property(d => d.DestinationPath).HasMaxLength(500);
+        builder.Property(d => d.SourceImagePath).HasMaxLength(500);
+        builder.Property(d => d.ReasonForFailing).HasMaxLength(500);
+        builder.Property(d => d.TargetSystemValidation).HasMaxLength(100);
 
         builder.HasIndex(d => d.MigrationRecordId);
         builder.HasIndex(d => new { d.MigrationRecordId, d.FileName }).IsUnique();

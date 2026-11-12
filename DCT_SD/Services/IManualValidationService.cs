@@ -5,7 +5,11 @@ namespace DCT_SD.Services;
 
 public interface IManualValidationService
 {
-    Task<PagedResult<ManualValidationListItemDto>> SearchAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default);
+    // excludeReadyForMigration: defaults to false so every existing caller (Reports included)
+    // keeps seeing the full Manual Validation history exactly as before. The Manual Validation
+    // list page itself passes true, since a record marked Ready for Migration is now queued for
+    // migration rather than pending manual validation - MarkReadyForMigrationAsync below.
+    Task<PagedResult<ManualValidationListItemDto>> SearchAsync(ManualValidationSearchRequestDto request, bool excludeReadyForMigration = false, CancellationToken cancellationToken = default);
 
     /// Same filters/grouping as SearchAsync, but returns every matching (grouped) row in one call
     /// instead of one SearchAsync-sized page at a time - for Reports' full-table Excel export,
@@ -13,20 +17,28 @@ public interface IManualValidationService
     /// SearchAsync redoes the full filter+group pass on every call regardless of page size,
     /// re-loaded and re-grouped the entire matching set once per 100-row page (O(n^2) for n
     /// matching rows). This method does that same load+group pass exactly once.
-    Task<List<ManualValidationListItemDto>> SearchAllAsync(ManualValidationSearchRequestDto request, CancellationToken cancellationToken = default);
+    Task<List<ManualValidationListItemDto>> SearchAllAsync(ManualValidationSearchRequestDto request, bool excludeReadyForMigration = false, CancellationToken cancellationToken = default);
     Task<PagedResult<ManualValidationRemarkDto>> GetRemarksHistoryAsync(int id, int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<ManualValidationDetailDto> OpenForEditAsync(int id, CancellationToken cancellationToken = default);
     Task<ManualValidationDetailDto> SaveAsync(int id, SaveManualValidationRequestDto request, CancellationToken cancellationToken = default);
     Task CloseAsync(int id, string remarks, CancellationToken cancellationToken = default);
     Task ReleaseLocksForUserAsync(int userId, CancellationToken cancellationToken = default);
 
-    // Replaces the old "Migrate" action: only marks the record Status as ReadyForMigration and
-    // records it in Action History - it never sets MigratedAt itself and never talks to
-    // MigrationRecords/Migration Monitoring, which stay entirely unaffected. The record remains
-    // fully visible/editable in Manual Validation afterward; the actual migration mechanism
-    // (external to this app) is expected to pick up ReadyForMigration records on its own.
+    // Replaces the old "Migrate" action: marks the record Status as ReadyForMigration, records it
+    // in Action History, and creates its one MigrationRecords row (MigrationType=ManualValidation)
+    // so it becomes visible on Migration Monitoring. Never sets MigratedAt itself (that's reserved
+    // for when a real migration outcome exists) and only ever touches the single selected record -
+    // sibling Title Records and Supporting Documents are left untouched. The actual migration
+    // mechanism (external to this app) is expected to update this same MigrationRecords row with
+    // the real outcome afterward.
     Task MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default);
     Task<TitleSequenceDto> RetrieveTitleSequenceAsync(RetrieveTitleSequenceRequestDto request, CancellationToken cancellationToken = default);
+
+    // Persists a Title Sequence value the user picked from the "Repeating Title Number" modal
+    // (the single-match path inside RetrieveTitleSequenceAsync persists through the same
+    // mechanism internally) - recordId identifies the specific Title Record row, never guessed
+    // by position.
+    Task SelectTitleSequenceAsync(int recordId, string sequence, CancellationToken cancellationToken = default);
 
     /// Looks up the imagePath stored in DocumentsJson for the document at the given 1-based
     /// position (the same ordering/position used by ManualValidationDocumentDto.Id from

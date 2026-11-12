@@ -79,7 +79,7 @@
                         <tr data-title-record-row data-title-record-index="@i">
                             <td class="small text-muted">@(i + 1)</td>
                             <td class="mb-3 @(trMissing.Contains("title") ? "missing-field" : "")">
-                                <input type="hidden" name="TitleRecords[@i].RecordId" value="@titleRecord.RecordId" />
+                                <input type="hidden" id="mvTitleRecordId_@i" name="TitleRecords[@i].RecordId" value="@titleRecord.RecordId" />
                                 <input type="text" class="form-control form-control-sm" id="mvTitle_@i" name="TitleRecords[@i].Title" value="@titleRecord.Title" aria-label="Title Number" />
                             </td>
                             <td class="mb-3 @(trMissing.Contains("titleType") ? "missing-field" : "")">
@@ -168,7 +168,7 @@
                 }
                 else
                 {
-                    <div class="table-responsive table-frame flex-fill" style="min-height: 0; overflow-y: auto;">
+                    <div class="table-responsive table-frame flex-fill" style="min-height: 0; min-width: 0; overflow-y: auto;">
                         <table class="table table-hover align-middle mb-0" style="table-layout: fixed;">
                             <thead>
                                 <tr>

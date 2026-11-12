@@ -83,6 +83,26 @@ public static class ServiceCollectionExtensions
             ConnectTimeout = TimeSpan.FromSeconds(15),
         });
 
+        // The second external HTTP dependency in this app - PHILARIS-RD's SD Auto Conversion
+        // service (multipart/form-data, X-API-Key header auth). Base URL is config
+        // (SDAutoConversion:BaseUrl), never hardcoded. The API key lives only in user secrets /
+        // the SDAutoConversion__ApiKey environment variable - never committed, same convention as
+        // RdFetchApi's credentials and the DB encryption key above.
+        var sdAutoConversionBaseUrl = configuration["SDAutoConversion:BaseUrl"]
+            ?? throw new InvalidOperationException("SDAutoConversion:BaseUrl is not configured.");
+        var sdAutoConversionApiKey = configuration["SDAutoConversion:ApiKey"]
+            ?? throw new InvalidOperationException("SDAutoConversion:ApiKey is missing. Set it via the SDAutoConversion__ApiKey environment variable or user secrets.");
+
+        services.AddHttpClient<ISdAutoConversionClient, SdAutoConversionClient>(client =>
+        {
+            client.BaseAddress = new Uri(sdAutoConversionBaseUrl);
+            client.Timeout = TimeSpan.FromMinutes(5); // multipart uploads of several supporting-document images - allow more time than the JSON-only RdFetchApi client
+            client.DefaultRequestHeaders.Add("X-API-Key", sdAutoConversionApiKey);
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+        });
+
         services.AddSingleton<IAuthorizationHandler, MenuAuthorizationHandler>();
         services.AddAuthorization(options =>
         {
