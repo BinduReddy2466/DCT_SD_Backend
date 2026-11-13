@@ -1,5 +1,7 @@
 using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DCT_SD.Models.Dtos.SdAutoConversion;
 
 namespace DCT_SD.Services;
@@ -118,17 +120,22 @@ public class SdAutoConversionClient : ISdAutoConversionClient
         }
     }
 
-    // GET with a multipart/form-data body - unusual, but matches the documented contract exactly
-    // (HttpClient/SocketsHttpHandler have no issue sending a body on GET; it's just built via
-    // HttpRequestMessage rather than the GetAsync convenience method, which has none).
+    // GET with a JSON body - unusual, but matches the client's own API documentation (header
+    // table: Content-Type is multipart/form-data only for a call that actually uploads a file,
+    // such as CreateSDConversion - every other endpoint, including this one, uses
+    // application/json). Confirmed 2026-11-13: the previous multipart/form-data version of this
+    // call got HTTP 415 Unsupported Media Type from the real service, consistent with that table.
+    // Field names (RDCode/TitleType/TitleNo) are unchanged from the previous multipart version -
+    // only the wire format changed, not the field names themselves.
     public async Task<SdTitleSequenceResult> GetTitleSequenceAsync(SdTitleSequenceRequest request, CancellationToken cancellationToken = default)
     {
-        using var content = new MultipartFormDataContent
+        var payload = new JsonObject
         {
-            { new StringContent(request.RdCode), "RDCode" },
-            { new StringContent(request.TitleType), "TitleType" },
-            { new StringContent(request.TitleNo), "TitleNo" },
+            ["RDCode"] = request.RdCode,
+            ["TitleType"] = request.TitleType,
+            ["TitleNo"] = request.TitleNo,
         };
+        using var content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
 
         using var requestMessage = new HttpRequestMessage(HttpMethod.Get, GetTitleSequenceRequestUri) { Content = content };
 
