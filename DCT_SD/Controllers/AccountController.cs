@@ -83,11 +83,19 @@ public class AccountController : Controller
             var user = await _authService.LoginAsync(model.Username, model.Password, cancellationToken);
             var allowedMenus = await _authService.ResolveAllowedMenusAsync(user, cancellationToken);
 
-            var (accessToken, accessExpiresAt) = _tokenService.CreateAccessToken(user.Id, user.Username, user.RoleName, allowedMenus);
+            var (accessToken, accessExpiresAt) = _tokenService.CreateAccessToken(user.Id, user.Username, user.RoleName, allowedMenus, user.MustChangePassword);
             var (refreshToken, refreshExpiresAt) = await _authService.IssueRefreshTokenAsync(user.Id, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
 
             AuthCookieHelper.SetAccessTokenCookie(Response, accessToken, accessExpiresAt);
             AuthCookieHelper.SetRefreshTokenCookie(Response, refreshToken, refreshExpiresAt);
+
+            // Access to the rest of the system is restricted until this is done - the original
+            // ReturnUrl is intentionally dropped here; the user lands back on it (or Home) the
+            // first time they navigate anywhere after completing Change Password instead.
+            if (user.MustChangePassword)
+            {
+                return RedirectToAction("ChangePassword");
+            }
 
             if (!string.IsNullOrEmpty(model.ReturnUrl) && Url.IsLocalUrl(model.ReturnUrl))
             {
@@ -136,7 +144,7 @@ public class AccountController : Controller
             var rotated = await _authService.RotateRefreshTokenAsync(
                 refreshToken, HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
             var (newAccessToken, newAccessExpiresAt) = _tokenService.CreateAccessToken(
-                rotated.User.Id, rotated.User.Username, rotated.User.RoleName, rotated.AllowedMenus);
+                rotated.User.Id, rotated.User.Username, rotated.User.RoleName, rotated.AllowedMenus, rotated.User.MustChangePassword);
 
             AuthCookieHelper.SetAccessTokenCookie(Response, newAccessToken, newAccessExpiresAt);
             AuthCookieHelper.SetRefreshTokenCookie(Response, rotated.NewRawToken, rotated.NewExpiresAtUtc);
@@ -274,8 +282,8 @@ public class AccountController : Controller
                 "Password must be between 8 to 32 characters long;\n" +
                 "Password must contain at least one uppercase letter;\n" +
                 "Password must contain at least one lowercase letter;\n" +
-                "Password must contain at least one number;\n" +
-                "Password must contain at least one special character (!,@#$%^&*_-+=).");
+                "Password must contain at least one number; and\n" +
+                "Password must contain at least one of the following special characters: (!,@#$%^&*_-+=)");
         }
 
         if (!ModelState.IsValid)
@@ -283,9 +291,71 @@ public class AccountController : Controller
             return View(model);
         }
 
-        await _userService.ResetPasswordAsync(validation.UserId!.Value, model.NewPassword, cancellationToken);
+        await _userService.ResetPasswordAsync(validation.UserId!.Value, model.NewPassword, requireChangeOnNextLogin: false, cancellationToken);
 
-        TempData["ToastMessage"] = "Your password has been reset. Please sign in with your new password.";
+        TempData["ToastMessage"] = "Your password has been successfully reset. You can now log in with your new password.";
+        TempData["ToastVariant"] = "success";
+        return RedirectToAction("Login");
+    }
+
+    // No [AllowAnonymous] - the fallback policy (ServiceCollectionExtensions) already requires
+    // an authenticated user here, which is exactly right: this page is reached mid-session
+    // (right after Login, or redirected back to by the MustChangePassword gate in Program.cs),
+    // never by an anonymous visitor with just a token like ResetPassword above.
+    [HttpGet]
+    public IActionResult ChangePassword()
+    {
+        return View(new ChangePasswordViewModel { Username = _currentUserService.Username ?? string.Empty });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ChangePassword(ChangePasswordViewModel model, CancellationToken cancellationToken)
+    {
+        model.Username = _currentUserService.Username ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(model.OldPassword) || string.IsNullOrWhiteSpace(model.NewPassword) || string.IsNullOrWhiteSpace(model.ConfirmPassword))
+        {
+            ModelState.AddModelError(string.Empty, "All fields are required.");
+        }
+        else if (model.NewPassword != model.ConfirmPassword)
+        {
+            ModelState.AddModelError(nameof(model.ConfirmPassword), "The new password and confirm password do not match.");
+        }
+        else if (!UserValidation.IsValidPassword(model.NewPassword))
+        {
+            ModelState.AddModelError(nameof(model.NewPassword),
+                "The password you entered does not meet the minimum security requirements described below:\n" +
+                "Password must be between 8 to 32 characters long;\n" +
+                "Password must contain at least one uppercase letter;\n" +
+                "Password must contain at least one lowercase letter;\n" +
+                "Password must contain at least one number; and\n" +
+                "Password must contain at least one of the following special characters: (!,@#$%^&*_-+=)");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
+
+        var userId = _currentUserService.UserId!.Value;
+
+        try
+        {
+            await _userService.ChangePasswordAsync(userId, model.OldPassword, model.NewPassword, cancellationToken);
+        }
+        catch (BusinessValidationException ex)
+        {
+            ModelState.AddModelError(string.Empty, ex.Message);
+            return View(model);
+        }
+
+        // The password itself is already changed at this point - log the session out rather
+        // than carrying it forward, since the acceptance criteria call for landing back on the
+        // Login page, not continuing straight into the app.
+        AuthCookieHelper.ClearAuthCookies(Response);
+
+        TempData["ToastMessage"] = "Your password has been successfully changed.";
         TempData["ToastVariant"] = "success";
         return RedirectToAction("Login");
     }

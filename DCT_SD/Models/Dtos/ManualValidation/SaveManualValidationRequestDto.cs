@@ -19,11 +19,4 @@ public class SaveManualValidationRequestDto
     // the same synthesized 1-based position as ManualValidationDocumentDto.Id (a position in the
     // group's merged/de-duplicated Supporting Documents list, not any single row's own list).
     public string? DocumentChangesJson { get; set; }
-
-    // Zero or more Duplicate checkbox toggles (check or uncheck), submitted only as part of
-    // Save - same deferred-until-Save convention as DocumentChangesJson above. JSON-serialized
-    // client-side as an array of {documentId, renamedFileName, isDuplicate}; only entries the
-    // user actually toggled this session are included, so a document nobody touched is never
-    // resubmitted/overwritten.
-    public string? DocumentDuplicateFlagsJson { get; set; }
 }

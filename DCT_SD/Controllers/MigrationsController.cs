@@ -281,6 +281,13 @@ public class MigrationsController : Controller
         try
         {
             var detail = await _migrationService.SaveCorrectionsAsync(id, model, cancellationToken);
+            // Same formula as Details.cshtml's own canInitiateMigration - mutually exclusive with
+            // CanMarkReadyForMigration. Returned here so the client can show the "Initiate
+            // Migration" button immediately after a Save resolves the RD Code/Others corrections,
+            // without a full page reload - that button was previously only ever rendered at
+            // initial page load (@if canInitiateMigration), so a Save that flips
+            // CanMarkReadyForMigration from true to false left neither button visible.
+            var canInitiateMigration = (detail.ProcessingStatus is null or "RetryPending") && !detail.CanMarkReadyForMigration;
             return Json(new
             {
                 success = true,
@@ -289,6 +296,7 @@ public class MigrationsController : Controller
                 rdName = detail.RdName,
                 isTargetRdNotIdentified = detail.IsTargetRdNotIdentified,
                 canMarkReadyForMigration = detail.CanMarkReadyForMigration,
+                canInitiateMigration,
                 documents = detail.Documents,
             });
         }

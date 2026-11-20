@@ -1,10 +1,14 @@
 namespace DCT_SD.Models.Dtos.Dashboard;
 
 // One statistical row for one RD + Record Type ("Folder" or "Images") on the Dashboard page.
-// A null value renders as "N/A" (the statistic doesn't apply to this Record Type); WIP,
-// FailedMigration and, on Images rows, ConfirmedDuplicate are 0 rather than null - see
-// DashboardService for why (no existing data source for those, per explicit product decision
-// to show 0 instead of inventing a status or schema change).
+// A null value renders as "N/A" (the statistic doesn't apply to this Record Type).
+//
+// Activated is always 0 (Folder row) / null (Images row, N/A): MigrationRecord
+// .TargetSystemActivationStatus exists on the entity but is never written anywhere in this
+// codebase (same external-API limitation as MigrationRecord.TargetSystemValidation elsewhere in
+// this app) - there is no real "activated in PHILARIS-RD" signal to count yet, so this stays 0
+// by the same explicit product decision already covering WIP/FailedMigration/ConfirmedDuplicate
+// below, rather than inventing a status or a schema change.
 public class DashboardRowDto
 {
     public string RdCode { get; set; } = string.Empty;
@@ -23,5 +27,6 @@ public class DashboardRowDto
     public int? ConfirmedDuplicate { get; set; }
     public int? Inserted { get; set; }
     public int? NotApplicableOthers { get; set; }
+    public int? Activated { get; set; }
     public int Total { get; set; }
 }

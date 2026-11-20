@@ -51,7 +51,7 @@
                     @await Html.PartialAsync("_FieldInfoTooltip", new FieldInfoTooltipViewModel { Title = "Username Requirements", Items = DCT_SD.Helpers.UserValidation.UsernameRequirements })
                 </div>
                 <input asp-for="Username" class="form-control mt-2" placeholder="user@example.com" readonly="@Model.IsEditing" autocomplete="username" />
-                <span asp-validation-for="Username" class="text-danger small"></span>
+                <span asp-validation-for="Username" class="text-danger small" style="white-space: pre-line;"></span>
             </div>
 
             <div class="col-sm-6">

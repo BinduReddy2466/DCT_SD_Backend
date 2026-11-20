@@ -22,4 +22,10 @@ public class User : AuditableEntity
     public DateTime? LastLoginAt { get; set; }
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAt { get; set; }
+
+    // True for a brand-new account (admin-set initial password) or one just reactivated with a
+    // system-generated temporary password - cleared the moment the user successfully completes
+    // the Change Password page. Checked on every request (Program.cs) to keep the whole app
+    // locked to that one page until it's cleared.
+    public bool MustChangePassword { get; set; }
 }

@@ -26,6 +26,12 @@
 
     var isAuthenticated = User.Identity?.IsAuthenticated == true;
 
+    // The forced "must change password" page sets this so a user who is technically
+    // authenticated (but blocked from everything else by the MustChangePassword gate in
+    // Program.cs) doesn't see a sidebar full of menus they can't actually navigate to - every
+    // link would just bounce them straight back here.
+    var showSidebarChrome = isAuthenticated && ViewData["HideAppChrome"] is not true;
+
     var displayName = User.Identity?.Name ?? string.Empty;
     var initials = "?";
     if (isAuthenticated && CurrentUser.UserId.HasValue)
@@ -71,7 +77,7 @@
     var serverUtcOffsetMinutes = (int)TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow).TotalMinutes;
 }
 <body data-server-utc-offset-minutes="@serverUtcOffsetMinutes">
-    @if (isAuthenticated)
+    @if (showSidebarChrome)
     {
         <div class="d-flex" id="appShell">
             <nav class="app-sidebar d-flex flex-column" id="appSidebar">
@@ -161,6 +167,11 @@
         @RenderBody()
     }
 
+    <!-- Unconditional (not gated on isAuthenticated) - a TempData toast can land here right
+         after a redirect to an anonymous page too (e.g. Change/Reset Password -> Login), and
+         toast.js's showToast() silently no-ops if this container isn't present. -->
+    <div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;"></div>
+
     @if (isAuthenticated)
     {
         <!-- Generic AJAX-loaded modal: modal-loader.js fetches a PartialView into #ajaxModalContent -->
@@ -182,8 +193,6 @@
                 </div>
             </div>
         </div>
-
-        <div id="toastContainer" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1080;"></div>
 
         <!-- "Assign Tab" menu picker, launched from inside the AJAX-loaded User form -->
         <div class="modal fade" id="assignTabModal" tabindex="-1" aria-hidden="true">

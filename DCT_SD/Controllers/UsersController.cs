@@ -14,8 +14,6 @@ namespace DCT_SD.Controllers;
 [Authorize(Policy = $"Menu:{MenuKeys.UserManagement}")]
 public class UsersController : Controller
 {
-    private static readonly HashSet<string> NonSubAdminRoles = new() { "Encoder", "LARES QA", "LRA QA" };
-
     private readonly IUserService _userService;
     private readonly IRoleService _roleService;
     private readonly IMenuService _menuService;
@@ -138,15 +136,15 @@ public class UsersController : Controller
     {
         var user = await _userService.GetByIdAsync(id, cancellationToken);
 
-        // The Edit button is hidden entirely for Administrator rows - this guards the direct
-        // URL too (e.g. someone navigating straight to /Users/Edit/{id}).
-        if (user.Role == RoleNames.Administrator)
+        // A Sub-Admin can never edit an Administrator or a Sub-Admin account - another one's,
+        // or their own. This guards the direct URL too (e.g. someone navigating straight to
+        // /Users/Edit/{id}). An Administrator, however, CAN edit another Administrator account
+        // (or their own) - just never its Role, which is locked client- and server-side below.
+        if (CurrentRole == RoleNames.SubAdmin && user.Role == RoleNames.Administrator)
         {
-            return StatusCode(403, "Administrator accounts cannot be edited through User Management.");
+            return StatusCode(403, "A Sub-Admin cannot edit an Administrator account.");
         }
 
-        // Likewise, the Edit button is hidden for a Sub-Admin viewer looking at any Sub-Admin
-        // row - another one's, or their own.
         if (CurrentRole == RoleNames.SubAdmin && user.Role == RoleNames.SubAdmin)
         {
             return StatusCode(403, "A Sub-Admin cannot edit a Sub-Admin account.");
@@ -209,9 +207,22 @@ public class UsersController : Controller
             return PartialView("_Form", model);
         }
 
+        // Reactivating a Locked/Deactivated account hands out a brand new, system-generated
+        // password - the admin never sees or types it, it only ever travels inside the email
+        // below - rather than silently leaving whatever password the account had before a
+        // human lost access to it.
+        string? temporaryPassword = null;
+        var isReactivation = updatedUser.Status == "Active"
+            && (previousStatus == "Locked" || previousStatus == "Deactivated");
+        if (isReactivation)
+        {
+            temporaryPassword = UserValidation.GenerateTemporaryPassword();
+            await _userService.ResetPasswordAsync(id, temporaryPassword, requireChangeOnNextLogin: true, cancellationToken);
+        }
+
         // The update already succeeded at this point - same isolation as the registration email,
         // a notification failure must never turn a successful update into a failure response.
-        await SendStatusChangeEmailAsync(updatedUser, previousStatus, cancellationToken);
+        await SendStatusChangeEmailAsync(updatedUser, previousStatus, temporaryPassword, cancellationToken);
 
         return Json(new { success = true, message = "Account successfully updated." });
     }
@@ -250,7 +261,11 @@ public class UsersController : Controller
         else if (!UserValidation.IsValidUsername(model.Username.Trim()))
         {
             ModelState.AddModelError(nameof(model.Username),
-                "The username you entered is invalid. It must be a valid email using only letters, numbers, periods (.) and underscores (_), and cannot start or end with a special character.");
+                "The username you entered is invalid. Please ensure it meets the following guidelines:\n" +
+                "Contains only letters, numbers, and the following special characters:\n" +
+                "   Period (.)\n" +
+                "   Underscore (_)\n" +
+                "Does not start or end with a special character (e.g., -username@domain.com or username.@domain.com).");
         }
 
         if (string.IsNullOrWhiteSpace(model.Password))
@@ -264,8 +279,8 @@ public class UsersController : Controller
                 "Password must be between 8 to 32 characters long;\n" +
                 "Password must contain at least one uppercase letter;\n" +
                 "Password must contain at least one lowercase letter;\n" +
-                "Password must contain at least one number;\n" +
-                "Password must contain at least one special character (!,@#$%^&*_-+=).");
+                "Password must contain at least one number; and\n" +
+                "Password must contain at least one of the following special characters: (!,@#$%^&*_-+=)");
         }
 
         if (model.RoleId is null or 0)
@@ -329,7 +344,7 @@ public class UsersController : Controller
         }
     }
 
-    private async Task SendStatusChangeEmailAsync(UserDetailDto updatedUser, string previousStatus, CancellationToken cancellationToken)
+    private async Task SendStatusChangeEmailAsync(UserDetailDto updatedUser, string previousStatus, string? temporaryPassword, CancellationToken cancellationToken)
     {
         if (string.Equals(previousStatus, updatedUser.Status, StringComparison.OrdinalIgnoreCase))
         {
@@ -367,6 +382,14 @@ public class UsersController : Controller
                 ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
             };
 
+            if (temporaryPassword is not null)
+            {
+                var (resetToken, _) = _tokenService.CreatePasswordResetToken(updatedUser.Id, updatedUser.Username);
+                values["{{TemporaryPassword}}"] = temporaryPassword;
+                values["{{ChangePasswordLink}}"] = Url.Action("ResetPassword", "Account", new { token = resetToken }, Request.Scheme)
+                    ?? string.Empty;
+            }
+
             var subject = EmailPlaceholders.FillWithValues(template.Subject, values);
             var body = EmailPlaceholders.FillWithValues(template.Body, values);
 
@@ -390,18 +413,11 @@ public class UsersController : Controller
     private async Task<IReadOnlyList<RoleDto>> GetRoleOptionsAsync(string? currentRole, string? editingUserRole, CancellationToken cancellationToken)
     {
         var roles = await _roleService.GetAllAsync(cancellationToken);
-        // Encoder/LARES QA/LRA QA are no longer offered as a selectable role - Sub-Admin is the
-        // only assignable option now. An existing account already in one of those roles still
-        // displays correctly (see the editingUserRole fallback below); it just can't be newly
-        // assigned to anyone else.
-        var options = roles.Where(r => r.Name != RoleNames.Administrator && !NonSubAdminRoles.Contains(r.Name));
+        // Sub-Admin is the only assignable option - Administrator can't be newly assigned
+        // through this form.
+        var options = roles.Where(r => r.Name != RoleNames.Administrator);
 
         if (currentRole == RoleNames.SubAdmin)
-        {
-            options = options.Where(r => r.Name != RoleNames.SubAdmin);
-        }
-
-        if (editingUserRole != null && NonSubAdminRoles.Contains(editingUserRole))
         {
             options = options.Where(r => r.Name != RoleNames.SubAdmin);
         }

@@ -31,7 +31,7 @@ public class TokenService : ITokenService
         _passwordResetMinutes = int.TryParse(configuration["Jwt:PasswordResetMinutes"], out var resetMinutes) ? resetMinutes : 30;
     }
 
-    public (string Token, DateTime ExpiresAtUtc) CreateAccessToken(int userId, string username, string role, IEnumerable<string> menuKeys)
+    public (string Token, DateTime ExpiresAtUtc) CreateAccessToken(int userId, string username, string role, IEnumerable<string> menuKeys, bool mustChangePassword = false)
     {
         var expiresAt = DateTime.UtcNow.AddMinutes(_accessTokenMinutes);
 
@@ -43,6 +43,10 @@ public class TokenService : ITokenService
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
         claims.AddRange(menuKeys.Select(key => new Claim(AppClaimTypes.Menu, key)));
+        if (mustChangePassword)
+        {
+            claims.Add(new Claim(AppClaimTypes.MustChangePassword, "true"));
+        }
 
         var credentials = new SigningCredentials(_signingKey, SecurityAlgorithms.HmacSha256);
         var token = new JwtSecurityToken(_issuer, _audience, claims, expires: expiresAt, signingCredentials: credentials);

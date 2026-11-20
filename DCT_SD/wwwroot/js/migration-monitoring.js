@@ -65,8 +65,8 @@
       var statusText = DOC_STATUS_DISPLAY[d.status] || d.status;
       return '<tr>' +
         '<td>' + (i + 1) + '</td>' +
-        '<td class="small">' + escapeHtml(d.documentType || '—') + '</td>' +
-        '<td class="small text-muted">' + escapeHtml(d.fileName) + '</td>' +
+        '<td class="small cell-wrap">' + escapeHtml(d.documentType || '—') + '</td>' +
+        '<td class="small text-muted cell-wrap">' + escapeHtml(d.fileName) + '</td>' +
         '<td class="small text-muted cell-wrap">' + escapeHtml(d.sourceImagePath || '—') + '</td>' +
         '<td class="small text-muted cell-wrap">' + escapeHtml(d.destinationPath || '—') + '</td>' +
         '<td class="small">' + escapeHtml(d.targetSystemValidation || '—') + '</td>' +

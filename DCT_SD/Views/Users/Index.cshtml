@@ -1,7 +1,7 @@
 @model DCT_SD.Models.PagedResult<DCT_SD.Models.Dtos.Users.UserListItemDto>
 @{
     var q = Context.Request.Query;
-    var roleOptions = new[] { "Administrator", "Sub-Admin", "Encoder", "LARES QA", "LRA QA" };
+    var roleOptions = new[] { "Administrator", "Sub-Admin" };
     var statusOptions = new[] { "Active", "Deactivated", "Locked" };
 }
 

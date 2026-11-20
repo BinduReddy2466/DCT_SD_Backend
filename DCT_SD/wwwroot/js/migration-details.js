@@ -179,7 +179,11 @@
         var opt = document.createElement('option');
         opt.value = o.code;
         opt.textContent = o.code + ' - ' + o.name;
+        // data-name drives the dropdown list/search text ("001 - Malian", so the user can search
+        // by code or name) - data-display is what the RD Code input itself shows once a value is
+        // committed, which must be the code alone (RD Name has its own separate field/element).
         opt.setAttribute('data-name', o.code + ' - ' + o.name);
+        opt.setAttribute('data-display', o.code);
         rdSelect.appendChild(opt);
       });
       rdSelect.value = rdCodeField.value || '';
@@ -436,15 +440,17 @@
       if (isDuplicateFamily) {
         singleWrap.classList.add('d-none');
         dualWrap.classList.remove('d-none');
-        leftViewer.load(sourceImageUrl(doc), doc.fileName, { fitOnLoad: true });
+        // fitOnLoad: false - same as Manual Validation's own viewer, defaults to actual size
+        // (100%) rather than auto-scaling to fill the frame.
+        leftViewer.load(sourceImageUrl(doc), doc.fileName, { fitOnLoad: false });
         // No real image-serving path exists for PHILARIS-RD (target) documents - the right-hand
         // pane keeps the placeholder.
         var rightName = doc.existingFileName || doc.fileName;
-        rightViewer.load(window.dctPlaceholderImage(rightName), rightName, { fitOnLoad: true });
+        rightViewer.load(window.dctPlaceholderImage(rightName), rightName, { fitOnLoad: false });
       } else {
         dualWrap.classList.add('d-none');
         singleWrap.classList.remove('d-none');
-        singleViewer.load(sourceImageUrl(doc), doc.fileName, { fitOnLoad: true });
+        singleViewer.load(sourceImageUrl(doc), doc.fileName, { fitOnLoad: false });
       }
 
       if (listEl) {
@@ -490,7 +496,15 @@
         idxTd.textContent = String(index + 1);
 
         var typeTd = document.createElement('td');
-        typeTd.className = 'small';
+        // Same styling as Manual Validation's own Document Type cell ('small fw-medium') - only
+        // this cell's class changed, every other Supporting Documents column (Source/Target Image
+        // File Path, Target System Validation, Migration Status, Reason for Failing) is
+        // Migration-specific and untouched.
+        // cell-wrap (not a title tooltip) - a long Document Type name (this app has real examples
+        // running 70+ characters) wraps onto multiple lines instead of overflowing its fixed-width
+        // column, so the full value is always visible with no data loss and no separate hover
+        // affordance needed.
+        typeTd.className = 'small fw-medium cell-wrap';
         if (doc.canChangeDocumentType) {
           var wrapper = document.createElement('div');
           wrapper.className = 'd-flex align-items-center gap-1 flex-wrap';
@@ -521,7 +535,7 @@
         }
 
         var fileTd = document.createElement('td');
-        fileTd.className = 'small text-muted';
+        fileTd.className = 'small text-muted cell-wrap';
         fileTd.textContent = effectiveFileName(doc);
 
         var sourceTd = document.createElement('td');
@@ -645,6 +659,12 @@
             }
             var readyBtn = document.getElementById('migrationReadyForMigrationBtn');
             if (readyBtn) readyBtn.classList.toggle('d-none', !data.canMarkReadyForMigration);
+            // initiateMigrationBtn is now always rendered (see Details.cshtml) specifically so
+            // this can reveal it the moment a Save resolves the RD Code/Others corrections -
+            // without this, neither button showed after such a Save (Ready for Migration hides
+            // correctly, but nothing ever made Initiate Migration appear).
+            var initiateBtn = document.getElementById('initiateMigrationBtn');
+            if (initiateBtn) initiateBtn.classList.toggle('d-none', !data.canInitiateMigration);
             targetRdNotIdentified = !!data.isTargetRdNotIdentified;
             if (data.documents) {
               documents = data.documents;

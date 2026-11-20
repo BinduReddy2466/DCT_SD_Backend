@@ -69,9 +69,16 @@ BEGIN
         UpdatedBy           INT               NULL,
         RowVersion          ROWVERSION        NOT NULL,
         LockoutEndUtc       DATETIME2         NULL,
+        MustChangePassword  BIT               NOT NULL CONSTRAINT DF_Users_MustChangePassword DEFAULT ((0)),
         CONSTRAINT PK_Users PRIMARY KEY (Id)
     );
 END;
+GO
+
+-- Catches up a Users table that already existed before MustChangePassword was introduced -
+-- the CREATE TABLE above only runs on a brand-new database.
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Users') AND name = 'MustChangePassword')
+    ALTER TABLE dbo.Users ADD MustChangePassword BIT NOT NULL CONSTRAINT DF_Users_MustChangePassword DEFAULT ((0));
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UK_Users_01' AND object_id = OBJECT_ID('dbo.Users'))
@@ -1027,9 +1034,16 @@ BEGIN
         CreatedBy INT NULL,
         UpdatedAt DATETIME2 NULL,
         UpdatedBy INT NULL,
-        LockoutEndUtc DATETIME2 NULL
+        LockoutEndUtc DATETIME2 NULL,
+        MustChangePassword BIT NULL
     );
 END;
+GO
+
+-- Catches up a Users_Log table that already existed before MustChangePassword was introduced -
+-- the CREATE TABLE above only runs on a brand-new database.
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Users_Log') AND name = 'MustChangePassword')
+    ALTER TABLE dbo.Users_Log ADD MustChangePassword BIT NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Log_01' AND object_id = OBJECT_ID('dbo.Users_Log'))
@@ -1067,9 +1081,16 @@ BEGIN
         CreatedBy INT NULL,
         UpdatedAt DATETIME2 NULL,
         UpdatedBy INT NULL,
-        LockoutEndUtc DATETIME2 NULL
+        LockoutEndUtc DATETIME2 NULL,
+        MustChangePassword BIT NULL
     );
 END;
+GO
+
+-- Catches up a Users_Hist table that already existed before MustChangePassword was introduced -
+-- the CREATE TABLE above only runs on a brand-new database.
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Users_Hist') AND name = 'MustChangePassword')
+    ALTER TABLE dbo.Users_Hist ADD MustChangePassword BIT NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Hist_01' AND object_id = OBJECT_ID('dbo.Users_Hist'))
@@ -1080,7 +1101,10 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_Users_Hist_03' AND obj
     CREATE NONCLUSTERED INDEX IX_Users_Hist_03 ON dbo.Users_Hist (Hist_RefNo);
 GO
 
-IF OBJECT_ID('dbo.trg_Users_I', 'TR') IS NULL
+-- Dropped and recreated unconditionally (rather than guarded by OBJECT_ID(...) IS NULL) so
+-- rerunning this script against a database where the trigger already exists still picks up
+-- column-list changes, e.g. MustChangePassword below.
+IF OBJECT_ID('dbo.trg_Users_I', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_Users_I;
 EXEC('
 CREATE TRIGGER dbo.trg_Users_I ON dbo.Users AFTER INSERT AS
 BEGIN
@@ -1088,13 +1112,13 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
-    SELECT @UserId, @IPAddr, ''I'', i.Id, i.FirstName, i.LastName, i.Username, i.PasswordHash, i.RoleName, i.MenuPermissionsCsv, i.Status, i.FailedLoginAttempts, i.LastLoginAt, i.IsDeleted, i.DeletedAt, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy, i.LockoutEndUtc FROM inserted i;
+    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc, MustChangePassword)
+    SELECT @UserId, @IPAddr, ''I'', i.Id, i.FirstName, i.LastName, i.Username, i.PasswordHash, i.RoleName, i.MenuPermissionsCsv, i.Status, i.FailedLoginAttempts, i.LastLoginAt, i.IsDeleted, i.DeletedAt, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy, i.LockoutEndUtc, i.MustChangePassword FROM inserted i;
 END
 ');
 GO
 
-IF OBJECT_ID('dbo.trg_Users_U', 'TR') IS NULL
+IF OBJECT_ID('dbo.trg_Users_U', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_Users_U;
 EXEC('
 CREATE TRIGGER dbo.trg_Users_U ON dbo.Users AFTER UPDATE AS
 BEGIN
@@ -1102,20 +1126,20 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
-    SELECT @UserId, @IPAddr, ''U'', i.Id, i.FirstName, i.LastName, i.Username, i.PasswordHash, i.RoleName, i.MenuPermissionsCsv, i.Status, i.FailedLoginAttempts, i.LastLoginAt, i.IsDeleted, i.DeletedAt, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy, i.LockoutEndUtc FROM inserted i;
+    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc, MustChangePassword)
+    SELECT @UserId, @IPAddr, ''U'', i.Id, i.FirstName, i.LastName, i.Username, i.PasswordHash, i.RoleName, i.MenuPermissionsCsv, i.Status, i.FailedLoginAttempts, i.LastLoginAt, i.IsDeleted, i.DeletedAt, i.CreatedAt, i.CreatedBy, i.UpdatedAt, i.UpdatedBy, i.LockoutEndUtc, i.MustChangePassword FROM inserted i;
 
-    INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
+    INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc, MustChangePassword)
     SELECT @UserId, @IPAddr, LEFT(i.Username, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
-           d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc
+           d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc, d.MustChangePassword
     FROM inserted i JOIN deleted d ON i.Id = d.Id;
 END
 ');
 GO
 
-IF OBJECT_ID('dbo.trg_Users_D', 'TR') IS NULL
+IF OBJECT_ID('dbo.trg_Users_D', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_Users_D;
 EXEC('
 CREATE TRIGGER dbo.trg_Users_D ON dbo.Users AFTER DELETE AS
 BEGIN
@@ -1123,14 +1147,14 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
-    SELECT @UserId, @IPAddr, ''D'', d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc FROM deleted d;
+    INSERT INTO dbo.Users_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc, MustChangePassword)
+    SELECT @UserId, @IPAddr, ''D'', d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc, d.MustChangePassword FROM deleted d;
 
-    INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc)
+    INSERT INTO dbo.Users_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, FirstName, LastName, Username, PasswordHash, RoleName, MenuPermissionsCsv, Status, FailedLoginAttempts, LastLoginAt, IsDeleted, DeletedAt, CreatedAt, CreatedBy, UpdatedAt, UpdatedBy, LockoutEndUtc, MustChangePassword)
     SELECT @UserId, @IPAddr, LEFT(d.Username, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
-           d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc
+           d.Id, d.FirstName, d.LastName, d.Username, d.PasswordHash, d.RoleName, d.MenuPermissionsCsv, d.Status, d.FailedLoginAttempts, d.LastLoginAt, d.IsDeleted, d.DeletedAt, d.CreatedAt, d.CreatedBy, d.UpdatedAt, d.UpdatedBy, d.LockoutEndUtc, d.MustChangePassword
     FROM deleted d;
 END
 ');

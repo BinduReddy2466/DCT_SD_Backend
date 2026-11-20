@@ -27,7 +27,7 @@
                         <td class="font-monospace small">@item.FetchDateTime.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>@(string.IsNullOrEmpty(rd) ? "—" : rd)</td>
                         <td>@item.FolderName</td>
-                        <td class="font-monospace small">@item.FolderPath</td>
+                        <td class="font-monospace small cell-wrap">@item.FolderPath</td>
                         <td><status-badge status="@item.Status"></status-badge></td>
                     </tr>
                 }

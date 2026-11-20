@@ -21,9 +21,4 @@ public class ManualValidationDocumentDto
     // through this UI, but a document that started as "OTHERS" stays correctable indefinitely,
     // even after being reclassified and saved, so a wrong pick can still be fixed later.
     public bool CanChangeDocumentType { get; set; }
-
-    // True when this document's DocumentsJson entry has "isDuplicate": "yes" - set via the
-    // Supporting Documents table's Duplicate checkbox, never derived/validated from anything
-    // else. Separate from (and never touches) the existing "duplicate" property.
-    public bool IsDuplicate { get; set; }
 }

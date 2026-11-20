@@ -29,8 +29,8 @@
                         <td class="font-monospace small">@item.ExtractionDateTime.ToLocalDisplay().ToString("MM/dd/yyyy h:mm tt")</td>
                         <td>@(item.RdName ?? "—")</td>
                         <td>@item.FolderName</td>
-                        <td class="font-monospace small">@item.FolderPath</td>
-                        <td>@(string.IsNullOrWhiteSpace(item.FailureReason) ? "—" : item.FailureReason)</td>
+                        <td class="font-monospace small cell-wrap">@item.FolderPath</td>
+                        <td class="cell-wrap">@(string.IsNullOrWhiteSpace(item.FailureReason) ? "—" : item.FailureReason)</td>
                         <td>
                             <button type="button" class="btn btn-outline-secondary btn-sm" data-reprocess-btn data-id="@item.Id">Reprocess</button>
                         </td>

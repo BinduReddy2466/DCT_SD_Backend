@@ -35,10 +35,16 @@
       return Array.prototype.slice.call(select.options).filter(function (o) { return o.value; });
     }
 
+    // data-display (optional) is what the input itself shows once a value is committed/loaded -
+    // falls back to data-name/textContent, so every existing caller that never sets data-display
+    // (Document Type, etc.) behaves exactly as before. A caller that wants the dropdown's own
+    // list/search text to differ from what the input ends up showing (e.g. RD Code: list items
+    // show "001 - Malian" for searchability, but the input itself should only ever show "001")
+    // sets data-display separately - see migration-details.js's RD Code combobox.
     function textForValue(value) {
       if (!value) return '';
       var match = options().filter(function (o) { return o.value === value; })[0];
-      return match ? (match.getAttribute('data-name') || match.textContent) : '';
+      return match ? (match.getAttribute('data-display') || match.getAttribute('data-name') || match.textContent) : '';
     }
 
     function closeMenu() {
@@ -58,7 +64,7 @@
 
     function choose(option) {
       select.value = option.value;
-      input.value = option.getAttribute('data-name') || option.textContent;
+      input.value = option.getAttribute('data-display') || option.getAttribute('data-name') || option.textContent;
       closeMenu();
       select.dispatchEvent(new Event('change', { bubbles: true }));
     }

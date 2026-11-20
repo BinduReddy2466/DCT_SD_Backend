@@ -1,0 +1,87 @@
+@using DCT_SD.Models.Dtos.Dashboard
+@using DCT_SD.Models.ViewModels
+@model DCT_SD.Models.PagedResult<DashboardRowDto>
+@{
+    // "—" (not the literal word "N/A") matches how every other table in this app already renders
+    // a "doesn't apply" cell (see Views/Migrations/_Results.cshtml, Views/ManualValidation/
+    // _Results.cshtml) - a 3-letter word repeated across half this table's cells (every
+    // Folder-only stat on an Images row, and vice versa) read as visual noise next to that
+    // established, quieter convention.
+    string Cell(int? value) => value.HasValue ? value.Value.ToString("N0") : "—";
+
+    // Each RD contributes exactly 2 consecutive rows (Folder, then Images) - alternating a subtle
+    // background tint per RD *pair* (not per row) makes that pairing readable at a glance and
+    // keeps adjacent RDs easy to tell apart, without a heavier border treatment. Toggled once per
+    // distinct RdCode encountered, not once per row.
+    string? lastRdCode = null;
+    var altPair = false;
+}
+
+<div class="table-responsive table-frame">
+    <table class="table table-hover align-middle mb-0" id="dashboardStatsTable">
+        <thead>
+            <tr>
+                <th>RD Code</th>
+                <th>RD Name</th>
+                <th>Record Type</th>
+                <th>Fetched</th>
+                <th>WIP</th>
+                <th>Ready for Migration</th>
+                <th>Manual Validation</th>
+                <th>Incomplete Extraction</th>
+                <th>Migrated</th>
+                <th>Failed Migration</th>
+                <th>Empty Folders</th>
+                <th>Duplicate SD</th>
+                <th>Confirmed Duplicate</th>
+                <th>Inserted</th>
+                <th>N/A</th>
+                <th>Activated</th>
+                <th>Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr><td colspan="17" class="text-center text-muted py-4">No records found.</td></tr>
+            }
+            else
+            {
+                @foreach (var row in Model.Items)
+                {
+                    if (row.RdCode != lastRdCode)
+                    {
+                        altPair = !altPair;
+                        lastRdCode = row.RdCode;
+                    }
+                    <tr class="@(altPair ? "rd-pair-alt" : "")">
+                        <td><span class="chip-mono">@row.RdCode</span></td>
+                        <td class="fw-medium cell-ellipsis" title="@row.RdName">@row.RdName</td>
+                        <td>
+                            <span class="badge @(row.RecordType == "Folder" ? "badge-info" : "badge-neutral")">@row.RecordType</span>
+                        </td>
+                        <td>@row.Fetched</td>
+                        <td>@row.Wip</td>
+                        <td>@Cell(row.ReadyForMigration)</td>
+                        <td>@Cell(row.ManualValidation)</td>
+                        <td>@Cell(row.IncompleteExtraction)</td>
+                        <td>@row.Migrated</td>
+                        <td>@row.FailedMigration</td>
+                        <td>@Cell(row.EmptyFolders)</td>
+                        <td>@Cell(row.DuplicateSd)</td>
+                        <td>@Cell(row.ConfirmedDuplicate)</td>
+                        <td>@Cell(row.Inserted)</td>
+                        <td>@Cell(row.NotApplicableOthers)</td>
+                        <td>@Cell(row.Activated)</td>
+                        <td class="fw-semibold">@row.Total</td>
+                    </tr>
+                }
+            }
+        </tbody>
+    </table>
+</div>
+
+@if (Model.Items.Count > 0)
+{
+    @await Html.PartialAsync("_Pagination", new PaginationViewModel { PageNumber = Model.PageNumber, PageSize = Model.PageSize, TotalCount = Model.TotalCount, TotalPages = Model.TotalPages, ActionName = "Results" })
+}

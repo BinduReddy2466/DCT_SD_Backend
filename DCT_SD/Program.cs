@@ -5,6 +5,7 @@ using DCT_SD.Configuration;
 using DCT_SD.Extensions;
 using DCT_SD.Helpers;
 using DCT_SD.Helpers.Exceptions;
+using DCT_SD.Models;
 using DCT_SD.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
@@ -234,7 +235,7 @@ app.Use(async (context, next) =>
         {
             var rotated = await authService.RotateRefreshTokenAsync(refreshToken, context.Connection.RemoteIpAddress?.ToString());
             var (newAccessToken, newAccessExpiresAt) = tokenService.CreateAccessToken(
-                rotated.User.Id, rotated.User.Username, rotated.User.RoleName, rotated.AllowedMenus);
+                rotated.User.Id, rotated.User.Username, rotated.User.RoleName, rotated.AllowedMenus, rotated.User.MustChangePassword);
 
             AuthCookieHelper.SetAccessTokenCookie(context.Response, newAccessToken, newAccessExpiresAt);
             AuthCookieHelper.SetRefreshTokenCookie(context.Response, rotated.NewRawToken, rotated.NewExpiresAtUtc);
@@ -261,6 +262,36 @@ app.Use(async (context, next) =>
 });
 
 app.UseAuthentication();
+
+// Access to the rest of the system is restricted until a first-login/reactivation password
+// change is completed - every authenticated request gets bounced back to the one page that
+// can clear it, regardless of which menus the user's role would otherwise allow.
+app.Use(async (context, next) =>
+{
+    if (context.User.Identity?.IsAuthenticated == true
+        && context.User.HasClaim(c => c.Type == AppClaimTypes.MustChangePassword && c.Value == "true"))
+    {
+        var path = context.Request.Path;
+        var isExempt = path.StartsWithSegments("/Account/ChangePassword", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWithSegments("/Account/Logout", StringComparison.OrdinalIgnoreCase);
+
+        if (!isExempt)
+        {
+            if (context.Request.Headers["X-Requested-With"] == "XMLHttpRequest")
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            }
+            else
+            {
+                context.Response.Redirect("/Account/ChangePassword");
+            }
+            return;
+        }
+    }
+
+    await next();
+});
+
 app.UseAuthorization();
 
 app.MapControllerRoute(

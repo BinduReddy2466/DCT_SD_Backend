@@ -5,7 +5,7 @@ namespace DCT_SD.Models.ViewModels;
 public class LoginViewModel
 {
     [Required(ErrorMessage = "All fields are required.")]
-    [Display(Name = "User ID / Email")]
+    [Display(Name = "Username")]
     public string Username { get; set; } = string.Empty;
 
     [Required(ErrorMessage = "All fields are required.")]

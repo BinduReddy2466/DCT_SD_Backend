@@ -48,7 +48,7 @@ public class MigrationService : IMigrationService
             _logger.LogError(ex, "Migration Monitoring: failed to sync newly-eligible OcrExtractionRecords rows into MigrationRecords.");
         }
 
-        var query = _context.MigrationRecords.AsNoTracking().Include(r => r.OcrExtractionRecord).AsQueryable();
+        var query = _context.MigrationRecords.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.RdCode))
         {
@@ -374,20 +374,33 @@ public class MigrationService : IMigrationService
     {
         var record = await _context.MigrationRecords.AsNoTracking()
             .Include(r => r.Documents).ThenInclude(d => d.CodeLookup)
-            .Include(r => r.OcrExtractionRecord)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken)
             ?? throw new NotFoundException("Migration record", id);
 
-        // Associated Title Records: every MigrationRecords row sharing the same RD Code + Entry
-        // Number as this one - each row already represents exactly one Title (Title/TitleSequence
-        // are scalar per-row fields), so siblings under the same Entry Number are the "other
-        // Titles" associated with this Entry Record. Mirrors the grouping ManualValidationRequest
-        // already does by EntryNumberRange, applied here since MigrationRecords has no such
-        // grouping today.
-        // Sorted by Title Sequence (numerically where it parses as a number, non-numeric/blank
-        // values last) rather than insertion order - TitleSequence is a free-text NVARCHAR column,
-        // so this can't be translated to SQL and is applied after materializing the small sibling
-        // set.
+        // Associated Title Records: LEVEL 1 ONLY (2026-11-16, Entry Number-based consolidation
+        // across processing instances - supersedes the same-day folder-wise grouping fix, which
+        // incorrectly made FolderPath part of this key). Every MigrationRecords row sharing the
+        // same RdCode + EntryNumbersCsv as this one - each row already represents exactly one
+        // Title (Title/TitleSequence are scalar per-row fields), so siblings under the same Entry
+        // Number are the "other Titles" associated with this Entry Record, spanning every
+        // processing instance (physical source folder) that Entry Number was ever processed
+        // under, not just this one record's own instance. FolderPath is deliberately NOT part of
+        // this key: the same Entry Number can legitimately be processed multiple times under
+        // different folders, and every one of those processing instances must consolidate into
+        // this SAME Associated Title Records list, never split into separate ones just because the
+        // folder changed. Mirrors ManualValidationService.GetEntryNumberGroupAsync's identical
+        // Level-1 key. Sorted by Title Sequence (numerically where it parses as a number, non-
+        // numeric/blank values last) rather than insertion order - TitleSequence is a free-text
+        // NVARCHAR column, so this can't be translated to SQL and is applied after materializing
+        // the small sibling set.
+        //
+        // Supporting Documents (below, record.Documents) deliberately stay scoped to THIS record's
+        // own rows only, never aggregated across the broader Level-1 group here - each sibling
+        // MigrationRecord (regardless of which processing instance it came from) independently
+        // owns its own MigrationDocuments and goes through Initiate Migration/Reprocess on its own
+        // schedule; consolidating their documents into one shared view would risk misrepresenting
+        // one sibling's own migration outcome as another's ("Preserve individual migration
+        // statuses... do not incorrectly merge independent migration status records").
         var titleRecords = (await _context.MigrationRecords.AsNoTracking()
             .Where(m => m.RdCode == record.RdCode && m.EntryNumbersCsv == record.EntryNumbersCsv)
             .OrderBy(m => m.Id)
@@ -414,25 +427,6 @@ public class MigrationService : IMigrationService
         // Manual-Validation row - see SyncEligibleOcrExtractionRecordsAsync).
         var canMarkReadyForMigration = record.MigrationType == MigrationType.SystemMigration && isTargetRdNotIdentified;
 
-        // Manual Validation Origin (spec section 11): the only real link between the two tables is
-        // a shared OcrExtractionRecordId - there is no FK from MigrationRecords to
-        // ManualValidationRequests (confirmed, 2026-11-11).
-        var manualValidationOrigin = record.OcrExtractionRecordId.HasValue
-            ? await _context.ManualValidationRequests.AsNoTracking()
-                .Where(m => m.OcrExtractionRecordId == record.OcrExtractionRecordId)
-                .Select(m => new ManualValidationOriginDto
-                {
-                    Title = m.Title,
-                    TitleType = m.TitleType != null ? m.TitleType.ToString() : null,
-                    Plan = m.Plan,
-                    Block = m.Block,
-                    Lot = m.Lot,
-                    TitleSequence = m.TitleSequence,
-                    ExtractionDate = m.ExtractionDate,
-                })
-                .FirstOrDefaultAsync(cancellationToken)
-            : null;
-
         // Action History (spec section 10): merges the existing trigger-based MigrationRecords_Log
         // audit trail (`history` above - system-level processing transitions) with user-initiated
         // actions (Save / Insert as New Image / Confirm Duplicate / Ready for Migration), written
@@ -444,7 +438,7 @@ public class MigrationService : IMigrationService
             .OrderByDescending(h => h.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return MapToDetail(record, titleRecords, history, isTargetRdNotIdentified, canMarkReadyForMigration, manualValidationOrigin, userActions);
+        return MapToDetail(record, titleRecords, history, isTargetRdNotIdentified, canMarkReadyForMigration, userActions);
     }
 
     // Streams a supporting document's image straight from disk, using SourceImagePath - the
@@ -1332,7 +1326,6 @@ public class MigrationService : IMigrationService
         IReadOnlyList<MigrationRecordLogEntry> history,
         bool isTargetRdNotIdentified,
         bool canMarkReadyForMigration,
-        ManualValidationOriginDto? manualValidationOrigin,
         IReadOnlyList<RecordHistory> userActions) => new()
     {
         Id = r.Id,
@@ -1364,7 +1357,6 @@ public class MigrationService : IMigrationService
         ProcessingStatus = r.ProcessingStatus?.ToString(),
         IsTargetRdNotIdentified = isTargetRdNotIdentified,
         CanMarkReadyForMigration = canMarkReadyForMigration,
-        ManualValidationOrigin = manualValidationOrigin,
         // Document Type ascending, then Image File Name ascending - the Supporting Document
         // Images table and the viewer's Previous/Next navigation share this exact same order
         // (the JS simply walks the array this DTO list is rendered from), so they can never

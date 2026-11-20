@@ -16,9 +16,6 @@ public class RoleService : IRoleService
     [
         new() { Id = 1, Name = RoleNames.Administrator, Description = "Full system access.", IsSystemDefined = true },
         new() { Id = 2, Name = RoleNames.SubAdmin, Description = "Administrator-delegated access to explicitly assigned modules.", IsSystemDefined = true },
-        new() { Id = 3, Name = RoleNames.Encoder, Description = "Operational data-entry access to the core pipeline modules.", IsSystemDefined = false },
-        new() { Id = 4, Name = RoleNames.LaresQa, Description = "LARES quality-assurance review access.", IsSystemDefined = false },
-        new() { Id = 5, Name = RoleNames.LraQa, Description = "LRA quality-assurance review access.", IsSystemDefined = false },
     ];
 
     public Task<IReadOnlyList<RoleDto>> GetAllAsync(CancellationToken cancellationToken = default) =>

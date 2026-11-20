@@ -125,6 +125,8 @@ public class UserService : IUserService
             RoleName = role.Name,
             MenuPermissionsCsv = menuKeys.Count == 0 ? null : string.Join(',', menuKeys),
             Status = UserStatus.Active,
+            // The admin just chose this password for them - they must change it on first login.
+            MustChangePassword = true,
         };
 
         _context.Users.Add(user);
@@ -155,16 +157,14 @@ public class UserService : IUserService
         var user = await LoadUserAsync(id, cancellationToken)
             ?? throw new NotFoundException(nameof(User), id);
 
-        // The Edit button is hidden entirely for Administrator rows, but that's only a UI
-        // hint - a crafted request could still post directly to this endpoint. Administrator
-        // accounts (Role ID 1) are not editable through User Management at all, by anyone.
-        if (user.RoleName == RoleNames.Administrator)
+        // The Edit button is hidden entirely for a Sub-Admin viewer looking at an Administrator
+        // or a Sub-Admin row, but that's only a UI hint - a crafted request could still post
+        // directly to this endpoint.
+        if (_currentUser.Role == RoleNames.SubAdmin && user.RoleName == RoleNames.Administrator)
         {
-            throw new ForbiddenAppException("Administrator accounts cannot be edited through User Management.");
+            throw new ForbiddenAppException("A Sub-Admin cannot edit an Administrator account.");
         }
 
-        // Likewise, a Sub-Admin viewer can't edit any Sub-Admin account - another one's, or
-        // their own.
         if (_currentUser.Role == RoleNames.SubAdmin && user.RoleName == RoleNames.SubAdmin)
         {
             throw new ForbiddenAppException("A Sub-Admin cannot edit a Sub-Admin account.");
@@ -174,11 +174,19 @@ public class UserService : IUserService
 
         EnsureRoleAssignmentIsAllowed(role, currentRoleOfTargetUser: user.RoleName);
 
-        // The role dropdown is disabled client-side for a Sub-Admin account, but a disabled
-        // field is only a UI hint - a crafted request could still post a different RoleId.
+        // The role dropdown is disabled client-side for a Sub-Admin or an Administrator
+        // account (an Administrator can update its own, or another Administrator's, First/
+        // Last Name and Status, but never its Role - that's what keeps one Administrator from
+        // demoting another through this form), but a disabled field is only a UI hint - a
+        // crafted request could still post a different RoleId.
         if (user.RoleName == RoleNames.SubAdmin && role.Name != user.RoleName)
         {
             throw new ForbiddenAppException("The role of a Sub-Admin account cannot be changed.");
+        }
+
+        if (user.RoleName == RoleNames.Administrator && role.Name != user.RoleName)
+        {
+            throw new ForbiddenAppException("The role of an Administrator account cannot be changed.");
         }
 
         if (!Enum.TryParse<UserStatus>(request.Status, true, out var status))
@@ -242,17 +250,42 @@ public class UserService : IUserService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task ResetPasswordAsync(int userId, string newPassword, CancellationToken cancellationToken = default)
+    public async Task ResetPasswordAsync(int userId, string newPassword, bool requireChangeOnNextLogin, CancellationToken cancellationToken = default)
     {
         var user = await LoadUserAsync(userId, cancellationToken)
             ?? throw new NotFoundException(nameof(User), userId);
 
         user.PasswordHash = PasswordHasher.Hash(newPassword);
+        user.MustChangePassword = requireChangeOnNextLogin;
         await _context.SaveChangesAsync(cancellationToken);
 
         // Mirrors UpdateAsync's status-change handling - a password reset must invalidate any
         // refresh tokens already issued under the old password, so a session started before the
         // reset can't silently keep renewing afterward.
+        await _authService.RevokeAllRefreshTokensForUserAsync(user.Id, cancellationToken);
+    }
+
+    public async Task ChangePasswordAsync(int userId, string oldPassword, string newPassword, CancellationToken cancellationToken = default)
+    {
+        var user = await LoadUserAsync(userId, cancellationToken)
+            ?? throw new NotFoundException(nameof(User), userId);
+
+        if (!PasswordHasher.Verify(oldPassword, user.PasswordHash))
+        {
+            throw new BusinessValidationException("The old password you entered is incorrect.");
+        }
+
+        if (PasswordHasher.Verify(newPassword, user.PasswordHash))
+        {
+            throw new BusinessValidationException("The new password must be different from your old password.");
+        }
+
+        user.PasswordHash = PasswordHasher.Hash(newPassword);
+        user.MustChangePassword = false;
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Same reasoning as ResetPasswordAsync - a password change must invalidate any refresh
+        // tokens already issued under the old password.
         await _authService.RevokeAllRefreshTokensForUserAsync(user.Id, cancellationToken);
     }
 

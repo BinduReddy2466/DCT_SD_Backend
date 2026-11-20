@@ -752,6 +752,11 @@ a:hover { color: var(--bs-link-hover-color); }
   border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
 }
+/* Users list spec calls for header text exactly as written (e.g. "Date Creation"), not the
+   all-caps styling every other .table-frame list uses. */
+.table-frame-cased thead th {
+  text-transform: none;
+}
 .table-frame tbody td {
   padding: 12px 14px;
   font-size: 13px;
@@ -839,6 +844,62 @@ tr.migration-expand-row td { border-top: 0; }
   overflow-wrap: anywhere;
   word-break: break-word;
   max-width: 260px;
+}
+
+/* Single-line truncation + ellipsis for a cell whose full value is still available via its own
+   title="" tooltip attribute - used where a value is normally short but can occasionally run
+   long enough to make a row uneven (e.g. a Registry Office's full name), unlike .cell-wrap above
+   (which lets an unbounded value wrap onto multiple lines instead). */
+.cell-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dashboard "Registry of Deeds Statistics" table (Views/Dashboard/_Results.cshtml) - scoped to
+   #dashboardStatsTable only; the fixed left-offset math below only holds for this table's own
+   first two columns, so no other table in the app should pick this up.
+   - RD Code + RD Name pinned via position: sticky while the (16+ column) table scrolls
+     horizontally, so the user never loses track of which RD a column mid-scroll belongs to.
+   - Each RD's Folder+Images row PAIR shares a subtle tint, alternating per pair (set via
+     .rd-pair-alt below) rather than per row - set on the <tr> itself (not each <td>): the
+     .table-frame tbody td default background is already transparent, so a tr-level color shows
+     through every ordinary cell without fighting the existing :hover/.table-active rules, which
+     paint their own background directly on td with equal-or-higher specificity and correctly
+     take over on top of this when they apply. The two sticky columns are the one exception - they
+     need their own explicit, opaque background (never transparent) so they don't let the
+     horizontally-scrolled columns behind them show through, and that background has to be
+     re-stated per pair-tint state so a sticky cell still matches the rest of its own row. */
+#dashboardStatsTable th:nth-child(1),
+#dashboardStatsTable td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 92px;
+}
+#dashboardStatsTable th:nth-child(2),
+#dashboardStatsTable td:nth-child(2) {
+  position: sticky;
+  left: 92px;
+  z-index: 1;
+  min-width: 200px;
+  max-width: 200px;
+}
+#dashboardStatsTable thead th:nth-child(1),
+#dashboardStatsTable thead th:nth-child(2) {
+  background: var(--color-table-header-bg);
+}
+#dashboardStatsTable tbody td:nth-child(1),
+#dashboardStatsTable tbody td:nth-child(2) {
+  background: var(--color-surface-solid);
+  box-shadow: 2px 0 4px -2px rgba(0, 0, 0, 0.12);
+}
+#dashboardStatsTable tbody tr.rd-pair-alt td:nth-child(1),
+#dashboardStatsTable tbody tr.rd-pair-alt td:nth-child(2) {
+  background: var(--color-bg-2);
+}
+#dashboardStatsTable tbody tr.rd-pair-alt {
+  background: var(--color-bg-2);
 }
 
 .pagination-bar {

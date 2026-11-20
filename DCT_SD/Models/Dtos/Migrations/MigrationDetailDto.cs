@@ -44,10 +44,6 @@ public class MigrationDetailDto
     // MigrationService.MarkReadyForMigrationAsync.
     public bool CanMarkReadyForMigration { get; set; }
 
-    // Present only when this Entry Record originated from a Manual Validation record (spec
-    // section 11) - null for System Migration-origin records with no Manual Validation history.
-    public ManualValidationOriginDto? ManualValidationOrigin { get; set; }
-
     public IReadOnlyList<MigrationDocumentDto> Documents { get; set; } = Array.Empty<MigrationDocumentDto>();
     public IReadOnlyList<MigrationTitleRecordDto> TitleRecords { get; set; } = Array.Empty<MigrationTitleRecordDto>();
     public IReadOnlyList<MigrationActionHistoryDto> ActionHistory { get; set; } = Array.Empty<MigrationActionHistoryDto>();

@@ -1,30 +1,36 @@
-@model IReadOnlyList<DCT_SD.Models.Dtos.Dashboard.DashboardRowDto>
+@using DCT_SD.Models.Dtos.RdConfig
+@model DCT_SD.Models.Dtos.Dashboard.DashboardStatsDto
 @using System.Globalization
 @{
-    // Every number below is a simple aggregate (sum/count) over the exact same rows the table
-    // renders - nothing here calls a service or invents data. Null fields (columns that don't
-    // apply to a given RecordType - see DashboardRowDto) are simply skipped by ?? 0 / Sum on
-    // nullable ints, matching the table's own "N/A" treatment for those cells.
-    string Cell(int? value) => value.HasValue ? value.Value.ToString("N0") : "N/A";
+    // Every number below is a simple aggregate (sum/count) over AllRows - every configured RD's
+    // Folder+Images rows, unfiltered and unpaged - never over Model.Table (the statistics
+    // table's own current page/RD-filter), so the KPI cards/charts never change just because the
+    // user paged or filtered the table beneath them.
+    var allRows = Model.AllRows;
+    var registryOffices = (IReadOnlyList<RegistryOfficeDto>)ViewData["RegistryOffices"]!;
+    var q = Context.Request.Query;
 
-    var totalRds = Model.Select(r => r.RdCode).Distinct().Count();
-    var totalFetched = Model.Sum(r => r.Fetched);
-    var totalMigrated = Model.Sum(r => r.Migrated);
-    var totalReadyForMigration = Model.Sum(r => r.ReadyForMigration ?? 0);
-    var totalManualValidation = Model.Sum(r => r.ManualValidation ?? 0) + Model.Sum(r => r.IncompleteExtraction ?? 0);
-    var totalEmptyFolders = Model.Sum(r => r.EmptyFolders ?? 0);
+    var totalRds = allRows.Select(r => r.RdCode).Distinct().Count();
+    var totalFetched = allRows.Sum(r => r.Fetched);
+    var totalMigrated = allRows.Sum(r => r.Migrated);
+    var totalReadyForMigration = allRows.Sum(r => r.ReadyForMigration ?? 0);
+    var totalManualValidation = allRows.Sum(r => r.ManualValidation ?? 0) + allRows.Sum(r => r.IncompleteExtraction ?? 0);
+    var totalEmptyFolders = allRows.Sum(r => r.EmptyFolders ?? 0);
+    var totalWip = allRows.Sum(r => r.Wip);
+    var totalFailedMigration = allRows.Sum(r => r.FailedMigration);
 
     string N(int value) => value.ToString("N0");
 
-    // --- Record Status Mix donut - proportions among the same 4 aggregates the KPI cards above
-    // already show (Migrated / Ready for Migration / Manual Validation / Empty Folders), nothing
-    // else queried or invented. Rendered as plain inline SVG (stroke-dasharray per segment) so no
-    // charting library is needed.
+    // --- Record Status Mix donut - proportions among the same aggregates the KPI cards above
+    // already show, nothing else queried or invented. Rendered as plain inline SVG
+    // (stroke-dasharray per segment) so no charting library is needed.
     var donutSegments = new (string Label, int Value, string Color)[]
     {
         ("Migrated", totalMigrated, "var(--color-ok-text)"),
         ("Ready for Migration", totalReadyForMigration, "var(--color-blue)"),
         ("Manual Validation", totalManualValidation, "var(--color-warn-text)"),
+        ("WIP", totalWip, "var(--color-info-text)"),
+        ("Failed Migration", totalFailedMigration, "var(--color-err-text)"),
         ("Empty Folders", totalEmptyFolders, "var(--color-muted-2)"),
     };
     var donutTotal = donutSegments.Sum(s => s.Value);
@@ -34,7 +40,7 @@
 
     // --- Fetched vs Migrated per RD - same per-row Fetched/Migrated fields the table below
     // renders, summed across each RD's Folder+Images rows, top 6 RDs by Total.
-    var rdBars = Model
+    var rdBars = allRows
         .GroupBy(r => new { r.RdCode, r.RdName })
         .Select(g => new
         {
@@ -188,70 +194,41 @@
     </div>
 </div>
 
-<div class="card p-0">
+<div class="card p-0" id="dashboardStatsCard" data-dashboard-results-url="@Url.Action("Results")">
     <div class="p-4 border-bottom">
-        <div class="section-heading">Registry of Deeds Statistics</div>
-        <div class="section-subtext">Per-RD Folder and Images record counts across every processing stage.</div>
+        <div class="d-flex flex-wrap align-items-end justify-content-between gap-3">
+            <div>
+                <div class="section-heading">Registry of Deeds Statistics</div>
+                <div class="section-subtext">Per-RD Folder and Images record counts across every processing stage. Updates automatically.</div>
+            </div>
+            <!-- RD Code filter - a searchable combobox (not a plain select, unlike the other list
+                 pages' own RD Code filters) because the spec explicitly asks for type-ahead
+                 matching against the configured RD Codes, which a native <select> doesn't do. -->
+            <form data-list-page-form="dashboard-results" data-list-page-page-url="@Url.Action("Index")"
+                  action="@Url.Action("Results")" method="get" class="d-flex align-items-end gap-2">
+                <div>
+                    <label class="form-label field-label" for="dashboardRdCodeSelect">RD Code</label>
+                    <div id="dashboardRdCodeComboboxHost"></div>
+                    <select class="form-select form-select-sm d-none" id="dashboardRdCodeSelect" name="rdCode">
+                        <option value=""></option>
+                        @foreach (var o in registryOffices)
+                        {
+                            <option value="@o.Code" data-name="@(o.Code + " - " + o.Name)" data-display="@o.Code" selected="@(q["rdCode"] == o.Code)">@(o.Code + " - " + o.Name)</option>
+                        }
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-navy btn-sm">Search</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-list-page-clear>Clear</button>
+            </form>
+        </div>
     </div>
 
-    @if (Model.Count == 0)
-    {
-        <div class="empty-state">
-            <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg>
-            <div class="empty-state-title">No Registry of Deeds configured</div>
-            <div class="empty-state-text">Configure a Registry Office to start seeing Folder and Images statistics here.</div>
-        </div>
-    }
-    else
-    {
-        <div class="table-responsive table-frame" style="border: 0; border-radius: 0;">
-            <table class="table table-hover align-middle mb-0">
-                <thead>
-                    <tr>
-                        <th>RD Code</th>
-                        <th>RD Name</th>
-                        <th>Record Type</th>
-                        <th>Fetched</th>
-                        <th>WIP</th>
-                        <th>Ready for Migration</th>
-                        <th>Manual Validation</th>
-                        <th>Incomplete Extraction</th>
-                        <th>Migrated</th>
-                        <th>Failed Migration</th>
-                        <th>Empty Folders</th>
-                        <th>Duplicate SD</th>
-                        <th>Confirmed Duplicate</th>
-                        <th>Inserted</th>
-                        <th>N/A</th>
-                        <th>Total</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var row in Model)
-                    {
-                        <tr>
-                            <td><span class="chip-mono">@row.RdCode</span></td>
-                            <td class="fw-medium">@row.RdName</td>
-                            <td>
-                                <span class="badge @(row.RecordType == "Folder" ? "badge-info" : "badge-neutral")">@row.RecordType</span>
-                            </td>
-                            <td>@row.Fetched</td>
-                            <td>@row.Wip</td>
-                            <td>@Cell(row.ReadyForMigration)</td>
-                            <td>@Cell(row.ManualValidation)</td>
-                            <td>@Cell(row.IncompleteExtraction)</td>
-                            <td>@row.Migrated</td>
-                            <td>@row.FailedMigration</td>
-                            <td>@Cell(row.EmptyFolders)</td>
-                            <td>@Cell(row.DuplicateSd)</td>
-                            <td>@Cell(row.ConfirmedDuplicate)</td>
-                            <td>@Cell(row.Inserted)</td>
-                            <td>@Cell(row.NotApplicableOthers)</td>
-                            <td class="fw-semibold">@row.Total</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-    }
+    <div id="dashboard-results">
+        @await Html.PartialAsync("_Results", Model.Table)
+    </div>
 </div>
+
+@section Scripts {
+    <script src="~/js/searchable-combobox.js"></script>
+    <script src="~/js/dashboard.js"></script>
+}

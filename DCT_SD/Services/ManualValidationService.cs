@@ -93,18 +93,28 @@ public class ManualValidationService : IManualValidationService
         return query;
     }
 
-    // Same grouping key as the Details page (GetGroupRecordsAsync): rows sharing the exact
-    // same (RdCode, EntryNumberRange) pair become one UI row - never EntryNumberRange alone
-    // (the same range can recur under a different RD) and never RdCode alone (one RD has many
-    // unrelated ranges). EntryNumbersCsv is a separate field and plays no part in this key. A
-    // blank/whitespace EntryNumberRange (NULL included), or a blank RdCode, never groups -
-    // each such row is identified independently by its own Id, never merged with another row
-    // just because both happen to be missing a range.
+    // Level 1 ONLY (2026-11-16, Entry Number-based consolidation across processing instances -
+    // supersedes the 2026-11-16 folder-wise grouping fix, which incorrectly made FolderPath part
+    // of this key): rows sharing the exact same (RdCode, EntryNumbersCsv) pair become one UI row -
+    // never EntryNumbersCsv alone (the same Entry Number can recur under a different RD) and never
+    // RdCode alone (one RD has many unrelated Entry Numbers). EntryNumberRange is a separate field
+    // (the Details page's own editable "Entry Number" display field - see SaveAsync) and plays no
+    // part in this key. A blank/whitespace EntryNumbersCsv (NULL included), or a blank RdCode,
+    // never groups - each such row is identified independently by its own Id.
+    //
+    // FolderPath is deliberately NOT part of this key: the same Entry Number can legitimately be
+    // processed multiple times under different physical folders (different OcrExtractionRecords
+    // rows), and every one of those processing instances must still consolidate into this SAME
+    // overall group, not split into separate ones just because the folder changed. See
+    // GetEntryNumberGroupAsync/PartitionIntoProcessingInstances for how FolderPath/
+    // OcrExtractionRecordId are instead used as a SECOND, narrower level - which processing
+    // instance (and therefore which DocumentsJson) a given row's documents come from - entirely
+    // within this broader group, never to decide what belongs in it.
     private static List<List<ManualValidationRequest>> GroupMatchingRecords(List<ManualValidationRequest> matchingRecords) =>
         matchingRecords
-            .GroupBy(r => string.IsNullOrWhiteSpace(r.RdCode) || string.IsNullOrWhiteSpace(r.EntryNumberRange)
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.RdCode) || string.IsNullOrWhiteSpace(r.EntryNumbersCsv)
                 ? $"__row:{r.Id}"
-                : $"{r.RdCode}|{r.EntryNumberRange}")
+                : $"{r.RdCode}|{r.EntryNumbersCsv}")
             .Select(g => g.OrderBy(r => r.Id).ToList())
             .ToList();
 
@@ -216,7 +226,7 @@ public class ManualValidationService : IManualValidationService
         record.LockedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync(cancellationToken);
 
-        var group = await GetGroupRecordsAsync(record, cancellationToken);
+        var group = await GetEntryNumberGroupAsync(record, cancellationToken);
         return MapToDetail(record, group);
     }
 
@@ -225,12 +235,13 @@ public class ManualValidationService : IManualValidationService
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
-        // Every row sharing this record's (pre-edit) RdCode + EntryNumberRange - the grouping key
-        // (see GetGroupRecordsAsync). Locking stays scoped to `record` alone
+        // Every row sharing this record's RdCode + EntryNumbersCsv - the Level-1 Entry Number
+        // group (see GetEntryNumberGroupAsync), spanning every processing instance/folder, not
+        // just this record's own. Locking stays scoped to `record` alone
         // (EnsureNotLockedByAnotherUser above only checked that one row); group siblings are
         // written here regardless of their own lock state, same as today's single-record Save
         // never checked a second row's lock.
-        var group = await GetGroupRecordsAsync(record, cancellationToken);
+        var group = await GetEntryNumberGroupAsync(record, cancellationToken);
         var groupIds = group.Select(r => r.Id).ToHashSet();
 
         var changeDescriptionsByRecordId = new Dictionary<int, List<string>>();
@@ -352,24 +363,6 @@ public class ManualValidationService : IManualValidationService
         var touchedRecordIds = new HashSet<int>();
         try
         {
-            // Applied before ApplyDocumentTypeChanges below (not after): this never renames a
-            // file, so it always resolves against record.DocumentsJson exactly as the client last
-            // saw it (DocumentId + RenamedFileName unchanged) - running it first means a Document
-            // Type correction targeting the very same document in this same Save still finds its
-            // match, instead of looking for a RenamedFileName that a rename already applied after
-            // this point would have changed out from under it.
-            if (!string.IsNullOrWhiteSpace(request.DocumentDuplicateFlagsJson))
-            {
-                var duplicateFlagChanges = (JsonSerializer.Deserialize<List<DocumentDuplicateFlagItemDto>>(request.DocumentDuplicateFlagsJson, JsonOptions) ?? [])
-                    .Where(c => !string.IsNullOrWhiteSpace(c.RenamedFileName))
-                    .ToList();
-
-                if (duplicateFlagChanges.Count > 0)
-                {
-                    ApplyDocumentDuplicateFlags(record, duplicateFlagChanges, ChangesFor(record.Id));
-                }
-            }
-
             if (!string.IsNullOrWhiteSpace(request.DocumentChangesJson))
             {
                 var documentChanges = (JsonSerializer.Deserialize<List<DocumentChangeItemDto>>(request.DocumentChangesJson, JsonOptions) ?? [])
@@ -436,18 +429,21 @@ public class ManualValidationService : IManualValidationService
         // just written, silently reverting it. A failure here is logged by RdFetchApiClient
         // itself and swallowed - it must never fail a Save that has already succeeded.
         //
-        // Matching key fixed to RdCode + EntryNumberRange (2026-11-03), consistent with
-        // GetGroupRecordsAsync - this used to compare/query on EntryNumbersCsv, which was correct
-        // back when EntryNumbersCsv WAS the grouping key, but became stale once the grouping key
-        // changed to EntryNumberRange without this block being updated to match (the regression).
+        // Matching key fixed to RdCode + EntryNumberRange (2026-11-03) - this used to compare/
+        // query on EntryNumbersCsv, which was correct back when EntryNumbersCsv WAS the grouping
+        // key, but became stale once the grouping key changed to EntryNumberRange without this
+        // block being updated to match (the regression). NOTE (2026-11-16): this block is about
+        // the EXTERNAL RD Fetch service's own "merge entry" concept, a different, narrower concern
+        // from this app's own Entry Number consolidation grouping (GetEntryNumberGroupAsync, keyed
+        // on RdCode + EntryNumbersCsv) - it intentionally stays keyed on EntryNumberRange, the
+        // field this Details page's own "Entry Number" box edits, not on EntryNumbersCsv.
         // EntryNumberRange is now written by this Save itself (the mutation loop above, from the
         // "Entry Number" field), so this check always runs against the record's just-saved value,
-        // not a stale pre-edit snapshot. A blank/whitespace EntryNumberRange means this record is
-        // never part of any group (same rule as GetGroupRecordsAsync), so it can never have a
-        // merge candidate and the whole block is skipped for it. Otherwise, any active row outside
-        // this record's own group that already shares the same (RdCode, EntryNumberRange) is a
-        // genuine merge candidate - this is always re-checked fresh here, never inferred from
-        // "did a specific field change".
+        // not a stale pre-edit snapshot. A blank/whitespace EntryNumberRange means this record has
+        // nothing to merge, so the whole block is skipped for it. Otherwise, any active row outside
+        // this record's own Entry Number group that already shares the same (RdCode,
+        // EntryNumberRange) is a genuine merge candidate - this is always re-checked fresh here,
+        // never inferred from "did a specific field change".
         if (!string.IsNullOrWhiteSpace(record.EntryNumberRange))
         {
             // The external service's own match query excludes any row that is currently locked
@@ -557,48 +553,6 @@ public class ManualValidationService : IManualValidationService
         return combined[..(RemarksMaxLength - suffix.Length)] + suffix;
     }
 
-    // Applies zero or more pending Duplicate checkbox toggles in a single Save. Each change
-    // targets one document by DocumentId + RenamedFileName (not position/index - the Supporting
-    // Documents list can be sorted/reordered, and unlike a Document Type correction this never
-    // renames a file, so there's no stable position to resolve against in the first place) within
-    // the OPENED record's OWN DocumentsJson only - never a group sibling's copy, matching the
-    // acceptance criteria that only the specific document a checkbox targets gets updated. A
-    // document never represented in `changes` (nobody touched its checkbox this Save) is left
-    // completely untouched, including its existing "duplicate" value.
-    private static void ApplyDocumentDuplicateFlags(ManualValidationRequest record, List<DocumentDuplicateFlagItemDto> changes, List<string> changeDescriptions)
-    {
-        var items = ParseDocumentItems(record.DocumentsJson);
-        var changed = false;
-
-        foreach (var change in changes)
-        {
-            var item = items.FirstOrDefault(i =>
-                string.Equals(i.DocumentId ?? string.Empty, change.DocumentId ?? string.Empty, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(i.RenamedFileName, change.RenamedFileName, StringComparison.OrdinalIgnoreCase));
-
-            if (item is null)
-            {
-                continue;
-            }
-
-            var wasDuplicate = string.Equals(item.IsDuplicate, "yes", StringComparison.OrdinalIgnoreCase);
-            if (wasDuplicate == change.IsDuplicate)
-            {
-                continue;
-            }
-
-            item.IsDuplicate = change.IsDuplicate ? "yes" : "no";
-            changed = true;
-            changeDescriptions.Add(
-                $"Supporting Document '{item.RenamedFileName}' - Duplicate: Previous = '{(wasDuplicate ? "Yes" : "No")}', Current = '{(change.IsDuplicate ? "Yes" : "No")}'");
-        }
-
-        if (changed)
-        {
-            record.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
-        }
-    }
-
     // Applies one or more pending Others -> real Document Type corrections in a single Save.
     // Every change's target document is resolved up front, against ONE pre-change sorted snapshot
     // of the OPENED record's OWN DocumentsJson (see MapToDetail - the exact same source/sort that
@@ -620,48 +574,50 @@ public class ManualValidationService : IManualValidationService
         Dictionary<int, List<string>> changeDescriptionsByRecordId,
         HashSet<int> touchedRecordIds)
     {
-        var perRecordItems = group.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
-        var allItemsFlat = perRecordItems.SelectMany(x => x.Items).ToList();
+        // Must match MapToDetail's displayDocuments ordering EXACTLY - change.Index is a 1-based
+        // position in that SAME combined, multi-processing-instance list (BuildCombinedDocuments),
+        // not just the opened record's own instance - a document shown at a given position can
+        // now come from any processing instance in the whole Entry Number group.
+        var combined = BuildCombinedDocuments(group);
+        var instances = PartitionIntoProcessingInstances(group);
+        var instanceByRepresentativeId = instances.ToDictionary(inst => inst[0].Id, inst => inst);
 
-        // Must match MapToDetail's displayDocuments ordering EXACTLY (Document Type, then Image
-        // File Name) - change.Index is a 1-based position in that displayed list (see
-        // SaveTitleRecordItemDto's sibling, SaveManualValidationRequestDto's DocumentChangesJson
-        // doc comment), so resolving it against any different order here silently targets
-        // whatever document happens to land on that position under the two orderings instead -
-        // the file that actually gets renamed, and the one left untouched, can both be wrong
-        // without either operation itself failing or throwing.
-        var primarySorted = perRecordItems.First(x => x.RecordId == primary.Id).Items
-            .OrderBy(item => item.DocumentName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var targets = new List<(DocumentJsonItem Target, DocumentChangeItemDto Change)>();
+        var targets = new List<(DocumentJsonItem Target, int OwnerRecordId, DocumentChangeItemDto Change)>();
         foreach (var change in changes)
         {
-            if (change.Index - 1 < primarySorted.Count)
+            if (change.Index - 1 < combined.Count)
             {
-                targets.Add((primarySorted[change.Index - 1], change));
+                var (item, ownerRecordId) = combined[change.Index - 1];
+                targets.Add((item, ownerRecordId, change));
             }
         }
 
-        foreach (var (target, change) in targets)
+        foreach (var (target, ownerRecordId, change) in targets)
         {
+            // A correction never crosses a processing-instance boundary: it only ever propagates
+            // to the SAME instance's own sibling rows (every one of which is guaranteed to carry
+            // an identical copy of this exact document - spec: "identical DocumentsJson values are
+            // repeated across sibling records"), never into a different instance's distinct,
+            // unrelated document set, even though both instances sit in the same broader Entry
+            // Number group.
+            var instanceMembers = instanceByRepresentativeId[ownerRecordId];
+            var perRecordItems = instanceMembers.Select(r => (RecordId: r.Id, Items: ParseDocumentItems(r.DocumentsJson))).ToList();
+            var instanceItemsFlat = perRecordItems.SelectMany(x => x.Items).ToList();
+
             var originalIdentityKey = DocumentIdentityKey(target);
 
-            // Every item across the WHOLE group that shares this document's identity
-            // (DocumentIdentityKey - RD Code/Entry Folder/Document Type Folder/File Name, so this
-            // also catches the same document re-extracted into a different Root Source Path
-            // folder on another fetch run, not just a byte-identical ImagePath) - always includes
-            // `target` itself. Grouped by each item's ORIGINAL absolute ImagePath (captured now,
-            // before any renames below): a physical rename only ever needs to happen ONCE per
-            // distinct physical file. Two rows from the SAME fetch run commonly cite the literal
-            // same file (e.g. a shared "Others" bucket file, which is why `target` can itself
-            // share its original path with another member) - renaming that file a second time
-            // would fail (it's already been moved by the first rename), so only ONE member per
-            // path group is actually renamed (preferring `target`'s own row when it's a member of
-            // that group, so the plain, unsuffixed audit line still lands on the row the user
-            // directly edited); every other member in that same group just gets its fields copied
-            // from whichever one was actually renamed.
+            // Every item across this ONE processing instance that shares this document's identity
+            // (DocumentIdentityKey - RD Code/Entry Folder/Document Type Folder/File Name) - always
+            // includes `target` itself. Grouped by each item's ORIGINAL absolute ImagePath
+            // (captured now, before any renames below): a physical rename only ever needs to
+            // happen ONCE per distinct physical file. Two rows from the SAME instance commonly
+            // cite the literal same file (e.g. a shared "Others" bucket file, which is why
+            // `target` can itself share its original path with another member) - renaming that
+            // file a second time would fail (it's already been moved by the first rename), so
+            // only ONE member per path group is actually renamed (preferring `target`'s own row
+            // when it's a member of that group, so the plain, unsuffixed audit line still lands
+            // on the row the user directly edited); every other member in that same group just
+            // gets its fields copied from whichever one was actually renamed.
             var allMatching = perRecordItems
                 .SelectMany(x => x.Items.Select(item => (RecordId: x.RecordId, Item: item)))
                 .Where(x => ReferenceEquals(x.Item, target) || string.Equals(DocumentIdentityKey(x.Item), originalIdentityKey, StringComparison.OrdinalIgnoreCase))
@@ -683,11 +639,13 @@ public class ManualValidationService : IManualValidationService
                 var groupOriginalFileName = renamedItem.RenamedFileName;
                 var groupOriginalName = renamedItem.DocumentName;
 
-                // Sequence numbers are scanned across every document in the group (allItemsFlat),
-                // not just this document's own owning row, so two genuinely different physical
-                // files reclassified to the same Document Type in one Save never collide on the
-                // same sequence number.
-                var groupRollback = ApplyDocumentTypeChange(allItemsFlat, renamedItem, change.Code.Trim(), change.Name.Trim());
+                // Sequence numbers are scanned across every document in THIS processing instance
+                // (instanceItemsFlat), not just this document's own owning row and never a
+                // different instance's own, otherwise-unrelated files - two genuinely different
+                // physical files reclassified to the same Document Type in one Save never collide
+                // on the same sequence number, and two different instances' own "Others" buckets
+                // never interfere with each other's numbering either.
+                var groupRollback = ApplyDocumentTypeChange(instanceItemsFlat, renamedItem, change.Code.Trim(), change.Name.Trim());
                 if (groupRollback is { } gr)
                 {
                     rollbacks.Add(gr);
@@ -724,19 +682,21 @@ public class ManualValidationService : IManualValidationService
                     }
                 }
             }
-        }
 
-        // Only the owning row's own DocumentsJson is re-serialized/written back - a document that
-        // was never targeted, or belongs to a row nothing here touched, is left completely alone.
-        foreach (var (recordId, items) in perRecordItems)
-        {
-            if (!touchedRecordIds.Contains(recordId))
+            // Only this instance's touched member rows are re-serialized/written back here - a
+            // document never targeted, or belonging to a row nothing in THIS instance touched, is
+            // left completely alone; a different processing instance's own rows are never even
+            // considered, let alone written to.
+            foreach (var (recordId, items) in perRecordItems)
             {
-                continue;
-            }
+                if (!touchedRecordIds.Contains(recordId))
+                {
+                    continue;
+                }
 
-            var owner = group.First(r => r.Id == recordId);
-            owner.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
+                var owner = instanceMembers.First(r => r.Id == recordId);
+                owner.DocumentsJson = JsonSerializer.Serialize(items, JsonOptions);
+            }
         }
     }
 
@@ -798,23 +758,23 @@ public class ManualValidationService : IManualValidationService
         string.Equals(item.DocumentId, "OTHERS", StringComparison.OrdinalIgnoreCase)
         || string.Equals(item.DocumentTypeCode, "OTHERS", StringComparison.OrdinalIgnoreCase);
 
-    // Scans every supporting document across the WHOLE group (every Title Record sharing this
-    // EntryNumbersCsv - see ApplyDocumentTypeChanges's `allItemsFlat`) for ones already classified
-    // under the exact same Document ID + Document Name, extracts the trailing "_<number>" sequence
-    // from their renamedFileName (matching "<DocumentID>_<DocumentName>_<N>.<extension>"), and
-    // returns the highest one found, plus 1 - or 1 if none match. Gaps are preserved on purpose
-    // (existing _1 and _4 -> next is _5, not _2) since this always takes the true maximum, never
-    // the first free slot.
+    // Scans every supporting document across the WHOLE processing instance (every Title Record
+    // sharing this document's own OcrExtractionRecordId/folder - see ApplyDocumentTypeChanges's
+    // `instanceItemsFlat` - never a different processing instance in the same broader Entry
+    // Number group) for ones already classified under the exact same Document ID + Document Name,
+    // extracts the trailing "_<number>" sequence from their renamedFileName (matching
+    // "<DocumentID>_<DocumentName>_<N>.<extension>"), and returns the highest one found, plus 1 -
+    // or 1 if none match. Gaps are preserved on purpose (existing _1 and _4 -> next is _5, not
+    // _2) since this always takes the true maximum, never the first free slot.
     //
-    // Deliberately scans the whole group, not just the file's own folder: a document being
+    // Deliberately scans the whole instance, not just the file's own folder: a document being
     // corrected from Others always renames within the "Others" bucket folder, which is a
     // different folder than a genuine document of the same real type that was extracted directly
     // (each Document Type gets its own folder) - scoping the scan to one folder would miss that
     // existing document entirely and could generate a filename that already exists elsewhere,
-    // which is exactly the wrong-sequence-number/visible-collision bug this must avoid. Display no
-    // longer merges documents across Title Records (see MapToDetail), so scanning the whole group
-    // here does not risk re-introducing the older "combined into one row, then split after a
-    // rename" problem that a narrower, folder-only scan was once used to work around.
+    // which is exactly the wrong-sequence-number/visible-collision bug this must avoid. Never
+    // scans beyond this one instance - a different processing instance's own "Others" bucket is a
+    // physically different folder and must never influence this instance's own numbering.
     private static int NextDocumentSequenceNumber(List<DocumentJsonItem> items, string code, string name)
     {
         var pattern = new Regex("^" + Regex.Escape(SanitizeForFileName(code)) + "_" + Regex.Escape(SanitizeForFileName(name)) + @"_(\d+)\.[^.]+$", RegexOptions.IgnoreCase);
@@ -931,115 +891,151 @@ public class ManualValidationService : IManualValidationService
     // Validation records, so there is no real outcome to report yet; whatever mechanism completes
     // that migration is expected to update this same row afterward, same as it always has.
     // Deliberately never sets MigratedAt itself (that's reserved for when a real migration
-    // outcome exists) and only ever touches the single selected record - sibling Title Records
-    // sharing this record's EntryNumberRange, and all Supporting Documents, are left untouched.
+    // outcome exists). Processes the WHOLE Entry Number group the clicked record belongs to
+    // (RdCode + EntryNumbersCsv, spanning every processing instance/folder - see
+    // GetEntryNumberGroupAsync/GroupMatchingRecords), not just the single selected record - fixed
+    // 2026-11-16: once the list page started collapsing a group's sibling Title Records into one
+    // visible row, a sibling that isn't the group's representative row had no way to be
+    // individually selected from the list anymore, so leaving this single-record would have
+    // silently orphaned those siblings in Manual Validation forever. Each sibling still gets its
+    // own independent MigrationRecord + MigrationDocuments, copying that sibling's own
+    // Title/TitleType/Plan/Block/Lot/TitleSequence/DocumentsJson (its OWN processing instance's
+    // document set, never a different instance's) - this does NOT merge or delete any underlying
+    // ManualValidationRequests row, and does NOT change how MigrationService processes/submits
+    // each resulting MigrationRecord afterward (that stays entirely per-record, unchanged).
     public async Task MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
     {
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
-        // Same mandatory-fields gate the old Migrate action used - reused as-is, since a record
-        // that isn't fully validated still shouldn't be flagged ready for the next stage. This
-        // also guarantees RdCode/RdName/EntryNumberRange/Title/TitleType/Plan/Block/Lot/
-        // TitleSequence are all non-blank below, since every one of them is checked here.
-        if (ComputeMissingFields(record).Length > 0)
+        // Locking stays scoped to `record` alone, same precedent as SaveAsync's own group handling
+        // above - group siblings are written regardless of their own lock state.
+        var group = await GetEntryNumberGroupAsync(record, cancellationToken);
+
+        // Same mandatory-fields gate the old Migrate action used, now applied to every member of
+        // the group up front (fail the whole click before changing anything if any sibling isn't
+        // fully validated yet) - a half-migrated group would be worse than rejecting the click.
+        foreach (var sibling in group)
         {
-            throw new BusinessValidationException("Please complete all mandatory fields before marking this record as Ready for Migration.");
+            if (ComputeMissingFields(sibling).Length > 0)
+            {
+                throw new BusinessValidationException("Please complete all mandatory fields before marking this record as Ready for Migration.");
+            }
         }
 
-        if (await _context.MigrationRecords.AnyAsync(m => m.RequestNumber == record.RequestNumber, cancellationToken))
+        // UK_ManualValidationRequests_01 guarantees RequestNumber is unique per row (even within
+        // one folder-group, every sibling has its own distinct RequestNumber), so this check is
+        // still meaningful per sibling - a sibling already migrated by an earlier click is simply
+        // skipped rather than failing the whole batch; only a fully-already-migrated group is a
+        // real conflict.
+        var requestNumbers = group.Select(g => g.RequestNumber).ToList();
+        var alreadyMigratedRequestNumbers = await _context.MigrationRecords
+            .Where(m => requestNumbers.Contains(m.RequestNumber))
+            .Select(m => m.RequestNumber)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var pending = group.Where(g => !alreadyMigratedRequestNumbers.Contains(g.RequestNumber)).ToList();
+        if (pending.Count == 0)
         {
             throw new ConflictException("This Entry Record has already been marked Ready for Migration.");
         }
 
-        var originalStatus = record.Status;
-        record.Status = ManualValidationStatus.ReadyForMigration;
         var displayName = await _currentUserService.GetDisplayNameAsync(cancellationToken);
-        record.UpdatedByUserId = _currentUserService.UserId;
-        record.UpdatedByUsername = displayName;
-        record.UpdatedAt = DateTime.UtcNow;
 
-        // Action History entry via the existing RecordHistory mechanism - no new table/column.
-        // Action is stored as the literal display string (not an enum .ToString()) because,
-        // unlike Saved/Closed, "Ready for Migration" has spaces that a plain enum name can't
-        // produce; the same string is what <status-badge> renders for this action.
-        _context.RecordHistory.Add(new RecordHistory
-        {
-            TableName = RecordHistoryTables.ManualValidationRequests,
-            RecordId = record.Id,
-            RefNo = record.RequestNumber,
-            Action = "Ready for Migration",
-            Remarks = $"Status: Previous = '{FormatValueForHistory(StatusDisplay.ManualValidationStatusToDisplay(originalStatus.ToString()))}', Current = 'Ready for Migration'",
-            ByUserId = _currentUserService.UserId,
-            ByUsername = displayName ?? "system",
-            CreatedAt = DateTime.UtcNow,
-        });
-
-        // Pre-resolved once (not per entry number/document) - used below to populate each new
-        // MigrationDocument's CodeLookupId immediately, same shape as
+        // Pre-resolved once (not per sibling/entry number/document) - used below to populate each
+        // new MigrationDocument's CodeLookupId immediately, same shape as
         // MigrationService.GetDocumentTypeLookupAsync.
         var documentTypeLookup = await _context.CodeLookups.AsNoTracking()
             .Where(c => c.LookupType == CodeLookupTypes.DocumentType)
             .ToDictionaryAsync(c => c.Code, c => c.Id, cancellationToken);
-        var documentItems = ParseDocumentItems(record.DocumentsJson);
 
-        // One MigrationRecords row per entry number (client requirement, 2026-11-12: "Migration
-        // Tracking should be per entry number") - everything else copied identically into each row,
-        // only EntryNumbersCsv itself differs per iteration.
-        foreach (var entryNumber in EntryNumberCsvParser.Split(record.EntryNumbersCsv))
+        foreach (var sibling in pending)
         {
-            var migrationRecord = new MigrationRecord
-            {
-                RequestNumber = record.RequestNumber,
-                OcrExtractionRecordId = record.OcrExtractionRecordId,
-                MigrationDate = DateTime.UtcNow,
-                RdCode = record.RdCode!,
-                RdName = record.RdName!,
-                EntryNumbersCsv = entryNumber,
-                Title = record.Title,
-                TitleType = record.TitleType,
-                Plan = record.Plan,
-                Block = record.Block,
-                Lot = record.Lot,
-                TitleSequence = record.TitleSequence,
-                MigrationStatus = Models.Enums.MigrationStatus.ReadyForMigration,
-                MigrationType = Models.Enums.MigrationType.ManualValidation,
-                ProcessedByUserId = _currentUserService.UserId,
-                ProcessedByUsername = displayName,
-                // Verbatim copy - preserves the original JSON structure exactly as Manual Validation
-                // produced it. ProcessingStatus is deliberately left null here (not Pending): unlike
-                // System Migration's automatic 6-hourly batch, nothing processes a Manual Validation
-                // row until a user explicitly clicks "Initiate Migration" on its Migration Details
-                // page (see MigrationService.InitiateMigrationAsync), so null means "not yet
-                // initiated" rather than "queued".
-                DocumentJson = record.DocumentsJson,
-                // Copied directly from this record's own (possibly user-corrected via Save)
-                // EntryNumberRange - see MigrationRecord.RangeEntryNumber's own comment for why this
-                // is no longer looked up indirectly through OcrExtractionRecordId.
-                RangeEntryNumber = record.EntryNumberRange,
-            };
+            var originalStatus = sibling.Status;
+            sibling.Status = ManualValidationStatus.ReadyForMigration;
+            sibling.UpdatedByUserId = _currentUserService.UserId;
+            sibling.UpdatedByUsername = displayName;
+            sibling.UpdatedAt = DateTime.UtcNow;
 
-            // One MigrationDocuments row per supporting document, created immediately - not
-            // deferred until the SD Auto Conversion API responds (client requirement, 2026-11-12:
-            // the API response must UPDATE these rows, never INSERT new ones). CodeLookupId is
-            // left null exactly when DocumentName is still "OTHERS" (never resolves in the
-            // lookup), so an already-classified document is correctly never treated as "Others"
-            // from the moment it's created - see MigrationService.InitiateMigrationAsync, which
-            // sources submission from these rows directly instead of re-parsing DocumentsJson.
-            foreach (var item in documentItems)
+            // Action History entry via the existing RecordHistory mechanism - no new table/column.
+            // Action is stored as the literal display string (not an enum .ToString()) because,
+            // unlike Saved/Closed, "Ready for Migration" has spaces that a plain enum name can't
+            // produce; the same string is what <status-badge> renders for this action.
+            _context.RecordHistory.Add(new RecordHistory
             {
-                var documentName = item.DocumentId ?? item.DocumentTypeCode ?? string.Empty;
-                migrationRecord.Documents.Add(new MigrationDocument
+                TableName = RecordHistoryTables.ManualValidationRequests,
+                RecordId = sibling.Id,
+                RefNo = sibling.RequestNumber,
+                Action = "Ready for Migration",
+                Remarks = $"Status: Previous = '{FormatValueForHistory(StatusDisplay.ManualValidationStatusToDisplay(originalStatus.ToString()))}', Current = 'Ready for Migration'",
+                ByUserId = _currentUserService.UserId,
+                ByUsername = displayName ?? "system",
+                CreatedAt = DateTime.UtcNow,
+            });
+
+            var documentItems = ParseDocumentItems(sibling.DocumentsJson);
+
+            // One MigrationRecords row per entry number (client requirement, 2026-11-12: "Migration
+            // Tracking should be per entry number") - everything else copied identically into each
+            // row, only EntryNumbersCsv itself differs per iteration.
+            foreach (var entryNumber in EntryNumberCsvParser.Split(sibling.EntryNumbersCsv))
+            {
+                var migrationRecord = new MigrationRecord
                 {
-                    DocumentName = documentName,
-                    FileName = item.RenamedFileName,
-                    SourceImagePath = item.ImagePath,
-                    CodeLookupId = documentTypeLookup.TryGetValue(documentName, out var codeLookupId) ? codeLookupId : null,
-                    Status = MigrationDocumentStatus.Pending,
-                });
-            }
+                    RequestNumber = sibling.RequestNumber,
+                    OcrExtractionRecordId = sibling.OcrExtractionRecordId,
+                    MigrationDate = DateTime.UtcNow,
+                    RdCode = sibling.RdCode!,
+                    RdName = sibling.RdName!,
+                    EntryNumbersCsv = entryNumber,
+                    Title = sibling.Title,
+                    TitleType = sibling.TitleType,
+                    Plan = sibling.Plan,
+                    Block = sibling.Block,
+                    Lot = sibling.Lot,
+                    TitleSequence = sibling.TitleSequence,
+                    MigrationStatus = Models.Enums.MigrationStatus.ReadyForMigration,
+                    MigrationType = Models.Enums.MigrationType.ManualValidation,
+                    ProcessedByUserId = _currentUserService.UserId,
+                    ProcessedByUsername = displayName,
+                    // Verbatim copy - preserves the original JSON structure exactly as Manual
+                    // Validation produced it. ProcessingStatus is deliberately left null here (not
+                    // Pending): unlike System Migration's automatic 6-hourly batch, nothing
+                    // processes a Manual Validation row until a user explicitly clicks "Initiate
+                    // Migration" on its Migration Details page (see
+                    // MigrationService.InitiateMigrationAsync), so null means "not yet initiated"
+                    // rather than "queued".
+                    DocumentJson = sibling.DocumentsJson,
+                    // Copied directly from this sibling's own (possibly user-corrected via Save)
+                    // EntryNumberRange - see MigrationRecord.RangeEntryNumber's own comment for why
+                    // this is no longer looked up indirectly through OcrExtractionRecordId.
+                    RangeEntryNumber = sibling.EntryNumberRange,
+                };
 
-            _context.MigrationRecords.Add(migrationRecord);
+                // One MigrationDocuments row per supporting document, created immediately - not
+                // deferred until the SD Auto Conversion API responds (client requirement,
+                // 2026-11-12: the API response must UPDATE these rows, never INSERT new ones).
+                // CodeLookupId is left null exactly when DocumentName is still "OTHERS" (never
+                // resolves in the lookup), so an already-classified document is correctly never
+                // treated as "Others" from the moment it's created - see
+                // MigrationService.InitiateMigrationAsync, which sources submission from these
+                // rows directly instead of re-parsing DocumentsJson.
+                foreach (var item in documentItems)
+                {
+                    var documentName = item.DocumentId ?? item.DocumentTypeCode ?? string.Empty;
+                    migrationRecord.Documents.Add(new MigrationDocument
+                    {
+                        DocumentName = documentName,
+                        FileName = item.RenamedFileName,
+                        SourceImagePath = item.ImagePath,
+                        CodeLookupId = documentTypeLookup.TryGetValue(documentName, out var codeLookupId) ? codeLookupId : null,
+                        Status = MigrationDocumentStatus.Pending,
+                    });
+                }
+
+                _context.MigrationRecords.Add(migrationRecord);
+            }
         }
 
         try
@@ -1048,9 +1044,10 @@ public class ManualValidationService : IManualValidationService
         }
         catch (DbUpdateException)
         {
-            // UK_MigrationRecords_01 (unique RequestNumber) caught a concurrent duplicate
-            // submission - the pre-check above already covers the common case; this is the
-            // defense-in-depth backstop for a genuine race between two near-simultaneous clicks.
+            // UK_MigrationRecords_01 (unique RequestNumber + EntryNumbersCsv) caught a concurrent
+            // duplicate submission - the pre-check above already covers the common case; this is
+            // the defense-in-depth backstop for a genuine race between two near-simultaneous
+            // clicks (on the same record, or on two different siblings of the same group at once).
             throw new ConflictException("This Entry Record has already been marked Ready for Migration.");
         }
     }
@@ -1133,30 +1130,44 @@ public class ManualValidationService : IManualValidationService
             .FirstOrDefaultAsync(r => r.Id == id && r.MigratedAt == null, cancellationToken)
             ?? throw new NotFoundException("Manual validation record", id);
 
-    // Every active ManualValidationRequest sharing `primary`'s exact RD Code AND EntryNumberRange,
-    // in ascending Id order (so "Title Record 1" is always the earliest-created row) - the group
-    // key is the (RdCode, EntryNumberRange) pair, never EntryNumberRange alone (the same range
-    // can legitimately recur under a different RD) and never RdCode alone (one RD has many
-    // unrelated ranges), and never RequestNumber or Id. EntryNumbersCsv (the DB column, distinct
-    // from the Details page's "Entry Number" field, which reads/writes EntryNumberRange - see
-    // SaveAsync) is never compared, used as a fallback, or otherwise made part of this key. A
-    // blank/whitespace EntryNumberRange (NULL included) never groups, even
-    // with another blank/whitespace row: a record with no range always forms a group of one
-    // (itself) - two records both missing a range are identified independently by Id, never
-    // assumed to belong together. RdCode must also be present for a match; either side being
-    // blank forces a group of one.
-    // Returns tracked entities (so SaveAsync can mutate and persist group siblings directly).
-    private async Task<List<ManualValidationRequest>> GetGroupRecordsAsync(ManualValidationRequest primary, CancellationToken cancellationToken)
+    // LEVEL 1 - the overall Entry Number group (2026-11-16, Entry Number-based consolidation
+    // across processing instances). Every active ManualValidationRequest sharing `primary`'s
+    // exact RdCode AND EntryNumbersCsv, in ascending Id order (so "Title Record 1" is always the
+    // earliest-created row) - the key is the (RdCode, EntryNumbersCsv) pair, never EntryNumbersCsv
+    // alone (the same Entry Number can legitimately recur under a different RD) and never RdCode
+    // alone (one RD has many unrelated Entry Numbers), and never RequestNumber or Id.
+    // EntryNumberRange (the Details page's own editable "Entry Number" display/search field - see
+    // SaveAsync/BuildSearchQuery) is a DIFFERENT, narrower concern and plays no part in this key -
+    // EntryNumbersCsv is the raw value the external extraction pipeline sets once at
+    // record-creation time and never changes afterward, which is exactly why it - not the
+    // user-editable EntryNumberRange - is the stable identity that must tie multiple processing
+    // instances of "the same real Entry Number" together, even when each instance's own OCR-
+    // extracted EntryNumberRange text could vary slightly between runs. A blank/whitespace
+    // EntryNumbersCsv (NULL included), or a blank RdCode, never groups - each such row forms a
+    // group of one (itself), identified independently by Id. Returns tracked entities (so SaveAsync/
+    // MarkReadyForMigrationAsync can mutate and persist group siblings directly).
+    //
+    // IMPORTANT: this key deliberately does NOT include FolderPath. An earlier fix (same date)
+    // tried RdCode + EntryNumberRange + FolderPath as a single flat key - that was wrong: the same
+    // Entry Number can legitimately be processed multiple times under different physical folders
+    // (a different OcrExtractionRecords row each time), and every one of those processing
+    // instances must still consolidate into this SAME overall group, never split into separate
+    // ones just because the folder changed. FolderPath/OcrExtractionRecordId instead identify
+    // which PROCESSING INSTANCE (and therefore which DocumentsJson) a row within this broader
+    // group belongs to - see PartitionIntoProcessingInstances/BuildCombinedDocuments below.
+    private async Task<List<ManualValidationRequest>> GetEntryNumberGroupAsync(ManualValidationRequest primary, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(primary.RdCode) || string.IsNullOrWhiteSpace(primary.EntryNumberRange))
+        if (string.IsNullOrWhiteSpace(primary.RdCode) || string.IsNullOrWhiteSpace(primary.EntryNumbersCsv))
         {
             return [primary];
         }
 
         var rdCode = primary.RdCode;
-        var entryNumberRange = primary.EntryNumberRange;
+        var entryNumbersCsv = primary.EntryNumbersCsv;
+
         var group = await _context.ManualValidationRequests
-            .Where(r => r.MigratedAt == null && r.RdCode == rdCode && r.EntryNumberRange == entryNumberRange)
+            .Include(r => r.OcrExtractionRecord)
+            .Where(r => r.MigratedAt == null && r.RdCode == rdCode && r.EntryNumbersCsv == entryNumbersCsv)
             .OrderBy(r => r.Id)
             .ToListAsync(cancellationToken);
 
@@ -1196,22 +1207,56 @@ public class ManualValidationService : IManualValidationService
         return missing.ToArray();
     }
 
+    // LEVEL 2 - partitions a Level-1 Entry Number group (RdCode + EntryNumbersCsv) into individual
+    // processing instances, each of which shares exactly one DocumentsJson (spec: "identical
+    // DocumentsJson values are repeated across sibling records" within one instance). Keyed by
+    // OcrExtractionRecordId when present - two rows pointing at the same OcrExtractionRecords row
+    // are unambiguously the same physical fetch/extraction, the most reliable identity available
+    // (never the FolderPath string alone - "do not assume FolderPath alone uniquely identifies a
+    // processing instance if it can be reused"). A row with no OcrExtractionRecordId at all forms
+    // its own singleton instance, keyed by its own Id - two such rows are never assumed to be the
+    // same instance just because both lack a link.
+    private static List<List<ManualValidationRequest>> PartitionIntoProcessingInstances(List<ManualValidationRequest> group) =>
+        group
+            .GroupBy(r => r.OcrExtractionRecordId.HasValue ? $"ocr:{r.OcrExtractionRecordId}" : $"solo:{r.Id}")
+            .Select(g => g.OrderBy(r => r.Id).ToList())
+            .ToList();
+
+    // Builds the consolidated Supporting Documents list for an Entry Number group: one
+    // representative DocumentsJson per processing instance (the lowest-Id sibling in that
+    // instance - every other sibling in it is guaranteed to carry an identical copy, so only the
+    // representative's is ever parsed), UNIONED across every distinct processing instance found
+    // in the group - never just the single opened record's own instance. Different instances'
+    // document sets are combined, never overwritten or concatenated as raw JSON; identical
+    // documents repeated across sibling rows WITHIN one instance are still only ever read once.
+    // Sorted ascending by Document Type, then Image File Name, matching the single-instance
+    // ordering this always used before consolidation existed. Each returned item carries which
+    // record actually owns it (OwnerRecordId - always that instance's representative), so a
+    // correction later resolves back to the correct instance without ever crossing into another.
+    private static List<(DocumentJsonItem Item, int OwnerRecordId)> BuildCombinedDocuments(List<ManualValidationRequest> group)
+    {
+        var combined = new List<(DocumentJsonItem Item, int OwnerRecordId)>();
+        foreach (var instance in PartitionIntoProcessingInstances(group))
+        {
+            var representative = instance[0];
+            combined.AddRange(ParseDocumentItems(representative.DocumentsJson).Select(item => (item, representative.Id)));
+        }
+
+        return combined
+            .OrderBy(x => x.Item.DocumentName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(x => x.Item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static ManualValidationDetailDto MapToDetail(ManualValidationRequest primary, List<ManualValidationRequest> group)
     {
-        // Supporting Documents are read from the OPENED record's own DocumentsJson only - never
-        // merged/concatenated across its group siblings. Every Title Record sharing this
-        // EntryNumberRange describes the same physical document set (see SaveAsync's sync step
-        // below), so there is nothing to merge; doing so previously caused the same document to
-        // occasionally render as two rows (or, after a correction, to collide in display with an
-        // unrelated document of the same resulting name from a sibling's own folder - see
-        // NextDocumentSequenceNumber). Sorted ascending by Document Type (documentName - the
-        // "Document Type" column in Details.cshtml), then by Image File Name (renamedFileName) as
-        // the tiebreaker for documents sharing the same type - so the image viewer's Prev/Next
-        // order follows the same Document Type grouping the table displays.
-        var displayDocuments = ParseDocumentItems(primary.DocumentsJson)
-            .OrderBy(item => item.DocumentName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        // Supporting Documents are now consolidated across every processing instance in the
+        // Level-1 Entry Number group (2026-11-16) - see BuildCombinedDocuments. Previously this
+        // read only the opened record's own DocumentsJson; that was correct when a group could
+        // only ever represent one physical folder, but silently discarded other processing
+        // instances' documents once the same Entry Number could legitimately be processed more
+        // than once under a different folder.
+        var displayDocuments = BuildCombinedDocuments(group);
 
         return new ManualValidationDetailDto
         {
@@ -1250,14 +1295,13 @@ public class ManualValidationService : IManualValidationService
                     .Where(f => f is "title" or "titleType" or "plan" or "block" or "lot" or "titleSequence")
                     .ToArray(),
             }).ToArray(),
-            Documents = displayDocuments.Select((item, index) => new ManualValidationDocumentDto
+            Documents = displayDocuments.Select((x, index) => new ManualValidationDocumentDto
             {
                 Id = index + 1,
-                DocumentId = item.DocumentId,
-                DocumentName = item.DocumentName,
-                RenamedFileName = item.RenamedFileName,
-                CanChangeDocumentType = IsOthersEligible(item),
-                IsDuplicate = string.Equals(item.IsDuplicate, "yes", StringComparison.OrdinalIgnoreCase),
+                DocumentId = x.Item.DocumentId,
+                DocumentName = x.Item.DocumentName,
+                RenamedFileName = x.Item.RenamedFileName,
+                CanChangeDocumentType = IsOthersEligible(x.Item),
             }).ToArray(),
         };
     }
@@ -1280,9 +1324,11 @@ public class ManualValidationService : IManualValidationService
     // least 4 segments to work with (kept safe rather than throwing on an unexpected shape).
     //
     // Used solely to find every OTHER Title Record's own copy of the document a Document Type
-    // change targets (see ApplyDocumentTypeChanges's `allMatching`), so the same correction can be
-    // synchronized into all of them on Save - never for display (Supporting Documents display
-    // reads only the opened record's own DocumentsJson; see MapToDetail).
+    // change targets, WITHIN that document's own processing instance (see
+    // ApplyDocumentTypeChanges's `allMatching`), so the same correction can be synchronized into
+    // all of them on Save - never across a different processing instance, and never for display
+    // (Supporting Documents display consolidates one representative per instance across the whole
+    // Entry Number group; see BuildCombinedDocuments/MapToDetail).
     private static string DocumentIdentityKey(DocumentJsonItem item)
     {
         if (string.IsNullOrWhiteSpace(item.ImagePath))
@@ -1309,19 +1355,16 @@ public class ManualValidationService : IManualValidationService
             return null;
         }
 
-        // Same source and same sort as MapToDetail (the opened record's own DocumentsJson only,
-        // never merged across group siblings), so a given documentId always resolves to the exact
-        // document shown at that position on screen - no separate group lookup needed here at all.
-        // Must match MapToDetail's displayDocuments ordering EXACTLY (Document Type, then Image
-        // File Name) - a mismatched sort here would stream back a different document's image than
-        // the one actually clicked, whenever the two orderings disagree.
-        var sorted = ParseDocumentItems(record.DocumentsJson)
-            .OrderBy(item => item.DocumentName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(item => item.RenamedFileName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        // Same source and same build as MapToDetail's displayDocuments (the whole Entry Number
+        // group's consolidated document list, not just this one record's own instance - 2026-11-16),
+        // so a given documentId always resolves to the exact document shown at that position on
+        // screen. Must match MapToDetail's BuildCombinedDocuments ordering EXACTLY - a mismatch
+        // here would stream back a different document's image than the one actually clicked.
+        var group = await GetEntryNumberGroupAsync(record, cancellationToken);
+        var combined = BuildCombinedDocuments(group);
 
         var index = documentId - 1;
-        return index >= 0 && index < sorted.Count ? sorted[index].ImagePath : null;
+        return index >= 0 && index < combined.Count ? combined[index].Item.ImagePath : null;
     }
 
     private class DocumentJsonItem
@@ -1333,15 +1376,11 @@ public class ManualValidationService : IManualValidationService
         public string RenamedFileName { get; set; } = string.Empty;
         public string? ImagePath { get; set; }
 
-        // "yes"/"no" - set via the Supporting Documents table's Duplicate checkbox (see
-        // ApplyDocumentDuplicateFlags). A separate property from (and never touched by anything
-        // that writes) the existing "duplicate" property the external merge-entry service sets.
-        public string? IsDuplicate { get; set; }
-
         // Every DocumentsJson property not modeled above (e.g. titleNumber, plan, block, lot,
-        // duplicate) - captured here purely so re-serializing this item (ApplyDocumentTypeChanges,
-        // ApplyDocumentDuplicateFlags) round-trips them unchanged instead of silently dropping them;
-        // nothing in this service ever reads or writes through this bag directly.
+        // duplicate, and any legacy isDuplicate value from before the Duplicate checkbox feature
+        // was removed) - captured here purely so re-serializing this item (ApplyDocumentTypeChanges)
+        // round-trips them unchanged instead of silently dropping them; nothing in this service
+        // ever reads or writes through this bag directly.
         [JsonExtensionData]
         public Dictionary<string, JsonElement>? ExtensionData { get; set; }
     }

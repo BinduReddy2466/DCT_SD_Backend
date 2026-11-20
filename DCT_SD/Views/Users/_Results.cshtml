@@ -3,12 +3,12 @@
     var currentRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
 }
 
-<div class="table-responsive table-frame">
+<div class="table-responsive table-frame table-frame-cased">
     <table class="table table-hover align-middle mb-0">
         <thead>
             <tr>
                 <th style="width: 3.5rem;">ID</th>
-                <th>Date Created</th>
+                <th>Date Creation</th>
                 <th>First Name</th>
                 <th>Last Name</th>
                 <th>Username</th>
@@ -35,23 +35,36 @@
                         <td>@u.Role</td>
                         <td><status-badge status="@u.Status"></status-badge></td>
                         <td class="text-center">
-                            @if (u.Role == RoleNames.Administrator)
+                            @{
+                                // A Sub-Admin can never edit an Administrator or a Sub-Admin account -
+                                // another one's, or their own. An Administrator CAN edit another
+                                // Administrator account (or their own), so Edit is only blocked here
+                                // for a Sub-Admin viewer. Administrator accounts stay non-deletable
+                                // through this screen regardless of viewer - that part is unchanged.
+                                var editBlocked = currentRole == RoleNames.SubAdmin && (u.Role == RoleNames.Administrator || u.Role == RoleNames.SubAdmin);
+                                var deleteBlocked = u.Role == RoleNames.Administrator || editBlocked;
+                            }
+                            @if (editBlocked && deleteBlocked)
                             {
                                 <span class="text-muted small">—</span>
                             }
                             else
                             {
-                                // A Sub-Admin can never edit OR delete a Sub-Admin account - another
-                                // one's, or their own.
-                                var actionsBlocked = currentRole == RoleNames.SubAdmin && u.Role == RoleNames.SubAdmin;
                                 <div class="d-flex justify-content-center gap-2">
-                                    @if (actionsBlocked)
+                                    @if (editBlocked)
                                     {
                                         <span class="text-muted small">—</span>
                                     }
                                     else
                                     {
                                         <button type="button" class="btn btn-sm btn-outline-secondary" data-modal-url="@Url.Action("Edit", new { id = u.Id })">Edit</button>
+                                    }
+                                    @if (deleteBlocked)
+                                    {
+                                        <span class="text-muted small">—</span>
+                                    }
+                                    else
+                                    {
                                         <form asp-controller="Users" asp-action="Delete" asp-route-id="@u.Id" method="post"
                                               data-confirm-message="Are you sure you want to delete this account?" data-confirm-danger data-confirm-label="Delete">
                                             <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>

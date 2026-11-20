@@ -14,7 +14,7 @@ public interface ITokenService
     /// (user id, username, role, one claim per allowed menu key) - no password hash, no
     /// other PII - since a JWT's payload is base64-encoded, not encrypted, and must be
     /// treated as readable by anyone who holds the token.
-    (string Token, DateTime ExpiresAtUtc) CreateAccessToken(int userId, string username, string role, IEnumerable<string> menuKeys);
+    (string Token, DateTime ExpiresAtUtc) CreateAccessToken(int userId, string username, string role, IEnumerable<string> menuKeys, bool mustChangePassword = false);
 
     /// A cryptographically random opaque value - never a JWT - so a refresh token carries no
     /// inspectable claims of its own; it is only ever a lookup key into the RefreshTokens table.

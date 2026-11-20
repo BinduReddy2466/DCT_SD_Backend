@@ -92,6 +92,13 @@
         }
         return response.text().then(function (html) {
           contentEl.innerHTML = html;
+          // Item 15 of the Assign Tab spec calls for this specific message with an OK button,
+          // not the inline validation-summary text every other form error already uses here -
+          // native alert() is the OK-button affordance, scoped to this one message only.
+          var summary = contentEl.querySelector('#formValidationSummary');
+          if (summary && /please assign a tab to the user before proceeding/i.test(summary.textContent)) {
+            window.alert(summary.textContent.trim());
+          }
         });
       }).catch(function () {
         if (window.showToast) window.showToast('Could not save changes. Please check your connection and try again.', 'error');

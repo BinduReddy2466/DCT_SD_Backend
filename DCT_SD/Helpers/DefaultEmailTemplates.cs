@@ -32,7 +32,7 @@ public static class DefaultEmailTemplates
             "User Activated",
             "{{Email}}",
             "Lares User Status Change",
-            "Dear {{FirstName}} {{LastName}},\n\nYour account status has been activated by the Administrator.\n\nUser ID: {{Email}}\n\nYou may sign in using your existing credentials.\n\nWarm regards,\nLares"),
+            "Dear {{FirstName}} {{LastName}},\n\nYour account status has been activated by the Administrator.\n\nPlease follow the steps below to change your password:\n\n   1. Log in to the portal using the link: {{ChangePasswordLink}}.\n   2. Use the credentials provided below to access your account:\n         User ID: {{Email}}\n         Password: {{TemporaryPassword}}\n\nWarm regards,\nLares"),
         new DefaultEmailTemplate(
             "user_deactivated",
             "User Deactivated",

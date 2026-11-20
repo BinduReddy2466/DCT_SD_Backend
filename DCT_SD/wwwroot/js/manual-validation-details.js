@@ -30,7 +30,7 @@
       });
     });
 
-    var fieldIds = ['mvRdCode', 'mvEntry', 'mvRdName', 'mvDocumentChangesJson', 'mvDocumentDuplicateFlagsJson'].concat(titleRecordFieldIds);
+    var fieldIds = ['mvRdCode', 'mvEntry', 'mvRdName', 'mvDocumentChangesJson'].concat(titleRecordFieldIds);
     var fieldEls = {};
     fieldIds.forEach(function (id) {
       fieldEls[id] = document.getElementById(id);
@@ -233,22 +233,9 @@
       // successful save or on discard. { [docId]: { code, name } }
       var pendingChanges = {};
 
-      // Zero or more pending Duplicate checkbox toggles, keyed by doc.id - records every document
-      // the user actually checked or unchecked this session (true/false), regardless of its
-      // starting state, so a checkbox nobody touched is never resubmitted/overwritten and an
-      // unchecked-after-being-checked document still gets its change sent. Never sent to the
-      // server except as part of Save itself; cleared entirely on a successful save or on
-      // discard. { [docId]: true|false }
-      var pendingDuplicateChanges = {};
-
       function effectiveDocumentName(doc) {
         var p = pendingChanges[doc.id];
         return p ? p.name : doc.documentName;
-      }
-
-      function effectiveIsDuplicate(doc) {
-        var p = pendingDuplicateChanges[doc.id];
-        return typeof p === 'boolean' ? p : !!doc.isDuplicate;
       }
 
       function escapeRegExp(s) {
@@ -480,11 +467,14 @@
           idxTd.textContent = String(index + 1);
 
           var fileTd = document.createElement('td');
-          fileTd.className = 'small font-monospace';
+          // text-break (not a title tooltip) - matches this same table's own server-rendered
+          // initial markup exactly (Details.cshtml's @for loop), so a long Image File Name or
+          // Document Type wraps onto multiple lines instead of overflowing, with no data loss.
+          fileTd.className = 'small font-monospace text-break';
           fileTd.textContent = effectiveFileName(doc);
 
           var nameTd = document.createElement('td');
-          nameTd.className = 'small fw-medium';
+          nameTd.className = 'small fw-medium text-break';
           if (doc.canChangeDocumentType) {
             var wrapper = document.createElement('div');
             wrapper.className = 'd-flex align-items-center gap-1 flex-wrap';
@@ -528,20 +518,9 @@
             nameTd.textContent = effectiveDocumentName(doc);
           }
 
-          var dupTd = document.createElement('td');
-          dupTd.className = 'small text-center';
-          var dupCheckbox = document.createElement('input');
-          dupCheckbox.type = 'checkbox';
-          dupCheckbox.className = 'form-check-input';
-          dupCheckbox.setAttribute('data-doc-duplicate-checkbox', '');
-          dupCheckbox.setAttribute('data-doc-index', String(index));
-          dupCheckbox.checked = effectiveIsDuplicate(doc);
-          dupTd.appendChild(dupCheckbox);
-
           row.appendChild(idxTd);
           row.appendChild(fileTd);
           row.appendChild(nameTd);
-          row.appendChild(dupTd);
           listEl.appendChild(row);
         });
       }
@@ -566,20 +545,6 @@
           return { index: id, code: p.code, name: p.name };
         });
         document.getElementById('mvDocumentChangesJson').value = arr.length ? JSON.stringify(arr) : '';
-      }
-
-      // Serializes every currently pending Duplicate checkbox toggle into its own hidden field -
-      // each entry targets its document by documentId + renamedFileName (not doc.id/position,
-      // which is purely a client-side display concept the server never sees) since, unlike a
-      // Document Type correction, this never renames a file and so has no stable position to
-      // resolve against on the server in the first place.
-      function syncDuplicateFlagsField() {
-        var ids = Object.keys(pendingDuplicateChanges).map(Number);
-        var arr = ids.map(function (id) {
-          var doc = documents.filter(function (d) { return d.id === id; })[0];
-          return doc ? { documentId: doc.documentId, renamedFileName: doc.renamedFileName, isDuplicate: pendingDuplicateChanges[id] } : null;
-        }).filter(Boolean);
-        document.getElementById('mvDocumentDuplicateFlagsJson').value = arr.length ? JSON.stringify(arr) : '';
       }
 
       function renderDoc() {
@@ -614,9 +579,7 @@
       // Save.
       revertPendingDocumentChange = function () {
         pendingChanges = {};
-        pendingDuplicateChanges = {};
         syncPendingChangesField();
-        syncDuplicateFlagsField();
         renderDocumentList();
         updateDocTypeControls();
       };
@@ -629,9 +592,7 @@
         var current = documents[activeIndex];
         documents = newDocuments;
         pendingChanges = {};
-        pendingDuplicateChanges = {};
         syncPendingChangesField();
-        syncDuplicateFlagsField();
 
         var matchIndex = documents.findIndex(function (d) {
           return current && (d.renamedFileName === current.renamedFileName || d.id === current.id);
@@ -655,15 +616,6 @@
         // document into the Image Viewer), which is harmless and lets the user see the image
         // they're reclassifying without an extra click.
         listEl.addEventListener('change', function (e) {
-          var dupCheckbox = e.target.closest('[data-doc-duplicate-checkbox]');
-          if (dupCheckbox) {
-            var dupIndex = Number(dupCheckbox.getAttribute('data-doc-index'));
-            var dupDoc = documents[dupIndex];
-            pendingDuplicateChanges[dupDoc.id] = dupCheckbox.checked;
-            syncDuplicateFlagsField();
-            return;
-          }
-
           var select = e.target.closest('[data-doc-type-select]');
           if (!select) return;
 
