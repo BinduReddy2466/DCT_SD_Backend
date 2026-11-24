@@ -56,6 +56,15 @@ public class MigrationRecord
     public string? TargetSystemValidation { get; set; }
     public string? TargetSystemActivationStatus { get; set; }
 
+    // Associated Title-level Target System Validation ("Already Associated"/"Associated", mapped
+    // from the SD Auto Conversion API's titleStatus) - distinct from TargetSystemValidation above,
+    // which holds the Entry Record-level value ("Existing"/"Not Existing", mapped from
+    // entryStatus). Both facts come from the SAME API response for this row's own submission
+    // (every Title Record is already its own MigrationRecords row), so both are stored here rather
+    // than one column serving two different business meanings depending on which section displays
+    // it. See MigrationService.MapTitleTargetSystemValidation.
+    public string? TitleTargetSystemValidation { get; set; }
+
     // Holds this Entry Record's supporting-document information end to end: the original
     // ManualValidationRequests.DocumentsJson copied verbatim when marked "Ready for Migration",
     // then merged with the SD Auto Conversion API's own response under a separate "apiResponse"

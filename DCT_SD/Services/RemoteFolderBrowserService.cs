@@ -93,6 +93,26 @@ public class RemoteFolderBrowserService : IRemoteFolderBrowserService
             return false;
         }
 
+        if (path.StartsWith("/", StringComparison.Ordinal))
+        {
+            // POSIX absolute path - this dev server has no drive letters or UNC shares at all, so
+            // a configured NetworkRoots entry that is itself a POSIX path (e.g. "/", to browse the
+            // whole local filesystem for local development) is matched the same prefix-match way
+            // as the Windows-style roots below, with no translation.
+            var posixMatch = GetMappedDrives().FirstOrDefault(d =>
+                string.IsNullOrEmpty(d.DriveLetter) &&
+                (path.Equals(d.UncPath, StringComparison.Ordinal) ||
+                 path.StartsWith(d.UncPath.TrimEnd('/') + "/", StringComparison.Ordinal)));
+
+            if (posixMatch is null)
+            {
+                return false;
+            }
+
+            uncPath = path;
+            return true;
+        }
+
         if (path.StartsWith(@"\\", StringComparison.Ordinal))
         {
             // Already UNC - only accept it if its server+share root matches a currently mapped
@@ -115,6 +135,23 @@ public class RemoteFolderBrowserService : IRemoteFolderBrowserService
         if (path.Length < 2 || path[1] != ':')
         {
             return false;
+        }
+
+        // A configured NetworkRoots entry that is itself a local drive-letter path (e.g.
+        // "C:\DCT_SD\Documents", used for local development where no network drive is mapped) is
+        // matched the same way a UNC root is matched above - by exact match or prefix against the
+        // path as configured, with no DriveLetter-based reconstruction. It's kept as a distinct
+        // branch from the drive-letter lookup below (rather than giving it a DriveLetter too)
+        // because that reconstruction assumes UncPath is a bare drive letter: a subfolder root
+        // would otherwise get its own path segments duplicated back onto the result.
+        var driveRootMatch = GetMappedDrives().FirstOrDefault(d =>
+            string.IsNullOrEmpty(d.DriveLetter) &&
+            (path.Equals(d.UncPath, StringComparison.OrdinalIgnoreCase) ||
+             path.StartsWith(d.UncPath + @"\", StringComparison.OrdinalIgnoreCase)));
+        if (driveRootMatch is not null)
+        {
+            uncPath = path;
+            return true;
         }
 
         var driveLetter = path[..2];

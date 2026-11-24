@@ -54,6 +54,7 @@ public class MigrationRecordConfiguration : IEntityTypeConfiguration<MigrationRe
         builder.Property(r => r.LastFailureReason).HasMaxLength(500);
         builder.Property(r => r.TargetSystemValidation).HasMaxLength(100);
         builder.Property(r => r.TargetSystemActivationStatus).HasMaxLength(20);
+        builder.Property(r => r.TitleTargetSystemValidation).HasMaxLength(100);
         builder.Property(r => r.DocumentJson).HasColumnName("Document_Json");
 
         // Composite, not single-column: several rows now legitimately share one RequestNumber -

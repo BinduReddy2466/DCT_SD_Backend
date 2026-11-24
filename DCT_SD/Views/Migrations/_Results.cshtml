@@ -69,7 +69,7 @@
                             {
                                 <a class="btn btn-outline-secondary btn-sm" href="@Url.Action("Details", "Migrations", new { id = item.Id })">View</a>
                             }
-                            @if (migrationStatusDisplay == "Failed Migration")
+                            @if (item.CanReprocess)
                             {
                                 <button type="button" class="btn btn-outline-secondary btn-sm ms-1" data-list-reprocess-btn data-entry-id="@item.Id">Reprocess</button>
                             }

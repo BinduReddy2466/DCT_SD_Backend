@@ -14,6 +14,17 @@ public class SdAutoConversionResponseDto
     public string? RdCode { get; set; }
     public int TotalImagesCopied { get; set; }
     public DateTimeOffset? ProcessingDate { get; set; }
+
+    // Undocumented as of SD_Conversion_API_Guide_v1 (section 5.1's success response shows only
+    // rdCode/totalImagesCopied/processingDate/Images) - confirmed present in a real response
+    // sample shared 2026-11-20: { ..., "entryStatus": "Existing entry", "titleStatus": "Existing
+    // title Entry No: 2026000001", ... }. Only the "already existing" string has been observed for
+    // either field - there is no confirmed sample yet of what either field looks like for a newly
+    // created entry/title. See MigrationService.MapEntryTargetSystemValidation/
+    // MapTitleTargetSystemValidation for how these are interpreted (deliberately conservative
+    // where the shape is unconfirmed).
+    public string? EntryStatus { get; set; }
+    public string? TitleStatus { get; set; }
     public List<SdAutoConversionImageDto> Images { get; set; } = [];
 }
 

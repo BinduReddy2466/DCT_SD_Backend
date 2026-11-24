@@ -31,4 +31,11 @@ public class MigrationListItemDto
     // only ever be migrated by a human opening it and clicking "Initiate Migration" on the
     // Migration Details page, so View must stay enabled for it.
     public bool CanView { get; set; }
+
+    // Reprocess is only ever valid for ProcessingStatus = Failed (see
+    // MigrationService.ReprocessAsync's own claim condition) - NOT RetryPending, even though both
+    // consolidate to the same "Failed Migration" MigrationStatus display text above. Computed
+    // separately so the list row's Reprocess button is offered only when it would actually
+    // succeed, mirroring Details.cshtml's own canReprocess.
+    public bool CanReprocess { get; set; }
 }

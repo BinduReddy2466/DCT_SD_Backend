@@ -21,14 +21,16 @@ public class MigrationService : IMigrationService
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly ISdAutoConversionClient _sdAutoConversionClient;
+    private readonly IConfiguration _configuration;
 
     private readonly ILogger<MigrationService> _logger;
 
-    public MigrationService(ApplicationDbContext context, ICurrentUserService currentUserService, ISdAutoConversionClient sdAutoConversionClient, ILogger<MigrationService> logger)
+    public MigrationService(ApplicationDbContext context, ICurrentUserService currentUserService, ISdAutoConversionClient sdAutoConversionClient, IConfiguration configuration, ILogger<MigrationService> logger)
     {
         _context = context;
         _currentUserService = currentUserService;
         _sdAutoConversionClient = sdAutoConversionClient;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -154,6 +156,7 @@ public class MigrationService : IMigrationService
         TargetSystemValidation = r.TargetSystemValidation,
         TargetSystemActivationStatus = r.TargetSystemActivationStatus,
         CanView = r.ProcessingStatus is not (MigrationProcessingStatus.Pending or MigrationProcessingStatus.Processing),
+        CanReprocess = r.ProcessingStatus == MigrationProcessingStatus.Failed,
     };
 
     // Consolidated Migration Status (spec: Migration Monitoring page) - every Entry Record (and
@@ -424,8 +427,13 @@ public class MigrationService : IMigrationService
         // Keyed directly on RD Code resolution now (not ProcessingStatus - there is no more batch
         // queue distinguishing "resolved, auto-queued" from "unresolved, null"; every
         // System-Migration row starts at ProcessingStatus = null regardless, same as a
-        // Manual-Validation row - see SyncEligibleOcrExtractionRecordsAsync).
-        var canMarkReadyForMigration = record.MigrationType == MigrationType.SystemMigration && isTargetRdNotIdentified;
+        // Manual-Validation row - see SyncEligibleOcrExtractionRecordsAsync). ProcessingStatus is
+        // still checked here (mirroring MarkReadyForMigrationAsync's own guard) so a record that
+        // has already entered the queue/been processed never shows "Ready for Migration" again,
+        // even in the edge case where its RD Code's CodeLookup is later deactivated.
+        var canMarkReadyForMigration = record.MigrationType == MigrationType.SystemMigration
+            && record.ProcessingStatus is null
+            && isTargetRdNotIdentified;
 
         // Action History (spec section 10): merges the existing trigger-based MigrationRecords_Log
         // audit trail (`history` above - system-level processing transitions) with user-initiated
@@ -599,6 +607,14 @@ public class MigrationService : IMigrationService
                 await _context.SaveChangesAsync(cancellationToken);
                 return;
             }
+
+            // Entry Record / Associated Title Target System Validation (spec: "Display Target
+            // System Validation Based on Business Rules and Migration API Response") - both facts
+            // come from this same successful response, regardless of whether every submitted
+            // document ends up recognized below, so both are set unconditionally here rather than
+            // only on a fully-Completed outcome.
+            tracked.TargetSystemValidation = MapEntryTargetSystemValidation(result.Response.EntryStatus);
+            tracked.TitleTargetSystemValidation = MapTitleTargetSystemValidation(result.Response.TitleStatus, tracked.EntryNumbersCsv, tracked.Id);
 
             // Positional correlation - same rationale as the former SystemMigrationService
             // .ProcessOneAsync (the API's documentId/sequence are not reliable per-item keys; see
@@ -810,6 +826,10 @@ public class MigrationService : IMigrationService
             document.Sequence = image.Sequence;
             document.ReasonForFailing = null;
             document.Status = MigrationDocumentStatus.InsertedAsNew;
+            // The only reachable success outcome here is image.Status == "Inserted" (a lingering
+            // "Duplicate SD" throws above instead) - Not Existing per the same per-image mapping
+            // UpsertMigrationDocument uses (spec section 3).
+            document.TargetSystemValidation = "Not Existing";
         }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
         {
@@ -1396,7 +1416,12 @@ public class MigrationService : IMigrationService
             TitleSequence = t.TitleSequence,
             MigrationType = t.MigrationType?.ToString(),
             MigrationStatus = ConsolidatedMigrationStatus(t),
-            TargetSystemValidation = t.TargetSystemValidation,
+            // Associated Title-level value ("Already Associated"/"Associated") - distinct from
+            // t.TargetSystemValidation, which is this same row's own Entry Record-level value
+            // ("Existing"/"Not Existing"). Every sibling here (including the currently-opened
+            // record itself, which is always included in titleRecords) has both values on its own
+            // row - see MigrationRecord.TitleTargetSystemValidation.
+            TargetSystemValidation = t.TitleTargetSystemValidation,
             ReasonForFailing = t.LastFailureReason,
         }).ToArray(),
         ActionHistory = history.Select(h => new MigrationActionHistoryDto
@@ -1431,6 +1456,70 @@ public class MigrationService : IMigrationService
         _ => activity,
     };
 
+    // Entry Record-level Target System Validation (spec: "Display Target System Validation Based
+    // on Business Rules and Migration API Response", section 1). entryStatus == "Existing entry"
+    // -> "Existing" is CONFIRMED (client-provided real API response, 2026-11-20) and hardcoded.
+    // What entryStatus looks like for a brand-new entry has no confirmed sample yet - the value
+    // shown for that case (TargetSystemValidation:EntryNewValue, default "Not Existing") is
+    // configurable in appsettings.json rather than hardcoded, so the client's eventual confirmed
+    // answer can be applied without a code change. Applied whenever entryStatus isn't the
+    // confirmed "Existing entry" value (absent, blank, or anything else) - this is only called
+    // after a successful API response that otherwise proves the migration ran.
+    private string MapEntryTargetSystemValidation(string? entryStatus) =>
+        string.Equals(entryStatus?.Trim(), "Existing entry", StringComparison.OrdinalIgnoreCase)
+            ? "Existing"
+            : _configuration["TargetSystemValidation:EntryNewValue"] ?? "Not Existing";
+
+    private static readonly Regex TitleStatusEntryNoRegex = new(@"Entry\s*No\.?\s*:?\s*(\S+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // Associated Title-level Target System Validation (spec section 2). The confirmed sample
+    // ("Existing title Entry No: 2026000001") proves the TITLE itself already exists, but the
+    // client has NOT yet confirmed whether that means "Already Associated" (already linked to our
+    // target entry) or "Associated" (being linked to it for the first time via this call) - nor is
+    // there any confirmed sample of what a brand-new title's titleStatus looks like. Both outcomes
+    // are therefore configurable (TargetSystemValidation:ExistingTitleValue/TitleNewValue in
+    // appsettings.json) rather than hardcoded, so the client's eventual confirmed answers can be
+    // applied without a code change:
+    //  - null/blank titleStatus -> null (nothing to assign confidently either way).
+    //  - "Existing title ..." whose embedded Entry No matches what we submitted -> the configured
+    //    ExistingTitleValue (default "Already Associated").
+    //  - "Existing title ..." whose embedded Entry No does NOT match what we submitted -> null,
+    //    logged - this title exists under a different entry than the one we're targeting, which
+    //    neither business value correctly describes (per the task's own warning: "do not assume
+    //    every existing title is necessarily already associated with the target entry... identify
+    //    the missing information instead of incorrectly assigning a status").
+    //  - any other non-blank value -> the configured TitleNewValue (default "Associated"), on the
+    //    same "API evaluated it and didn't report it as existing" elimination logic as the
+    //    entry-level mapping above; logged at Information level since its exact shape is
+    //    unconfirmed.
+    private string? MapTitleTargetSystemValidation(string? titleStatus, string? submittedEntryNumber, int migrationRecordId)
+    {
+        if (string.IsNullOrWhiteSpace(titleStatus))
+        {
+            return null;
+        }
+
+        if (titleStatus.TrimStart().StartsWith("Existing title", StringComparison.OrdinalIgnoreCase))
+        {
+            var match = TitleStatusEntryNoRegex.Match(titleStatus);
+            if (match.Success && !string.IsNullOrWhiteSpace(submittedEntryNumber)
+                && !string.Equals(match.Groups[1].Value.Trim(), submittedEntryNumber.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "MigrationRecords.Id {Id}: titleStatus '{TitleStatus}' references a different Entry No than the one submitted ({SubmittedEntryNumber}) - leaving the Associated Title Target System Validation unassigned rather than guessing.",
+                    migrationRecordId, titleStatus, submittedEntryNumber);
+                return null;
+            }
+
+            return _configuration["TargetSystemValidation:ExistingTitleValue"] ?? "Already Associated";
+        }
+
+        _logger.LogInformation(
+            "MigrationRecords.Id {Id}: titleStatus '{TitleStatus}' did not match the one confirmed 'Existing title' pattern - treating as a first-time association. No confirmed sample of this case exists yet; verify against a real API response.",
+            migrationRecordId, titleStatus);
+        return _configuration["TargetSystemValidation:TitleNewValue"] ?? "Associated";
+    }
+
     // FileName is saved as whatever the SD Auto Conversion API itself returned for this image, not
     // the name we submitted - mirrors SystemMigrationService.UpsertMigrationDocument exactly (same
     // rationale: the API is free to alter the filename it echoes back). Matching an existing row
@@ -1449,6 +1538,18 @@ public class MigrationService : IMigrationService
         document.SizeBytes = image.SizeBytes;
         document.Sequence = image.Sequence;
         document.ReasonForFailing = null;
+        // Supporting Document-level Target System Validation (spec section 3): Duplicate SD ->
+        // Existing (already in PHILARIS-RD), Inserted -> Not Existing (migrated for the first
+        // time). image.Status is only ever "Duplicate SD" or "Inserted" by this point - the caller
+        // only reaches here for a recognized status (see the missing/unrecognized branch above,
+        // which routes to UpsertFailedMigrationDocument instead) - but the fallback null still
+        // guards against an unrecognized third value appearing in a future API response.
+        document.TargetSystemValidation = image.Status switch
+        {
+            "Duplicate SD" => "Existing",
+            "Inserted" => "Not Existing",
+            _ => null,
+        };
     }
 
     // A document the API never recognized - Status = Failed, ReasonForFailing set - mirrors
@@ -1460,6 +1561,8 @@ public class MigrationService : IMigrationService
         document.DestinationPath = null;
         document.SizeBytes = null;
         document.Sequence = null;
+        // No recognized image status to map from - leave unassigned rather than guessing.
+        document.TargetSystemValidation = null;
     }
 
     // Still classified "Others" (CodeLookupId null) - never submitted to the API at all (see
@@ -1471,6 +1574,8 @@ public class MigrationService : IMigrationService
         document.DestinationPath = null;
         document.SizeBytes = null;
         document.Sequence = null;
+        // Never submitted to the API at all - no validation to report.
+        document.TargetSystemValidation = null;
     }
 
     // Preserves the original supporting-document JSON under a "documents" property and adds the

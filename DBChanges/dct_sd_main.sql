@@ -353,6 +353,13 @@ BEGIN
         ApiResponseAt                 DATETIME2     NULL,
         TargetSystemValidation        NVARCHAR(100) NULL,
         TargetSystemActivationStatus  NVARCHAR(20)  NULL,
+        -- Added 2026-11-20: Associated Title-level Target System Validation ("Already Associated"/
+        -- "Associated", mapped from the SD Auto Conversion API's titleStatus) - distinct from
+        -- TargetSystemValidation above, which holds the Entry Record-level value ("Existing"/"Not
+        -- Existing", mapped from entryStatus). Both values come from the SAME API response for
+        -- this row's own submission, so both are stored on this row rather than one column serving
+        -- two different business meanings depending on which section displays it.
+        TitleTargetSystemValidation    NVARCHAR(100) NULL,
         -- Added 2026-11-10 (Ready for Migration / SD Auto Conversion from Migration Monitoring):
         -- holds the Entry Record's supporting-document information end to end - the original
         -- ManualValidationRequests.DocumentsJson copied verbatim on "Ready for Migration", then
@@ -374,6 +381,12 @@ BEGIN
         CONSTRAINT CK_MigrationRecords_DocumentJson CHECK (Document_Json IS NULL OR ISJSON(Document_Json) = 1)
     );
 END;
+GO
+
+-- Catches up a MigrationRecords table that already existed before TitleTargetSystemValidation was
+-- introduced - the CREATE TABLE above only runs on a brand-new database.
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.MigrationRecords') AND name = 'TitleTargetSystemValidation')
+    ALTER TABLE dbo.MigrationRecords ADD TitleTargetSystemValidation NVARCHAR(100) NULL;
 GO
 
 -- Composite, not single-column RequestNumber: as of 2026-11-12, one MigrationRecords row is
@@ -2003,10 +2016,17 @@ BEGIN
         ApiResponseAt DATETIME2 NULL,
         TargetSystemValidation NVARCHAR(100) NULL,
         TargetSystemActivationStatus NVARCHAR(20) NULL,
+        TitleTargetSystemValidation NVARCHAR(100) NULL,
         Document_Json NVARCHAR(MAX) NULL,
         RangeEntryNumber NVARCHAR(MAX) NULL
     );
 END;
+GO
+
+-- Catches up a MigrationRecords_Log table that already existed before TitleTargetSystemValidation
+-- was introduced - the CREATE TABLE above only runs on a brand-new database.
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.MigrationRecords_Log') AND name = 'TitleTargetSystemValidation')
+    ALTER TABLE dbo.MigrationRecords_Log ADD TitleTargetSystemValidation NVARCHAR(100) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Log_01' AND object_id = OBJECT_ID('dbo.MigrationRecords_Log'))
@@ -2057,10 +2077,17 @@ BEGIN
         ApiResponseAt DATETIME2 NULL,
         TargetSystemValidation NVARCHAR(100) NULL,
         TargetSystemActivationStatus NVARCHAR(20) NULL,
+        TitleTargetSystemValidation NVARCHAR(100) NULL,
         Document_Json NVARCHAR(MAX) NULL,
         RangeEntryNumber NVARCHAR(MAX) NULL
     );
 END;
+GO
+
+-- Catches up a MigrationRecords_Hist table that already existed before TitleTargetSystemValidation
+-- was introduced - the CREATE TABLE above only runs on a brand-new database.
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.MigrationRecords_Hist') AND name = 'TitleTargetSystemValidation')
+    ALTER TABLE dbo.MigrationRecords_Hist ADD TitleTargetSystemValidation NVARCHAR(100) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Hist_01' AND object_id = OBJECT_ID('dbo.MigrationRecords_Hist'))
@@ -2071,7 +2098,10 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_Hist_
     CREATE NONCLUSTERED INDEX IX_MigrationRecords_Hist_03 ON dbo.MigrationRecords_Hist (Hist_RefNo);
 GO
 
-IF OBJECT_ID('dbo.trg_MigrationRecords_I', 'TR') IS NULL
+-- Dropped and recreated unconditionally (rather than guarded by OBJECT_ID(...) IS NULL) so
+-- rerunning this script against a database where the trigger already exists still picks up
+-- column-list changes, e.g. TitleTargetSystemValidation below.
+IF OBJECT_ID('dbo.trg_MigrationRecords_I', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_MigrationRecords_I;
 EXEC('
 CREATE TRIGGER dbo.trg_MigrationRecords_I ON dbo.MigrationRecords AFTER INSERT AS
 BEGIN
@@ -2079,13 +2109,13 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
-    SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus, i.MigrationType, i.ProcessedByUserId, i.ProcessedByUsername, i.ProcessingStatus, i.AttemptCount, i.ProcessingStartedAt, i.ProcessingCompletedAt, i.LastAttemptAt, i.LastFailureReason, i.ApiResponseJson, i.ApiResponseAt, i.TargetSystemValidation, i.TargetSystemActivationStatus, i.Document_Json, i.RangeEntryNumber FROM inserted i;
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, TitleTargetSystemValidation, Document_Json, RangeEntryNumber)
+    SELECT @UserId, @IPAddr, ''I'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus, i.MigrationType, i.ProcessedByUserId, i.ProcessedByUsername, i.ProcessingStatus, i.AttemptCount, i.ProcessingStartedAt, i.ProcessingCompletedAt, i.LastAttemptAt, i.LastFailureReason, i.ApiResponseJson, i.ApiResponseAt, i.TargetSystemValidation, i.TargetSystemActivationStatus, i.TitleTargetSystemValidation, i.Document_Json, i.RangeEntryNumber FROM inserted i;
 END
 ');
 GO
 
-IF OBJECT_ID('dbo.trg_MigrationRecords_U', 'TR') IS NULL
+IF OBJECT_ID('dbo.trg_MigrationRecords_U', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_MigrationRecords_U;
 EXEC('
 CREATE TRIGGER dbo.trg_MigrationRecords_U ON dbo.MigrationRecords AFTER UPDATE AS
 BEGIN
@@ -2093,20 +2123,20 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
-    SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus, i.MigrationType, i.ProcessedByUserId, i.ProcessedByUsername, i.ProcessingStatus, i.AttemptCount, i.ProcessingStartedAt, i.ProcessingCompletedAt, i.LastAttemptAt, i.LastFailureReason, i.ApiResponseJson, i.ApiResponseAt, i.TargetSystemValidation, i.TargetSystemActivationStatus, i.Document_Json, i.RangeEntryNumber FROM inserted i;
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, TitleTargetSystemValidation, Document_Json, RangeEntryNumber)
+    SELECT @UserId, @IPAddr, ''U'', i.Id, i.RequestNumber, i.OcrExtractionRecordId, i.MigrationDate, i.RdCode, i.RdName, i.EntryNumbersCsv, i.Title, i.TitleType, i.[Plan], i.Block, i.Lot, i.TitleSequence, i.MigratedToRdName, i.MigrationStatus, i.SdStatus, i.MigrationType, i.ProcessedByUserId, i.ProcessedByUsername, i.ProcessingStatus, i.AttemptCount, i.ProcessingStartedAt, i.ProcessingCompletedAt, i.LastAttemptAt, i.LastFailureReason, i.ApiResponseJson, i.ApiResponseAt, i.TargetSystemValidation, i.TargetSystemActivationStatus, i.TitleTargetSystemValidation, i.Document_Json, i.RangeEntryNumber FROM inserted i;
 
-    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
+    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, TitleTargetSystemValidation, Document_Json, RangeEntryNumber)
     SELECT @UserId, @IPAddr, LEFT(i.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            (SELECT i2.* FROM inserted i2 WHERE i2.Id = i.Id FOR JSON AUTO),
-           d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.Document_Json, d.RangeEntryNumber
+           d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.TitleTargetSystemValidation, d.Document_Json, d.RangeEntryNumber
     FROM inserted i JOIN deleted d ON i.Id = d.Id;
 END
 ');
 GO
 
-IF OBJECT_ID('dbo.trg_MigrationRecords_D', 'TR') IS NULL
+IF OBJECT_ID('dbo.trg_MigrationRecords_D', 'TR') IS NOT NULL DROP TRIGGER dbo.trg_MigrationRecords_D;
 EXEC('
 CREATE TRIGGER dbo.trg_MigrationRecords_D ON dbo.MigrationRecords AFTER DELETE AS
 BEGIN
@@ -2114,14 +2144,14 @@ BEGIN
     DECLARE @UserId NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''AppUserId'') AS NVARCHAR(50)), N''0'');
     DECLARE @IPAddr NVARCHAR(64) = CAST(SESSION_CONTEXT(N''AppClientIp'') AS NVARCHAR(64));
 
-    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
-    SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.Document_Json, d.RangeEntryNumber FROM deleted d;
+    INSERT INTO dbo.MigrationRecords_Log (Log_UserID, Log_IPAddr, Log_Activity, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, TitleTargetSystemValidation, Document_Json, RangeEntryNumber)
+    SELECT @UserId, @IPAddr, ''D'', d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.TitleTargetSystemValidation, d.Document_Json, d.RangeEntryNumber FROM deleted d;
 
-    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, Document_Json, RangeEntryNumber)
+    INSERT INTO dbo.MigrationRecords_Hist (Hist_UserID, Hist_IPAddr, Hist_RefNo, OldValuesJson, NewValuesJson, Id, RequestNumber, OcrExtractionRecordId, MigrationDate, RdCode, RdName, EntryNumbersCsv, Title, TitleType, [Plan], Block, Lot, TitleSequence, MigratedToRdName, MigrationStatus, SdStatus, MigrationType, ProcessedByUserId, ProcessedByUsername, ProcessingStatus, AttemptCount, ProcessingStartedAt, ProcessingCompletedAt, LastAttemptAt, LastFailureReason, ApiResponseJson, ApiResponseAt, TargetSystemValidation, TargetSystemActivationStatus, TitleTargetSystemValidation, Document_Json, RangeEntryNumber)
     SELECT @UserId, @IPAddr, LEFT(d.RequestNumber, 50),
            (SELECT d2.* FROM deleted d2 WHERE d2.Id = d.Id FOR JSON AUTO),
            NULL,
-           d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.Document_Json, d.RangeEntryNumber
+           d.Id, d.RequestNumber, d.OcrExtractionRecordId, d.MigrationDate, d.RdCode, d.RdName, d.EntryNumbersCsv, d.Title, d.TitleType, d.[Plan], d.Block, d.Lot, d.TitleSequence, d.MigratedToRdName, d.MigrationStatus, d.SdStatus, d.MigrationType, d.ProcessedByUserId, d.ProcessedByUsername, d.ProcessingStatus, d.AttemptCount, d.ProcessingStartedAt, d.ProcessingCompletedAt, d.LastAttemptAt, d.LastFailureReason, d.ApiResponseJson, d.ApiResponseAt, d.TargetSystemValidation, d.TargetSystemActivationStatus, d.TitleTargetSystemValidation, d.Document_Json, d.RangeEntryNumber
     FROM deleted d;
 END
 ');

@@ -683,8 +683,17 @@
           });
       }
 
+      // Guards against a double-submit from a fast double-click or a slow response (every other
+      // action button on this page - Ready for Migration, Insert as New Image, Confirm Duplicate,
+      // Reprocess - already disables itself for the same reason).
       var saveBtn = document.getElementById('migrationSaveBtn');
-      if (saveBtn) saveBtn.addEventListener('click', function () { doSave(false); });
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function () {
+          if (saveBtn.disabled) return;
+          saveBtn.disabled = true;
+          doSave(false).finally(function () { saveBtn.disabled = false; });
+        });
+      }
 
       // --- Ready for Migration (spec section 5) ---
       var readyForMigrationBtn = document.getElementById('migrationReadyForMigrationBtn');

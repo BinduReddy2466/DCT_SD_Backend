@@ -28,14 +28,14 @@ public class MigrationDocument
     // Set only when Status = Failed (the API never recognized this document) - why it failed.
     public string? ReasonForFailing { get; set; }
 
-    // Per-document Target System Validation - distinct from MigrationRecord.TargetSystemValidation
-    // (the Entry Record-level value, also reused as-is for each sibling Title Record, since every
-    // Title Record is already its own MigrationRecords row). Added 2026-11-12 so a document-level
-    // value can be held independently of its parent record's value, rather than every document in
-    // the Supporting Documents table merely echoing the parent's single value. Deliberately left
-    // unset by every code path today - the external SD Auto Conversion API's documented response
-    // has no field for this at either level; nothing populates it until that's confirmed with the
-    // API team.
+    // Per-document Target System Validation ("Existing"/"Not Existing") - distinct from
+    // MigrationRecord.TargetSystemValidation (the Entry Record-level value) and
+    // MigrationRecord.TitleTargetSystemValidation (the Associated Title-level value). Added
+    // 2026-11-12 so a document-level value can be held independently of its parent record's
+    // values. Populated from the SD Auto Conversion API's per-image status - see
+    // MigrationService.UpsertMigrationDocument ("Duplicate SD" -> Existing, "Inserted" -> Not
+    // Existing); left null when the image is missing/unrecognized or the document was never
+    // submitted (still "Others").
     public string? TargetSystemValidation { get; set; }
 
     public MigrationRecord MigrationRecord { get; set; } = null!;

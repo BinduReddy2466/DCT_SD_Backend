@@ -5,10 +5,11 @@ namespace DCT_SD.Models.Dtos.Dashboard;
 //
 // Activated is always 0 (Folder row) / null (Images row, N/A): MigrationRecord
 // .TargetSystemActivationStatus exists on the entity but is never written anywhere in this
-// codebase (same external-API limitation as MigrationRecord.TargetSystemValidation elsewhere in
-// this app) - there is no real "activated in PHILARIS-RD" signal to count yet, so this stays 0
-// by the same explicit product decision already covering WIP/FailedMigration/ConfirmedDuplicate
-// below, rather than inventing a status or a schema change.
+// codebase - unlike TargetSystemValidation/TitleTargetSystemValidation (Entry/Title-level) and
+// MigrationDocument.TargetSystemValidation (document-level), which are populated from the SD Auto
+// Conversion API response, there is no real "activated in PHILARIS-RD" signal to count yet, so
+// this stays 0 by the same explicit product decision already covering
+// WIP/FailedMigration/ConfirmedDuplicate below, rather than inventing a status or a schema change.
 public class DashboardRowDto
 {
     public string RdCode { get; set; } = string.Empty;
