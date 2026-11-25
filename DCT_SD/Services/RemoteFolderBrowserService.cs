@@ -36,7 +36,13 @@ public class RemoteFolderBrowserService : IRemoteFolderBrowserService
     {
         var result = new List<MappedDriveDto>();
 
-        if (OperatingSystem.IsWindows())
+        // Lets a deployment opt out of live drive-letter detection entirely and show only the
+        // explicitly configured NetworkRoots below - e.g. when the live-detected drives for the
+        // current interactive session are not the ones that should be offered for picking a
+        // fetch root, regardless of what happens to be mapped in this Windows logon session.
+        var disableLiveDetection = _configuration.GetValue<bool>("RemoteFolderBrowser:DisableLiveDetection");
+
+        if (!disableLiveDetection && OperatingSystem.IsWindows())
         {
             foreach (var drive in DriveInfo.GetDrives())
             {
