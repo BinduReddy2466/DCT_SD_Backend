@@ -59,15 +59,30 @@ public static class DbInitializer
             });
         }
 
-        if (!await context.AppSettings.AnyAsync(s => s.Category == AppSettingCategories.EmailTemplate))
+        // Per-KEY, not per-category - EmailTemplate (unlike Session/Branding above) holds several
+        // independent rows, one per template Key. A category-wide check would seed every default
+        // template only on a truly empty table and then never again, so a template added to
+        // DefaultEmailTemplates.All later (e.g. user_auto_locked) would never reach an
+        // already-provisioned database - each key is ensured independently instead.
+        var existingTemplateKeys = await context.AppSettings
+            .Where(s => s.Category == AppSettingCategories.EmailTemplate)
+            .Select(s => s.Key)
+            .ToListAsync();
+
+        foreach (var t in DefaultEmailTemplates.All)
         {
-            context.AppSettings.AddRange(DefaultEmailTemplates.All.Select(t => new AppSetting
+            if (existingTemplateKeys.Contains(t.Key))
+            {
+                continue;
+            }
+
+            context.AppSettings.Add(new AppSetting
             {
                 Category = AppSettingCategories.EmailTemplate,
                 Key = t.Key,
                 Label = t.Label,
                 DataJson = JsonSerializer.Serialize(new { recipients = t.Recipients, subject = t.Subject, body = t.Body }, JsonOptions),
-            }));
+            });
         }
 
         await context.SaveChangesAsync();

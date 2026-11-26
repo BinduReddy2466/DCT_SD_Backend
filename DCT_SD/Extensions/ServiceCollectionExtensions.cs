@@ -41,6 +41,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IFailedExtractionService, FailedExtractionService>();
         services.AddScoped<IEmailSenderService, EmailSenderService>();
 
+        // Backs the Add/Edit User "Save" actions' notification emails - see UsersController's
+        // EnqueueRegistrationEmail/EnqueueStatusChangeEmail. Singleton queue + a hosted service
+        // that drains it in its own DI scope, so the controller's response returns immediately
+        // after the DB write instead of waiting on a real SMTP round-trip.
+        services.AddSingleton<IBackgroundTaskQueue, BackgroundTaskQueue>();
+        services.AddHostedService<QueuedTaskHostedService>();
+
         // The one external HTTP dependency in this app - a separate RD/fetch service, reachable
         // only over Paradigm WiFi/VPN. Base URL is config (RdFetchApi:BaseUrl), never hardcoded.
         // Username/Password authenticate every request via HTTP Basic Auth and, like the JWT

@@ -21,17 +21,27 @@
       setInterval(tick, 30000);
     }
 
-    var trigger = document.getElementById('sidebarProfileTrigger');
+    // Hover-triggered, per spec - open on entering either the name or the menu itself, close
+    // shortly after leaving both. The small delay (rather than hiding on mouseleave immediately)
+    // is what lets the pointer cross the few pixels of gap between the trigger and the menu
+    // below it without the menu disappearing first.
+    var profileWrapper = document.querySelector('.sidebar-profile');
     var menu = document.getElementById('sidebarProfileMenu');
-    if (trigger && menu) {
-      trigger.addEventListener('click', function (e) {
-        e.stopPropagation();
-        menu.classList.toggle('d-none');
-      });
-      document.addEventListener('click', function (e) {
-        if (!e.target.closest('#sidebarProfileTrigger') && !e.target.closest('#sidebarProfileMenu')) {
-          menu.classList.add('d-none');
-        }
+    if (profileWrapper && menu) {
+      var hideTimer = null;
+      var showMenu = function () {
+        if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+        menu.classList.remove('d-none');
+      };
+      var scheduleHide = function () {
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(function () { menu.classList.add('d-none'); }, 200);
+      };
+      profileWrapper.addEventListener('mouseenter', showMenu);
+      profileWrapper.addEventListener('mouseleave', scheduleHide);
+      profileWrapper.addEventListener('focusin', showMenu);
+      profileWrapper.addEventListener('focusout', function (e) {
+        if (!profileWrapper.contains(e.relatedTarget)) scheduleHide();
       });
     }
 

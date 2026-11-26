@@ -45,6 +45,11 @@
             initials = $"{firstInitial}{lastInitial}".ToUpperInvariant();
         }
     }
+    // "FirstName LastName (Role)" - the single-line format the spec calls for, e.g. "Juan
+    // Delacruz (Admin)". RoleNames.Administrator is deliberately preferred over the raw Role
+    // claim, matching the same precedent already used for the line below this one.
+    var displayRole = User.IsInRole(RoleNames.Administrator) ? RoleNames.Administrator : (User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "");
+    var profileLabel = string.IsNullOrEmpty(displayRole) ? displayName : $"{displayName} ({displayRole})";
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -120,12 +125,15 @@
                     <button type="button" id="sidebarProfileTrigger" class="w-100 px-3 py-3 d-flex align-items-center gap-2 border-0 bg-transparent text-white">
                         <div class="sidebar-avatar">@initials</div>
                         <div class="text-start flex-grow-1 sidebar-brand-text" style="line-height: 1.25; min-width: 0;">
-                            <div class="text-white text-truncate" style="font-size: 12.5px; font-weight: 500;">@displayName</div>
-                            <div class="text-white-50 text-truncate" style="font-size: 11px;">@(User.IsInRole(RoleNames.Administrator) ? RoleNames.Administrator : (User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? ""))</div>
+                            <div class="text-white text-truncate" style="font-size: 12.5px; font-weight: 500;">@profileLabel</div>
                         </div>
                         <svg class="sidebar-brand-text" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>
                     </button>
                     <div id="sidebarProfileMenu" class="sidebar-profile-menu d-none">
+                        <a asp-controller="Account" asp-action="ChangePassword" class="d-flex align-items-center gap-2">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9" rx="2" /><path stroke-linecap="round" stroke-linejoin="round" d="M8 10.5V7.5a4 4 0 0 1 8 0v3" /></svg>
+                            Change Password
+                        </a>
                         <form asp-controller="Account" asp-action="Logout" method="post" class="m-0">
                             <button type="submit" class="d-flex align-items-center gap-2 text-danger">
                                 <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>

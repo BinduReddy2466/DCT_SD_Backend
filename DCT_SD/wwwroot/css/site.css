@@ -1048,6 +1048,13 @@ textarea.form-control { line-height: 1.5; }
   color: var(--color-warn-text);
   border-color: var(--color-warn-border);
 }
+/* asp-validation-summary renders this class (merged onto whatever classes are already on the
+   element, e.g. a hardcoded "alert alert-danger") whenever there are zero ModelState errors - the
+   stock ASP.NET Core scaffolding always pairs it with this exact hidden rule, which this project
+   never included, so a validation-summary div with no errors still showed as an empty red bar. */
+.validation-summary-valid {
+  display: none;
+}
 
 /* ------------------------------------------------------------------------------------------
    10. Nav tabs, dropdowns, modals, toasts - glass, with smooth open/close motion

@@ -6,6 +6,7 @@ using DCT_SD.Models.Dtos.Auth;
 using DCT_SD.Models.Entities;
 using DCT_SD.Models.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DCT_SD.Services;
 
@@ -22,13 +23,20 @@ public class AuthService : IAuthService
     private readonly ApplicationDbContext _context;
     private readonly ILogger<AuthService> _logger;
     private readonly ITokenService _tokenService;
+    private readonly IBackgroundTaskQueue _backgroundTaskQueue;
     private readonly int _refreshTokenMinutes;
 
-    public AuthService(ApplicationDbContext context, ILogger<AuthService> logger, ITokenService tokenService, IConfiguration configuration)
+    public AuthService(
+        ApplicationDbContext context,
+        ILogger<AuthService> logger,
+        ITokenService tokenService,
+        IBackgroundTaskQueue backgroundTaskQueue,
+        IConfiguration configuration)
     {
         _context = context;
         _logger = logger;
         _tokenService = tokenService;
+        _backgroundTaskQueue = backgroundTaskQueue;
         // A sliding 15-minute window, same length as the access token: as long as at least one
         // request comes in every 15 minutes, silent refresh (Program.cs middleware) keeps rotating
         // this forward and the session never visibly ends. No activity for 15+ minutes - including
@@ -79,14 +87,32 @@ public class AuthService : IAuthService
         if (!PasswordHasher.Verify(password, user.PasswordHash))
         {
             user.FailedLoginAttempts++;
+            var justAutoLocked = false;
             if (user.FailedLoginAttempts >= MaxFailedLoginAttempts)
             {
                 user.Status = UserStatus.Locked;
                 user.LockoutEndUtc = DateTime.UtcNow.Add(AutoLockoutDuration);
+                justAutoLocked = true;
                 _logger.LogWarning("User {UserId} auto-locked for {Minutes} minutes after {Attempts} failed login attempts", user.Id, AutoLockoutDuration.TotalMinutes, user.FailedLoginAttempts);
             }
             await _context.SaveChangesAsync(cancellationToken);
-            throw new UnauthorizedAppException(InvalidCredentialsMessage);
+
+            // Fires exactly once, at the moment this attempt crosses the threshold - every
+            // subsequent attempt against an already-locked account takes the "account is locked"
+            // branch above instead, never this one, so this can't re-send on every blocked retry.
+            // Queued (see IBackgroundTaskQueue) rather than awaited so a mail-server hiccup never
+            // makes a failed login attempt itself hang or fail.
+            if (justAutoLocked)
+            {
+                EnqueueAutoLockedEmail(user.Id, user.FirstName, user.LastName, user.Username);
+            }
+
+            // The lockout message must show on THIS attempt - the one that actually crosses the
+            // threshold - not only starting on the next one; previously this always threw the
+            // generic incorrect-credentials message here regardless of justAutoLocked, so the
+            // user only ever saw the lockout message one attempt later than the account was
+            // actually locked.
+            throw new UnauthorizedAppException(justAutoLocked ? AutoLockedMessage : InvalidCredentialsMessage);
         }
 
         // TEMPORARILY DISABLED FOR THIS RELEASE - concurrent-login blocking is not wanted this
@@ -249,5 +275,47 @@ public class AuthService : IAuthService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    // Resolves ISettingsService/IEmailSenderService fresh from the queued work item's own DI
+    // scope, never from a field on this class - LoginAsync's own scope (and its DbContext) may
+    // already be disposed by the time this actually runs in the background, same reasoning as
+    // UsersController's EnqueueRegistrationEmail/EnqueueStatusChangeEmail.
+    private void EnqueueAutoLockedEmail(int userId, string firstName, string lastName, string username)
+    {
+        var values = new Dictionary<string, string>
+        {
+            ["{{FirstName}}"] = firstName,
+            ["{{LastName}}"] = lastName,
+            ["{{Email}}"] = username,
+            ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
+        };
+
+        _backgroundTaskQueue.Enqueue(async (services, cancellationToken) =>
+        {
+            var settingsService = services.GetRequiredService<ISettingsService>();
+            var emailSenderService = services.GetRequiredService<IEmailSenderService>();
+            var logger = services.GetRequiredService<ILogger<AuthService>>();
+
+            try
+            {
+                var templates = await settingsService.GetEmailTemplatesAsync(cancellationToken);
+                var template = templates.FirstOrDefault(t => t.Key == "user_auto_locked");
+                if (template is null)
+                {
+                    logger.LogWarning("No 'user_auto_locked' email template is configured - auto-lock email for user {UserId} was not sent.", userId);
+                    return;
+                }
+
+                var subject = EmailPlaceholders.FillWithValues(template.Subject, values);
+                var body = EmailPlaceholders.FillWithValues(template.Body, values);
+
+                await emailSenderService.SendAsync(username, subject, body, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to send the auto-lock email for user {UserId}.", userId);
+            }
+        });
     }
 }

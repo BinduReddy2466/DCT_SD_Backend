@@ -36,12 +36,11 @@
                         <td><status-badge status="@u.Status"></status-badge></td>
                         <td class="text-center">
                             @{
-                                // A Sub-Admin can never edit an Administrator or a Sub-Admin account -
-                                // another one's, or their own. An Administrator CAN edit another
-                                // Administrator account (or their own), so Edit is only blocked here
-                                // for a Sub-Admin viewer. Administrator accounts stay non-deletable
-                                // through this screen regardless of viewer - that part is unchanged.
-                                var editBlocked = currentRole == RoleNames.SubAdmin && (u.Role == RoleNames.Administrator || u.Role == RoleNames.SubAdmin);
+                                // An Administrator account is never editable through this screen, by
+                                // any viewer (including another Administrator, or itself) - same as
+                                // it's already never deletable. A Sub-Admin additionally can't edit
+                                // another Sub-Admin account.
+                                var editBlocked = u.Role == RoleNames.Administrator || (currentRole == RoleNames.SubAdmin && u.Role == RoleNames.SubAdmin);
                                 var deleteBlocked = u.Role == RoleNames.Administrator || editBlocked;
                             }
                             @if (editBlocked && deleteBlocked)

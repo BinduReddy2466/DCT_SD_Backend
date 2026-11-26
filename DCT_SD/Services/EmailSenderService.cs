@@ -35,6 +35,13 @@ public class EmailSenderService : IEmailSenderService
         {
             EnableSsl = enableSsl,
             Credentials = new NetworkCredential(username, password),
+            // SmtpClient's own default is 100,000ms - against a slow/unreachable mail server that
+            // meant a send could hang for up to 100 seconds. Callers now queue this send to run
+            // after their HTTP response has already gone out (see IBackgroundTaskQueue), so a long
+            // hang no longer blocks a user-facing action, but an explicit, much shorter bound still
+            // keeps one bad send from tying up a background-queue worker far longer than any real
+            // mail server needs to accept a message.
+            Timeout = 15000,
         };
 
         using var message = new MailMessage

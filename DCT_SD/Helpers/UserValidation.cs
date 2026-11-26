@@ -21,6 +21,10 @@ public static class UserValidation
         if (!Regex.IsMatch(password, "[a-z]")) return false;
         if (!Regex.IsMatch(password, "[0-9]")) return false;
         if (!Regex.IsMatch(password, @"[!@#$%^&*_\-+=]")) return false;
+        // The check above only confirms at least one allowed special character is present - it
+        // never rejected a character OUTSIDE the allowed set (e.g. "Password@123?" was accepted
+        // despite "?" not being one of !,@#$%^&*_-+=). This is the actual whole-string allow-list.
+        if (!Regex.IsMatch(password, @"^[A-Za-z0-9!@#$%^&*_\-+=]+$")) return false;
         return true;
     }
 

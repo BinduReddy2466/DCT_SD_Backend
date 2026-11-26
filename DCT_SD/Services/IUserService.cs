@@ -13,7 +13,7 @@ public interface IUserService
     /// (the page shows "the email address provided is not valid"), not an error condition.
     Task<UserDetailDto?> FindByUsernameAsync(string username, CancellationToken cancellationToken = default);
     Task<UserDetailDto> CreateAsync(CreateUserRequestDto request, CancellationToken cancellationToken = default);
-    Task<UserDetailDto> UpdateAsync(int id, UpdateUserRequestDto request, CancellationToken cancellationToken = default);
+    Task<UpdateUserResult> UpdateAsync(int id, UpdateUserRequestDto request, CancellationToken cancellationToken = default);
     Task DeleteAsync(int id, CancellationToken cancellationToken = default);
 
     /// Sets a user's password directly (no current-password check) - used by the Reset Password

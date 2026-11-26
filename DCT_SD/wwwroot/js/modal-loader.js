@@ -60,7 +60,11 @@
       // in `finally` below, including on failure, so a genuinely failed submit can be retried.
       form.dataset.submitting = 'true';
       var submitBtn = form.querySelector('[type="submit"]');
-      if (submitBtn) submitBtn.disabled = true;
+      var submitBtnOriginalText = submitBtn ? submitBtn.textContent : null;
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+      }
 
       var formData = new FormData(form);
       fetch(form.getAttribute('action') || window.location.href, {
@@ -92,19 +96,18 @@
         }
         return response.text().then(function (html) {
           contentEl.innerHTML = html;
-          // Item 15 of the Assign Tab spec calls for this specific message with an OK button,
-          // not the inline validation-summary text every other form error already uses here -
-          // native alert() is the OK-button affordance, scoped to this one message only.
-          var summary = contentEl.querySelector('#formValidationSummary');
-          if (summary && /please assign a tab to the user before proceeding/i.test(summary.textContent)) {
-            window.alert(summary.textContent.trim());
-          }
         });
       }).catch(function () {
         if (window.showToast) window.showToast('Could not save changes. Please check your connection and try again.', 'error');
       }).finally(function () {
         form.dataset.submitting = 'false';
-        if (submitBtn) submitBtn.disabled = false;
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          // Only restored here on a FAILURE/validation-error path - a success response already
+          // navigated away via location.reload() above, so there's no stale "Saving..." text left
+          // behind to flash before the reload takes effect.
+          if (submitBtnOriginalText !== null) submitBtn.textContent = submitBtnOriginalText;
+        }
       });
     });
   });

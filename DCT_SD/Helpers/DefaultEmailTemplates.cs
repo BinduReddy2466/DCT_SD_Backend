@@ -28,6 +28,12 @@ public static class DefaultEmailTemplates
             "Lares User Status Change",
             "Dear {{FirstName}} {{LastName}},\n\nYour account status has been locked by the Administrator.\n\nUser ID: {{Email}}\n\nWarm regards,\nLares"),
         new DefaultEmailTemplate(
+            "user_auto_locked",
+            "User Auto-Locked (Failed Logins)",
+            "{{Email}}",
+            "Lares User Status Change",
+            "Dear {{FirstName}} {{LastName}},\n\nYour account has been temporarily locked after too many failed login attempts.\n\nUser ID: {{Email}}\n\nYou can try logging in again after 30 minutes.\n\nWarm regards,\nLares"),
+        new DefaultEmailTemplate(
             "user_activated",
             "User Activated",
             "{{Email}}",

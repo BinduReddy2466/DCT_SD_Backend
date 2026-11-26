@@ -75,6 +75,14 @@ public class AccountController : Controller
 
         if (!ModelState.IsValid)
         {
+            // LoginViewModel's only validation is [Required] on Username/Password, each with the
+            // same "All fields are required." message - shown per-field, that duplicates the
+            // identical text once per empty field. Collapse to the single general message the
+            // acceptance criteria call for, via the validation summary already on this page,
+            // rather than the two per-field spans.
+            ModelState.Remove(nameof(model.Username));
+            ModelState.Remove(nameof(model.Password));
+            ModelState.AddModelError(string.Empty, "All fields are required.");
             return View(model);
         }
 
@@ -180,6 +188,10 @@ public class AccountController : Controller
         }
 
         AuthCookieHelper.ClearAuthCookies(Response);
+
+        TempData["ToastMessage"] = "You have been logged out successfully.";
+        TempData["ToastVariant"] = "success";
+
         return RedirectToAction("Login");
     }
 
@@ -277,13 +289,7 @@ public class AccountController : Controller
         }
         else if (!UserValidation.IsValidPassword(model.NewPassword))
         {
-            ModelState.AddModelError(nameof(model.NewPassword),
-                "The password you entered does not meet the minimum security requirements described below:\n" +
-                "Password must be between 8 to 32 characters long;\n" +
-                "Password must contain at least one uppercase letter;\n" +
-                "Password must contain at least one lowercase letter;\n" +
-                "Password must contain at least one number; and\n" +
-                "Password must contain at least one of the following special characters: (!,@#$%^&*_-+=)");
+            ModelState.AddModelError(nameof(model.NewPassword), "The password you entered is invalid.");
         }
 
         if (!ModelState.IsValid)
@@ -324,13 +330,7 @@ public class AccountController : Controller
         }
         else if (!UserValidation.IsValidPassword(model.NewPassword))
         {
-            ModelState.AddModelError(nameof(model.NewPassword),
-                "The password you entered does not meet the minimum security requirements described below:\n" +
-                "Password must be between 8 to 32 characters long;\n" +
-                "Password must contain at least one uppercase letter;\n" +
-                "Password must contain at least one lowercase letter;\n" +
-                "Password must contain at least one number; and\n" +
-                "Password must contain at least one of the following special characters: (!,@#$%^&*_-+=)");
+            ModelState.AddModelError(nameof(model.NewPassword), "The password you entered is invalid.");
         }
 
         if (!ModelState.IsValid)

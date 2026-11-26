@@ -152,17 +152,24 @@ public class UserService : IUserService
         ex.InnerException is Microsoft.Data.SqlClient.SqlException { Number: 2627 or 2601 } sqlEx &&
         sqlEx.Message.Contains("UK_Users_01", StringComparison.OrdinalIgnoreCase);
 
-    public async Task<UserDetailDto> UpdateAsync(int id, UpdateUserRequestDto request, CancellationToken cancellationToken = default)
+    public async Task<UpdateUserResult> UpdateAsync(int id, UpdateUserRequestDto request, CancellationToken cancellationToken = default)
     {
         var user = await LoadUserAsync(id, cancellationToken)
             ?? throw new NotFoundException(nameof(User), id);
 
-        // The Edit button is hidden entirely for a Sub-Admin viewer looking at an Administrator
-        // or a Sub-Admin row, but that's only a UI hint - a crafted request could still post
-        // directly to this endpoint.
-        if (_currentUser.Role == RoleNames.SubAdmin && user.RoleName == RoleNames.Administrator)
+        // Captured before anything below mutates it - the only current source of the user's
+        // pre-update status, so the caller no longer needs its own separate GetByIdAsync just to
+        // learn this. EffectiveStatus, not the raw enum, so this matches exactly what a
+        // GetByIdAsync call would have reported (e.g. an elapsed auto-lock reads as Active here
+        // too, not as the still-stored Locked value).
+        var previousStatus = EffectiveStatus(user).ToString();
+
+        // The Edit button is hidden entirely for an Administrator-role row (and for a Sub-Admin
+        // viewer looking at a Sub-Admin row below), but that's only a UI hint - a crafted request
+        // could still post directly to this endpoint.
+        if (user.RoleName == RoleNames.Administrator)
         {
-            throw new ForbiddenAppException("A Sub-Admin cannot edit an Administrator account.");
+            throw new ForbiddenAppException("The Admin account cannot be edited.");
         }
 
         if (_currentUser.Role == RoleNames.SubAdmin && user.RoleName == RoleNames.SubAdmin)
@@ -174,19 +181,13 @@ public class UserService : IUserService
 
         EnsureRoleAssignmentIsAllowed(role, currentRoleOfTargetUser: user.RoleName);
 
-        // The role dropdown is disabled client-side for a Sub-Admin or an Administrator
-        // account (an Administrator can update its own, or another Administrator's, First/
-        // Last Name and Status, but never its Role - that's what keeps one Administrator from
-        // demoting another through this form), but a disabled field is only a UI hint - a
-        // crafted request could still post a different RoleId.
+        // The role dropdown is disabled client-side for a Sub-Admin account's row - its Role can
+        // never be changed through this form - but a disabled field is only a UI hint; a crafted
+        // request could still post a different RoleId. (An Administrator row never reaches this
+        // point at all - it's already rejected above.)
         if (user.RoleName == RoleNames.SubAdmin && role.Name != user.RoleName)
         {
             throw new ForbiddenAppException("The role of a Sub-Admin account cannot be changed.");
-        }
-
-        if (user.RoleName == RoleNames.Administrator && role.Name != user.RoleName)
-        {
-            throw new ForbiddenAppException("The role of an Administrator account cannot be changed.");
         }
 
         if (!Enum.TryParse<UserStatus>(request.Status, true, out var status))
@@ -212,7 +213,7 @@ public class UserService : IUserService
             await _authService.RevokeAllRefreshTokensForUserAsync(user.Id, cancellationToken);
         }
 
-        return await MapToDetailAsync(user, cancellationToken);
+        return new UpdateUserResult(await MapToDetailAsync(user, cancellationToken), previousStatus);
     }
 
     public async Task DeleteAsync(int id, CancellationToken cancellationToken = default)

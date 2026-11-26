@@ -8,6 +8,7 @@ using DCT_SD.Models.ViewModels;
 using DCT_SD.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DCT_SD.Controllers;
 
@@ -20,6 +21,7 @@ public class UsersController : Controller
     private readonly ISettingsService _settingsService;
     private readonly ITokenService _tokenService;
     private readonly IEmailSenderService _emailSenderService;
+    private readonly IBackgroundTaskQueue _backgroundTaskQueue;
     private readonly ILogger<UsersController> _logger;
 
     public UsersController(
@@ -29,6 +31,7 @@ public class UsersController : Controller
         ISettingsService settingsService,
         ITokenService tokenService,
         IEmailSenderService emailSenderService,
+        IBackgroundTaskQueue backgroundTaskQueue,
         ILogger<UsersController> logger)
     {
         _userService = userService;
@@ -37,6 +40,7 @@ public class UsersController : Controller
         _settingsService = settingsService;
         _tokenService = tokenService;
         _emailSenderService = emailSenderService;
+        _backgroundTaskQueue = backgroundTaskQueue;
         _logger = logger;
     }
 
@@ -125,8 +129,10 @@ public class UsersController : Controller
 
         // The account is already created at this point - a notification-email failure (bad SMTP
         // config, mail server down, etc.) must never turn a successful account creation into a
-        // failure response, so this is fully isolated from the success result below.
-        await SendRegistrationEmailAsync(createdUser, model.Password ?? string.Empty, cancellationToken);
+        // failure response. It also must never make the Save button wait on a real SMTP
+        // round-trip, so this only queues the send (see EnqueueRegistrationEmail) rather than
+        // awaiting it here.
+        EnqueueRegistrationEmail(createdUser, model.Password ?? string.Empty);
 
         return Json(new { success = true, message = "Account successfully created." });
     }
@@ -136,13 +142,12 @@ public class UsersController : Controller
     {
         var user = await _userService.GetByIdAsync(id, cancellationToken);
 
-        // A Sub-Admin can never edit an Administrator or a Sub-Admin account - another one's,
-        // or their own. This guards the direct URL too (e.g. someone navigating straight to
-        // /Users/Edit/{id}). An Administrator, however, CAN edit another Administrator account
-        // (or their own) - just never its Role, which is locked client- and server-side below.
-        if (CurrentRole == RoleNames.SubAdmin && user.Role == RoleNames.Administrator)
+        // An Administrator account is never editable, by any viewer (including another
+        // Administrator, or itself) - this guards the direct URL too (e.g. someone navigating
+        // straight to /Users/Edit/{id}).
+        if (user.Role == RoleNames.Administrator)
         {
-            return StatusCode(403, "A Sub-Admin cannot edit an Administrator account.");
+            return StatusCode(403, "The Admin account cannot be edited.");
         }
 
         if (CurrentRole == RoleNames.SubAdmin && user.Role == RoleNames.SubAdmin)
@@ -183,15 +188,15 @@ public class UsersController : Controller
             return PartialView("_Form", model);
         }
 
-        // Read before the update so there's something to compare the new status against - the
-        // acceptance criteria only send a status-change email when the status actually changed,
-        // never on a save that leaves it the same.
-        var previousStatus = (await _userService.GetByIdAsync(id, cancellationToken)).Status;
-
+        // previousStatus now comes back from UpdateAsync itself (captured before it mutates the
+        // tracked entity) instead of a separate GetByIdAsync call made just to read this one
+        // field off the same row UpdateAsync was about to load anyway - one DB round-trip fewer
+        // on every Edit save.
         UserDetailDto updatedUser;
+        string previousStatus;
         try
         {
-            updatedUser = await _userService.UpdateAsync(id, new UpdateUserRequestDto
+            var result = await _userService.UpdateAsync(id, new UpdateUserRequestDto
             {
                 FirstName = model.FirstName.Trim(),
                 LastName = model.LastName.Trim(),
@@ -199,6 +204,8 @@ public class UsersController : Controller
                 Status = model.Status,
                 AssignedMenuIds = model.AssignedMenuIds,
             }, cancellationToken);
+            updatedUser = result.User;
+            previousStatus = result.PreviousStatus;
         }
         catch (Exception ex) when (ex is ConflictException or ForbiddenAppException or BusinessValidationException or NotFoundException)
         {
@@ -220,9 +227,9 @@ public class UsersController : Controller
             await _userService.ResetPasswordAsync(id, temporaryPassword, requireChangeOnNextLogin: true, cancellationToken);
         }
 
-        // The update already succeeded at this point - same isolation as the registration email,
-        // a notification failure must never turn a successful update into a failure response.
-        await SendStatusChangeEmailAsync(updatedUser, previousStatus, temporaryPassword, cancellationToken);
+        // The update already succeeded at this point - same isolation and same non-blocking queue
+        // as the registration email above.
+        EnqueueStatusChangeEmail(updatedUser, previousStatus, temporaryPassword);
 
         return Json(new { success = true, message = "Account successfully updated." });
     }
@@ -260,12 +267,7 @@ public class UsersController : Controller
         }
         else if (!UserValidation.IsValidUsername(model.Username.Trim()))
         {
-            ModelState.AddModelError(nameof(model.Username),
-                "The username you entered is invalid. Please ensure it meets the following guidelines:\n" +
-                "Contains only letters, numbers, and the following special characters:\n" +
-                "   Period (.)\n" +
-                "   Underscore (_)\n" +
-                "Does not start or end with a special character (e.g., -username@domain.com or username.@domain.com).");
+            ModelState.AddModelError(nameof(model.Username), "The username you entered is invalid.");
         }
 
         if (string.IsNullOrWhiteSpace(model.Password))
@@ -274,13 +276,7 @@ public class UsersController : Controller
         }
         else if (!UserValidation.IsValidPassword(model.Password))
         {
-            ModelState.AddModelError(nameof(model.Password),
-                "The password you entered does not meet the minimum security requirements described below:\n" +
-                "Password must be between 8 to 32 characters long;\n" +
-                "Password must contain at least one uppercase letter;\n" +
-                "Password must contain at least one lowercase letter;\n" +
-                "Password must contain at least one number; and\n" +
-                "Password must contain at least one of the following special characters: (!,@#$%^&*_-+=)");
+            ModelState.AddModelError(nameof(model.Password), "The password you entered is invalid.");
         }
 
         if (model.RoleId is null or 0)
@@ -307,44 +303,58 @@ public class UsersController : Controller
         }
     }
 
-    private async Task SendRegistrationEmailAsync(UserDetailDto createdUser, string temporaryPassword, CancellationToken cancellationToken)
+    // Only the parts that need THIS request's Url/Request (the reset link) happen here, before
+    // returning. The actual template lookup (DB) and SMTP send are queued to run afterward, in
+    // their own DI scope (see IBackgroundTaskQueue) - that's the part that used to block the Save
+    // button's response for as long as the mail server took to answer.
+    private void EnqueueRegistrationEmail(UserDetailDto createdUser, string temporaryPassword)
     {
-        try
+        var (resetToken, _) = _tokenService.CreatePasswordResetToken(createdUser.Id, createdUser.Username);
+        var resetLink = Url.Action("ResetPassword", "Account", new { token = resetToken }, Request.Scheme)
+            ?? string.Empty;
+
+        var values = new Dictionary<string, string>
         {
-            var templates = await _settingsService.GetEmailTemplatesAsync(cancellationToken);
-            var template = templates.FirstOrDefault(t => t.Key == "user_created");
-            if (template is null)
+            ["{{FirstName}}"] = createdUser.FirstName,
+            ["{{LastName}}"] = createdUser.LastName,
+            ["{{Email}}"] = createdUser.Username,
+            ["{{TemporaryPassword}}"] = temporaryPassword,
+            ["{{ResetPasswordLink}}"] = resetLink,
+            ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
+        };
+
+        var userId = createdUser.Id;
+        var toAddress = createdUser.Username;
+
+        _backgroundTaskQueue.Enqueue(async (services, cancellationToken) =>
+        {
+            var settingsService = services.GetRequiredService<ISettingsService>();
+            var emailSenderService = services.GetRequiredService<IEmailSenderService>();
+            var logger = services.GetRequiredService<ILogger<UsersController>>();
+
+            try
             {
-                _logger.LogWarning("No 'user_created' email template is configured - registration email for user {UserId} was not sent.", createdUser.Id);
-                return;
+                var templates = await settingsService.GetEmailTemplatesAsync(cancellationToken);
+                var template = templates.FirstOrDefault(t => t.Key == "user_created");
+                if (template is null)
+                {
+                    logger.LogWarning("No 'user_created' email template is configured - registration email for user {UserId} was not sent.", userId);
+                    return;
+                }
+
+                var subject = EmailPlaceholders.FillWithValues(template.Subject, values);
+                var body = EmailPlaceholders.FillWithValues(template.Body, values);
+
+                await emailSenderService.SendAsync(toAddress, subject, body, cancellationToken);
             }
-
-            var (resetToken, _) = _tokenService.CreatePasswordResetToken(createdUser.Id, createdUser.Username);
-            var resetLink = Url.Action("ResetPassword", "Account", new { token = resetToken }, Request.Scheme)
-                ?? string.Empty;
-
-            var values = new Dictionary<string, string>
+            catch (Exception ex)
             {
-                ["{{FirstName}}"] = createdUser.FirstName,
-                ["{{LastName}}"] = createdUser.LastName,
-                ["{{Email}}"] = createdUser.Username,
-                ["{{TemporaryPassword}}"] = temporaryPassword,
-                ["{{ResetPasswordLink}}"] = resetLink,
-                ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
-            };
-
-            var subject = EmailPlaceholders.FillWithValues(template.Subject, values);
-            var body = EmailPlaceholders.FillWithValues(template.Body, values);
-
-            await _emailSenderService.SendAsync(createdUser.Username, subject, body, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to send the registration email for user {UserId}.", createdUser.Id);
-        }
+                logger.LogError(ex, "Failed to send the registration email for user {UserId}.", userId);
+            }
+        });
     }
 
-    private async Task SendStatusChangeEmailAsync(UserDetailDto updatedUser, string previousStatus, string? temporaryPassword, CancellationToken cancellationToken)
+    private void EnqueueStatusChangeEmail(UserDetailDto updatedUser, string previousStatus, string? temporaryPassword)
     {
         if (string.Equals(previousStatus, updatedUser.Status, StringComparison.OrdinalIgnoreCase))
         {
@@ -364,41 +374,56 @@ public class UsersController : Controller
             return;
         }
 
-        try
+        var values = new Dictionary<string, string>
         {
-            var templates = await _settingsService.GetEmailTemplatesAsync(cancellationToken);
-            var template = templates.FirstOrDefault(t => t.Key == templateKey);
-            if (template is null)
-            {
-                _logger.LogWarning("No '{TemplateKey}' email template is configured - status-change email for user {UserId} was not sent.", templateKey, updatedUser.Id);
-                return;
-            }
+            ["{{FirstName}}"] = updatedUser.FirstName,
+            ["{{LastName}}"] = updatedUser.LastName,
+            ["{{Email}}"] = updatedUser.Username,
+            ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
+        };
 
-            var values = new Dictionary<string, string>
-            {
-                ["{{FirstName}}"] = updatedUser.FirstName,
-                ["{{LastName}}"] = updatedUser.LastName,
-                ["{{Email}}"] = updatedUser.Username,
-                ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
-            };
-
-            if (temporaryPassword is not null)
-            {
-                var (resetToken, _) = _tokenService.CreatePasswordResetToken(updatedUser.Id, updatedUser.Username);
-                values["{{TemporaryPassword}}"] = temporaryPassword;
-                values["{{ChangePasswordLink}}"] = Url.Action("ResetPassword", "Account", new { token = resetToken }, Request.Scheme)
-                    ?? string.Empty;
-            }
-
-            var subject = EmailPlaceholders.FillWithValues(template.Subject, values);
-            var body = EmailPlaceholders.FillWithValues(template.Body, values);
-
-            await _emailSenderService.SendAsync(updatedUser.Username, subject, body, cancellationToken);
-        }
-        catch (Exception ex)
+        if (temporaryPassword is not null)
         {
-            _logger.LogError(ex, "Failed to send the '{TemplateKey}' status-change email for user {UserId}.", templateKey, updatedUser.Id);
+            // Points at the ordinary Login page, not a reset-token link - a reactivated account's
+            // MustChangePassword flag (set by ResetPasswordAsync below) already makes AccountController.Login
+            // redirect straight to Change Password on a successful login, so the recipient logs in
+            // with the temporary password given below and lands on Change Password automatically,
+            // exactly as this email's own wording describes ("Log in to the portal using the
+            // link... Use the credentials provided below").
+            values["{{TemporaryPassword}}"] = temporaryPassword;
+            values["{{ChangePasswordLink}}"] = Url.Action("Login", "Account", null, Request.Scheme)
+                ?? string.Empty;
         }
+
+        var userId = updatedUser.Id;
+        var toAddress = updatedUser.Username;
+
+        _backgroundTaskQueue.Enqueue(async (services, cancellationToken) =>
+        {
+            var settingsService = services.GetRequiredService<ISettingsService>();
+            var emailSenderService = services.GetRequiredService<IEmailSenderService>();
+            var logger = services.GetRequiredService<ILogger<UsersController>>();
+
+            try
+            {
+                var templates = await settingsService.GetEmailTemplatesAsync(cancellationToken);
+                var template = templates.FirstOrDefault(t => t.Key == templateKey);
+                if (template is null)
+                {
+                    logger.LogWarning("No '{TemplateKey}' email template is configured - status-change email for user {UserId} was not sent.", templateKey, userId);
+                    return;
+                }
+
+                var subject = EmailPlaceholders.FillWithValues(template.Subject, values);
+                var body = EmailPlaceholders.FillWithValues(template.Body, values);
+
+                await emailSenderService.SendAsync(toAddress, subject, body, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to send the '{TemplateKey}' status-change email for user {UserId}.", templateKey, userId);
+            }
+        });
     }
 
     private string? CurrentRole => User.FindFirst(ClaimTypes.Role)?.Value;
