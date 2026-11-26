@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace DCT_SD.Models.ViewModels;
 
 public class ResetPasswordViewModel
@@ -13,6 +15,9 @@ public class ResetPasswordViewModel
     // Validated manually in AccountController.ResetPassword (POST), not via DataAnnotations -
     // the acceptance criteria call for exactly one combined "All fields are required" message
     // when either is empty, not independent per-field required messages.
+    [Display(Name = "New Password")]
     public string NewPassword { get; set; } = string.Empty;
+
+    [Display(Name = "Confirm Password")]
     public string ConfirmPassword { get; set; } = string.Empty;
 }
