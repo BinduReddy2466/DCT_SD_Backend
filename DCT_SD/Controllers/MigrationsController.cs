@@ -5,6 +5,7 @@ using DCT_SD.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DCT_SD.Controllers;
 
@@ -14,17 +15,20 @@ public class MigrationsController : Controller
     private readonly IMigrationService _migrationService;
     private readonly IRegistryOfficeService _registryOfficeService;
     private readonly IDocumentTypeService _documentTypeService;
+    private readonly IBackgroundTaskQueue _backgroundTaskQueue;
     private readonly ILogger<MigrationsController> _logger;
 
     public MigrationsController(
         IMigrationService migrationService,
         IRegistryOfficeService registryOfficeService,
         IDocumentTypeService documentTypeService,
+        IBackgroundTaskQueue backgroundTaskQueue,
         ILogger<MigrationsController> logger)
     {
         _migrationService = migrationService;
         _registryOfficeService = registryOfficeService;
         _documentTypeService = documentTypeService;
+        _backgroundTaskQueue = backgroundTaskQueue;
         _logger = logger;
     }
 
@@ -180,25 +184,6 @@ public class MigrationsController : Controller
         }
     }
 
-    [HttpPost]
-    [ValidateAntiForgeryToken]
-    public async Task<IActionResult> InitiateMigration(int id, CancellationToken cancellationToken)
-    {
-        try
-        {
-            await _migrationService.InitiateMigrationAsync(id, cancellationToken);
-            TempData["ToastMessage"] = "Migration initiated for this Entry Record.";
-            TempData["ToastVariant"] = "success";
-        }
-        catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ConflictException)
-        {
-            TempData["ToastMessage"] = ex.Message;
-            TempData["ToastVariant"] = "error";
-        }
-
-        return RedirectToAction("Details", new { id });
-    }
-
     // Manual retry for a record stuck in Failed - nothing retries it automatically, regardless of
     // origin (no batch/background processing - client requirement, 2026-11-12). AJAX (JSON) -
     // called from both the Migration Details page and the Migration Monitoring list row action;
@@ -281,13 +266,6 @@ public class MigrationsController : Controller
         try
         {
             var detail = await _migrationService.SaveCorrectionsAsync(id, model, cancellationToken);
-            // Same formula as Details.cshtml's own canInitiateMigration - mutually exclusive with
-            // CanMarkReadyForMigration. Returned here so the client can show the "Initiate
-            // Migration" button immediately after a Save resolves the RD Code/Others corrections,
-            // without a full page reload - that button was previously only ever rendered at
-            // initial page load (@if canInitiateMigration), so a Save that flips
-            // CanMarkReadyForMigration from true to false left neither button visible.
-            var canInitiateMigration = (detail.ProcessingStatus is null or "RetryPending") && !detail.CanMarkReadyForMigration;
             return Json(new
             {
                 success = true,
@@ -296,7 +274,7 @@ public class MigrationsController : Controller
                 rdName = detail.RdName,
                 isTargetRdNotIdentified = detail.IsTargetRdNotIdentified,
                 canMarkReadyForMigration = detail.CanMarkReadyForMigration,
-                canInitiateMigration,
+                canTriggerReadyForMigration = detail.CanTriggerReadyForMigration,
                 documents = detail.Documents,
             });
         }
@@ -323,6 +301,42 @@ public class MigrationsController : Controller
             return Json(new { success = true, message = "This Entry Record has been placed in the migration queue." });
         }
         catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ConflictException)
+        {
+            return Json(new { success = false, message = ex.Message });
+        }
+    }
+
+    // New "Ready for Migration" trigger (client requirement, 2026-11-27) - distinct from the
+    // legacy ReadyForMigration action above. Shown only when this Entry Record's Supporting
+    // Document Status is "Supporting Documents Migrated with N/A" and its Migration Status isn't
+    // already "Migrated" (see MigrationService.GetByIdAsync's canTriggerReadyForMigration). Mirrors
+    // ManualValidationController.ReadyForMigration's enqueue pattern exactly - resolves
+    // IMigrationService from the queued work item's own DI scope, never injected directly, reusing
+    // the same ProcessEntryNumbersSequentiallyAsync driver so migration logic is never duplicated.
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> TriggerReadyForMigration(int id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _migrationService.TriggerReadyForMigrationAsync(id, cancellationToken);
+            _backgroundTaskQueue.Enqueue(async (services, ct) =>
+            {
+                var migrationService = services.GetRequiredService<IMigrationService>();
+                var logger = services.GetRequiredService<ILogger<MigrationsController>>();
+                try
+                {
+                    await migrationService.ProcessEntryNumbersSequentiallyAsync([id], ct);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Background migration processing failed for MigrationRecord {Id} triggered from Migration Monitoring.", id);
+                }
+            });
+
+            return Json(new { success = true, message = "This Entry Record has been marked Ready for Migration." });
+        }
+        catch (Exception ex) when (ex is NotFoundException or ConflictException)
         {
             return Json(new { success = false, message = ex.Message });
         }

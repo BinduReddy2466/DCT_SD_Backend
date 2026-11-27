@@ -18,8 +18,8 @@ public class MigrationRecord
     // Helpers/EntryNumberCsvParser.cs, which splits a source's comma-separated entry number list
     // into one MigrationRecords row per entry number. Rows created before that change may still
     // hold the full original comma-separated list (not retroactively split - see
-    // MigrationService.SyncEligibleOcrExtractionRecordsAsync/
-    // ManualValidationService.MarkReadyForMigrationAsync).
+    // ManualValidationService.MarkReadyForMigrationAsync, the only thing that creates these rows
+    // now).
     public string? EntryNumbersCsv { get; set; }
     public string? Title { get; set; }
     public TitleType? TitleType { get; set; }

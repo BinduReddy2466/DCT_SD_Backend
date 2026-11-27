@@ -24,14 +24,14 @@ public interface IManualValidationService
     Task CloseAsync(int id, string remarks, CancellationToken cancellationToken = default);
     Task ReleaseLocksForUserAsync(int userId, CancellationToken cancellationToken = default);
 
-    // Replaces the old "Migrate" action: marks the record Status as ReadyForMigration, records it
-    // in Action History, and creates its one MigrationRecords row (MigrationType=ManualValidation)
-    // so it becomes visible on Migration Monitoring. Never sets MigratedAt itself (that's reserved
-    // for when a real migration outcome exists) and only ever touches the single selected record -
-    // sibling Title Records and Supporting Documents are left untouched. The actual migration
-    // mechanism (external to this app) is expected to update this same MigrationRecords row with
-    // the real outcome afterward.
-    Task MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default);
+    // Replaces the old "Migrate" action: marks the record (and every sibling in its Entry Number
+    // group) Status as ReadyForMigration, records it in Action History, and creates one
+    // MigrationRecords row per entry number (MigrationType=ManualValidation) so each becomes
+    // visible on Migration Monitoring. Never sets MigratedAt itself (that's reserved for when a
+    // real migration outcome exists). Returns the newly created MigrationRecords ids so the caller
+    // can trigger migration for each of them right away, in the background (client requirement,
+    // 2026-11-27: no separate button anywhere else to start it).
+    Task<IReadOnlyList<int>> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default);
     Task<TitleSequenceDto> RetrieveTitleSequenceAsync(RetrieveTitleSequenceRequestDto request, CancellationToken cancellationToken = default);
 
     // Persists a Title Sequence value the user picked from the "Repeating Title Number" modal

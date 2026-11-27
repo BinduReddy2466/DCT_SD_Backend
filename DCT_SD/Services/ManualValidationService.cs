@@ -880,18 +880,18 @@ public class ManualValidationService : IManualValidationService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    // Replaces the old "Migrate" action. Flags the record as ready, then creates its one
-    // MigrationRecords row (MigrationType=ManualValidation) so the Entry Record immediately
-    // becomes visible on Migration Monitoring - this app's only other writer into that table,
-    // MigrationService.SyncEligibleOcrExtractionRecordsAsync, follows the exact same "create the
-    // tracking row, leave the real outcome fields null until they're actually known" shape.
-    // MigrationStatus/SdStatus/TargetSystemValidation/
+    // Replaces the old "Migrate" action. Flags the record as ready, then creates its own
+    // MigrationRecords row(s) (MigrationType=ManualValidation, one per entry number) so the Entry
+    // Record immediately becomes visible on Migration Monitoring - this app's only writer into
+    // that table now (client requirement, 2026-11-27: Migration Monitoring is view-only and no
+    // longer fed directly from OcrExtractionRecords). Returns the newly created rows' ids so the
+    // caller can kick off migration for each of them right away, in the background - see
+    // ManualValidationController.ReadyForMigration and MigrationService.
+    // ProcessEntryNumbersSequentiallyAsync. MigrationStatus/SdStatus/TargetSystemValidation/
     // TargetSystemActivationStatus stay at their "awaiting outcome" values (ReadyForMigration /
-    // null / null / null) here - nothing in this app performs the actual migration for Manual
-    // Validation records, so there is no real outcome to report yet; whatever mechanism completes
-    // that migration is expected to update this same row afterward, same as it always has.
-    // Deliberately never sets MigratedAt itself (that's reserved for when a real migration
-    // outcome exists). Processes the WHOLE Entry Number group the clicked record belongs to
+    // null / null / null) here - the actual outcome isn't known until that background processing
+    // (or a later Reprocess) completes. Deliberately never sets MigratedAt itself (that's reserved
+    // for when a real migration outcome exists). Processes the WHOLE Entry Number group the clicked record belongs to
     // (RdCode + EntryNumbersCsv, spanning every processing instance/folder - see
     // GetEntryNumberGroupAsync/GroupMatchingRecords), not just the single selected record - fixed
     // 2026-11-16: once the list page started collapsing a group's sibling Title Records into one
@@ -903,8 +903,10 @@ public class ManualValidationService : IManualValidationService
     // document set, never a different instance's) - this does NOT merge or delete any underlying
     // ManualValidationRequests row, and does NOT change how MigrationService processes/submits
     // each resulting MigrationRecord afterward (that stays entirely per-record, unchanged).
-    public async Task MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<int>> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
     {
+        var createdRecords = new List<MigrationRecord>();
+
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
@@ -1000,12 +1002,10 @@ public class ManualValidationService : IManualValidationService
                     ProcessedByUserId = _currentUserService.UserId,
                     ProcessedByUsername = displayName,
                     // Verbatim copy - preserves the original JSON structure exactly as Manual
-                    // Validation produced it. ProcessingStatus is deliberately left null here (not
-                    // Pending): unlike System Migration's automatic 6-hourly batch, nothing
-                    // processes a Manual Validation row until a user explicitly clicks "Initiate
-                    // Migration" on its Migration Details page (see
-                    // MigrationService.InitiateMigrationAsync), so null means "not yet initiated"
-                    // rather than "queued".
+                    // Validation produced it. ProcessingStatus starts null ("not yet initiated") -
+                    // InitiateMigrationAsync's own atomic claim accepts a null row, so the
+                    // background sequential processing kicked off right after this method returns
+                    // (see ManualValidationController.ReadyForMigration) picks it up normally.
                     DocumentJson = sibling.DocumentsJson,
                     // Copied directly from this sibling's own (possibly user-corrected via Save)
                     // EntryNumberRange - see MigrationRecord.RangeEntryNumber's own comment for why
@@ -1035,6 +1035,7 @@ public class ManualValidationService : IManualValidationService
                 }
 
                 _context.MigrationRecords.Add(migrationRecord);
+                createdRecords.Add(migrationRecord);
             }
         }
 
@@ -1050,6 +1051,12 @@ public class ManualValidationService : IManualValidationService
             // clicks (on the same record, or on two different siblings of the same group at once).
             throw new ConflictException("This Entry Record has already been marked Ready for Migration.");
         }
+
+        // EF has now populated each new row's real Id - the caller (ManualValidationController)
+        // uses these to enqueue ProcessEntryNumbersSequentiallyAsync as a background work item, one
+        // InitiateMigrationAsync call per entry number, awaited sequentially (client requirement,
+        // 2026-11-27: migration starts automatically on Confirm, with no separate button to click).
+        return createdRecords.Select(r => r.Id).ToList();
     }
 
     // Matching is staged per the acceptance criteria:

@@ -30,8 +30,8 @@ public enum MigrationDocumentStatus
     NotApplicable = 7,
 
     // Created the moment this record enters Migration Monitoring, before the external API is ever
-    // called - see the pre-creation logic in ManualValidationService.MarkReadyForMigrationAsync /
-    // MigrationService.SyncEligibleOcrExtractionRecordsAsync. Replaces the old
+    // called - see the pre-creation logic in ManualValidationService.MarkReadyForMigrationAsync.
+    // Replaces the old
     // display-only "Pending" that MigrationService.GetByIdAsync used to synthesize on the fly from
     // Document_Json for a record with no real MigrationDocuments rows yet - that fallback no
     // longer exists, since a real Pending row now always exists from creation.

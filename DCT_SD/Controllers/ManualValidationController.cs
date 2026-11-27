@@ -6,6 +6,7 @@ using DCT_SD.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DCT_SD.Controllers;
 
@@ -15,13 +16,15 @@ public class ManualValidationController : Controller
     private readonly IManualValidationService _manualValidationService;
     private readonly IRegistryOfficeService _registryOfficeService;
     private readonly IDocumentTypeService _documentTypeService;
+    private readonly IBackgroundTaskQueue _backgroundTaskQueue;
     private readonly ILogger<ManualValidationController> _logger;
 
-    public ManualValidationController(IManualValidationService manualValidationService, IRegistryOfficeService registryOfficeService, IDocumentTypeService documentTypeService, ILogger<ManualValidationController> logger)
+    public ManualValidationController(IManualValidationService manualValidationService, IRegistryOfficeService registryOfficeService, IDocumentTypeService documentTypeService, IBackgroundTaskQueue backgroundTaskQueue, ILogger<ManualValidationController> logger)
     {
         _manualValidationService = manualValidationService;
         _registryOfficeService = registryOfficeService;
         _documentTypeService = documentTypeService;
+        _backgroundTaskQueue = backgroundTaskQueue;
         _logger = logger;
     }
 
@@ -168,15 +171,36 @@ public class ManualValidationController : Controller
     }
 
     // Replaces the old "Migrate" action - flags the record Status as Ready for Migration, records
-    // it in Action History, and creates its MigrationRecords row so it shows on Migration
-    // Monitoring; never starts an actual migration.
+    // it in Action History, and creates its MigrationRecords row(s) so it shows on Migration
+    // Monitoring. Migration itself then starts automatically, in the background, immediately after
+    // this response is sent (client requirement, 2026-11-27: no separate button anywhere else to
+    // start it - Migration Monitoring is view-only). The background work item resolves
+    // IMigrationService from its own DI scope (never injected into this controller directly),
+    // same convention as UsersController's email-enqueue methods.
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ReadyForMigration(int id, CancellationToken cancellationToken)
     {
         try
         {
-            await _manualValidationService.MarkReadyForMigrationAsync(id, cancellationToken);
+            var newRecordIds = await _manualValidationService.MarkReadyForMigrationAsync(id, cancellationToken);
+            if (newRecordIds.Count > 0)
+            {
+                _backgroundTaskQueue.Enqueue(async (services, ct) =>
+                {
+                    var migrationService = services.GetRequiredService<IMigrationService>();
+                    var logger = services.GetRequiredService<ILogger<ManualValidationController>>();
+                    try
+                    {
+                        await migrationService.ProcessEntryNumbersSequentiallyAsync(newRecordIds, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Background migration processing failed for MigrationRecord ids [{Ids}].", string.Join(", ", newRecordIds));
+                    }
+                });
+            }
+
             return Json(new { success = true, message = "Record marked as Ready for Migration." });
         }
         catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException or ConflictException)

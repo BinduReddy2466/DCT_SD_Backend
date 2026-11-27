@@ -68,14 +68,13 @@
         '<td class="small cell-wrap">' + escapeHtml(d.documentType || '—') + '</td>' +
         '<td class="small text-muted cell-wrap">' + escapeHtml(d.fileName) + '</td>' +
         '<td class="small text-muted cell-wrap">' + escapeHtml(d.sourceImagePath || '—') + '</td>' +
-        '<td class="small text-muted cell-wrap">' + escapeHtml(d.destinationPath || '—') + '</td>' +
         '<td class="small">' + escapeHtml(d.targetSystemValidation || '—') + '</td>' +
         '<td>' + badgeHtml(statusText) + '</td>' +
         '<td class="small cell-wrap">' + escapeHtml(d.reasonForFailing || '—') + '</td>' +
         '</tr>';
     }).join('');
     return '<div class="table-responsive"><table class="table table-sm align-middle mb-0">' +
-      '<thead><tr><th style="width: 2.5rem;">#</th><th>Document Type</th><th>Image File Name</th><th>Source Image File Path</th><th>Target Image File Path</th><th>Target System Validation</th><th>Migration Status</th><th>Reason for Failing</th></tr></thead>' +
+      '<thead><tr><th style="width: 2.5rem;">#</th><th>Document Type</th><th>Image File Name</th><th>Source Image File Path</th><th>Target System Validation</th><th>Migration Status</th><th>Reason for Failing</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table></div>';
   }
 

@@ -44,6 +44,13 @@ public class MigrationDetailDto
     // MigrationService.MarkReadyForMigrationAsync.
     public bool CanMarkReadyForMigration { get; set; }
 
+    // True when this Entry Record's own Supporting Document Status is "Supporting Documents
+    // Migrated with N/A" and its own Migration Status isn't already "Migrated" - see
+    // MigrationService.GetByIdAsync's canTriggerReadyForMigration computation and
+    // MigrationService.TriggerReadyForMigrationAsync. Mutually exclusive with
+    // CanMarkReadyForMigration in practice.
+    public bool CanTriggerReadyForMigration { get; set; }
+
     public IReadOnlyList<MigrationDocumentDto> Documents { get; set; } = Array.Empty<MigrationDocumentDto>();
     public IReadOnlyList<MigrationTitleRecordDto> TitleRecords { get; set; } = Array.Empty<MigrationTitleRecordDto>();
     public IReadOnlyList<MigrationActionHistoryDto> ActionHistory { get; set; } = Array.Empty<MigrationActionHistoryDto>();

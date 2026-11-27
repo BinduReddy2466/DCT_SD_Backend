@@ -19,7 +19,6 @@ public class UsersController : Controller
     private readonly IRoleService _roleService;
     private readonly IMenuService _menuService;
     private readonly ISettingsService _settingsService;
-    private readonly ITokenService _tokenService;
     private readonly IEmailSenderService _emailSenderService;
     private readonly IBackgroundTaskQueue _backgroundTaskQueue;
     private readonly ILogger<UsersController> _logger;
@@ -29,7 +28,6 @@ public class UsersController : Controller
         IRoleService roleService,
         IMenuService menuService,
         ISettingsService settingsService,
-        ITokenService tokenService,
         IEmailSenderService emailSenderService,
         IBackgroundTaskQueue backgroundTaskQueue,
         ILogger<UsersController> logger)
@@ -38,7 +36,6 @@ public class UsersController : Controller
         _roleService = roleService;
         _menuService = menuService;
         _settingsService = settingsService;
-        _tokenService = tokenService;
         _emailSenderService = emailSenderService;
         _backgroundTaskQueue = backgroundTaskQueue;
         _logger = logger;
@@ -309,9 +306,13 @@ public class UsersController : Controller
     // button's response for as long as the mail server took to answer.
     private void EnqueueRegistrationEmail(UserDetailDto createdUser, string temporaryPassword)
     {
-        var (resetToken, _) = _tokenService.CreatePasswordResetToken(createdUser.Id, createdUser.Username);
-        var resetLink = Url.Action("ResetPassword", "Account", new { token = resetToken }, Request.Scheme)
-            ?? string.Empty;
+        // Points at the ordinary Login page, not a reset-token link - a new user's MustChangePassword
+        // flag (set by UserService.CreateAsync) already makes AccountController.Login redirect
+        // straight to Change Password on a successful login, so the recipient logs in with the
+        // temporary password given below and lands on Change Password automatically, exactly as
+        // this email's own wording describes ("Once logged in... you will be prompted to update
+        // your password").
+        var loginLink = Url.Action("Login", "Account", null, Request.Scheme) ?? string.Empty;
 
         var values = new Dictionary<string, string>
         {
@@ -319,7 +320,7 @@ public class UsersController : Controller
             ["{{LastName}}"] = createdUser.LastName,
             ["{{Email}}"] = createdUser.Username,
             ["{{TemporaryPassword}}"] = temporaryPassword,
-            ["{{ResetPasswordLink}}"] = resetLink,
+            ["{{ResetPasswordLink}}"] = loginLink,
             ["{{CurrentDate}}"] = DateTime.UtcNow.ToLocalDisplay().ToString("MM-dd-yyyy"),
         };
 

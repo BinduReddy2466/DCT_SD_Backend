@@ -115,20 +115,19 @@
     function updateReadyForMigrationButtonState() {
       var btn = document.getElementById('migrationReadyForMigrationBtn');
       if (!btn) return;
+      // "trigger" mode (new Ready for Migration gate: SD Status = Migrated with N/A, Migration
+      // Status != Migrated) has no pending-correction concept - the record's documents are already
+      // all resolved by definition, so the button is simply enabled whenever it's shown at all.
+      if (btn.getAttribute('data-rfm-mode') === 'trigger') {
+        btn.disabled = false;
+        btn.title = '';
+        return;
+      }
       var hasPendingDocumentType = documents.some(function (d) { return d.canChangeDocumentType; });
       btn.disabled = targetRdNotIdentified || hasPendingDocumentType;
       btn.title = btn.disabled
         ? 'Complete and save all pending corrections (' + [targetRdNotIdentified ? 'RD Code' : null, hasPendingDocumentType ? 'Document Type' : null].filter(Boolean).join(', ') + ') before marking this Entry Record Ready for Migration.'
         : '';
-    }
-
-    var initiateMigrationBtn = document.getElementById('initiateMigrationBtn');
-    if (initiateMigrationBtn) {
-      initiateMigrationBtn.addEventListener('click', function () {
-        if (initiateMigrationBtn.disabled) return; // prevent duplicate submissions
-        initiateMigrationBtn.disabled = true;
-        document.getElementById('initiateMigrationForm').requestSubmit();
-      });
     }
 
     // Reprocess (shown when ProcessingStatus = Failed) - mandatory Remarks, no minimum length
@@ -140,7 +139,7 @@
       reprocessBtn.addEventListener('click', function () {
         openRemarksModal(
           'Reprocess Migration',
-          'Are you sure you want to reprocess the failed migration for this Entry Record? This action will retry the failed migration.',
+          'Are you sure you want to reprocess the failed migrations? This action will retry the eligible failed migrations.',
           function (remarks) {
             var body = new URLSearchParams({ id: migrationId, remarks: remarks, __RequestVerificationToken: token });
             return fetch('/Migrations/Reprocess', { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
@@ -278,6 +277,34 @@
 
     function sourceImageUrl(doc) {
       return documentImageUrlBase + (documentImageUrlBase.indexOf('?') === -1 ? '?' : '&') + 'documentId=' + doc.id;
+    }
+
+    function mimeTypeForFileName(name) {
+      var ext = (name || '').split('.').pop().toLowerCase();
+      switch (ext) {
+        case 'jpg':
+        case 'jpeg': return 'image/jpeg';
+        case 'png': return 'image/png';
+        case 'gif': return 'image/gif';
+        case 'bmp': return 'image/bmp';
+        case 'tif':
+        case 'tiff': return 'image/tiff';
+        case 'webp': return 'image/webp';
+        default: return 'image/jpeg';
+      }
+    }
+
+    // For a Duplicate SD result, the SD Auto Conversion API's DestinationPath field carries the
+    // Base64-encoded bytes of the existing PHILARIS-RD (target) image, not a real file path (see
+    // MigrationDocument.DestinationPath) - decode it for the right-hand pane instead of the
+    // placeholder. Falls back to the placeholder if it's missing or not valid Base64 (e.g. an
+    // older record created before this field carried image data).
+    function duplicateTargetImageUrl(doc, displayName) {
+      var raw = doc.destinationPath ? doc.destinationPath.replace(/\s+/g, '') : '';
+      if (raw && /^[A-Za-z0-9+/]+=*$/.test(raw)) {
+        return 'data:' + mimeTypeForFileName(displayName) + ';base64,' + raw;
+      }
+      return window.dctPlaceholderImage(displayName);
     }
 
     var singleViewer = window.DctDocViewer.create(document.getElementById('migrationViewerSingle'));
@@ -443,10 +470,8 @@
         // fitOnLoad: false - same as Manual Validation's own viewer, defaults to actual size
         // (100%) rather than auto-scaling to fill the frame.
         leftViewer.load(sourceImageUrl(doc), doc.fileName, { fitOnLoad: false });
-        // No real image-serving path exists for PHILARIS-RD (target) documents - the right-hand
-        // pane keeps the placeholder.
         var rightName = doc.existingFileName || doc.fileName;
-        rightViewer.load(window.dctPlaceholderImage(rightName), rightName, { fitOnLoad: false });
+        rightViewer.load(duplicateTargetImageUrl(doc, rightName), rightName, { fitOnLoad: false });
       } else {
         dualWrap.classList.add('d-none');
         singleWrap.classList.remove('d-none');
@@ -478,7 +503,7 @@
       if (renderErrors.length > 0) {
         var warnRow = document.createElement('tr');
         var warnTd = document.createElement('td');
-        warnTd.colSpan = 8;
+        warnTd.colSpan = 7;
         warnTd.className = 'small text-danger';
         warnTd.textContent = renderErrors.length + ' of ' + documents.length + ' supporting document row(s) failed to render - open the browser console for details.';
         warnRow.appendChild(warnTd);
@@ -542,10 +567,6 @@
         sourceTd.className = 'small text-muted cell-wrap';
         sourceTd.textContent = doc.sourceImagePath || '—';
 
-        var targetTd = document.createElement('td');
-        targetTd.className = 'small text-muted cell-wrap';
-        targetTd.textContent = doc.destinationPath || '—';
-
         var validationTd = document.createElement('td');
         validationTd.className = 'small';
         validationTd.textContent = doc.targetSystemValidation || '—';
@@ -578,7 +599,6 @@
         row.appendChild(typeTd);
         row.appendChild(fileTd);
         row.appendChild(sourceTd);
-        row.appendChild(targetTd);
         row.appendChild(validationTd);
         row.appendChild(statusTd);
         row.appendChild(reasonTd);
@@ -658,13 +678,10 @@
               }
             }
             var readyBtn = document.getElementById('migrationReadyForMigrationBtn');
-            if (readyBtn) readyBtn.classList.toggle('d-none', !data.canMarkReadyForMigration);
-            // initiateMigrationBtn is now always rendered (see Details.cshtml) specifically so
-            // this can reveal it the moment a Save resolves the RD Code/Others corrections -
-            // without this, neither button showed after such a Save (Ready for Migration hides
-            // correctly, but nothing ever made Initiate Migration appear).
-            var initiateBtn = document.getElementById('initiateMigrationBtn');
-            if (initiateBtn) initiateBtn.classList.toggle('d-none', !data.canInitiateMigration);
+            if (readyBtn) {
+              readyBtn.classList.toggle('d-none', !data.canMarkReadyForMigration && !data.canTriggerReadyForMigration);
+              readyBtn.setAttribute('data-rfm-mode', data.canMarkReadyForMigration ? 'rd-fix' : 'trigger');
+            }
             targetRdNotIdentified = !!data.isTargetRdNotIdentified;
             if (data.documents) {
               documents = data.documents;
@@ -714,8 +731,15 @@
 
         readyForMigrationBtn.addEventListener('click', function () {
           if (!rfmModal || !rfmConfirmBtn || readyForMigrationBtn.disabled) return;
-          document.getElementById('confirmDialogMessage').textContent =
-            'Are you sure you want to mark this Entry Record as Ready for Migration? This action will place the Entry Record in the migration queue.';
+          // "trigger" mode (new gate: SD Status = Migrated with N/A, Migration Status != Migrated)
+          // reuses the exact confirmation wording and endpoint shape of Manual Validation's own
+          // Ready for Migration, which actually starts the background migration - "rd-fix" mode is
+          // the older, unrelated legacy action (fixes an unresolved RD Code only, never migrates).
+          var mode = readyForMigrationBtn.getAttribute('data-rfm-mode');
+          var isTrigger = mode === 'trigger';
+          document.getElementById('confirmDialogMessage').textContent = isTrigger
+            ? 'Are you sure you want to mark this Entry Record as Ready for Migration?'
+            : 'Are you sure you want to mark this Entry Record as Ready for Migration? This action will place the Entry Record in the migration queue.';
           rfmConfirmBtn.className = 'btn btn-navy';
           rfmConfirmBtn.textContent = 'Confirm';
           if (rfmCancelBtn) rfmCancelBtn.textContent = 'Cancel';
@@ -728,7 +752,8 @@
             doSave(true).then(function (saved) {
               if (!saved) { rfmConfirmBtn.disabled = false; readyForMigrationBtn.disabled = false; return; }
               var body = new URLSearchParams({ __RequestVerificationToken: token });
-              fetch('/Migrations/ReadyForMigration/' + migrationId, { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+              var url = isTrigger ? '/Migrations/TriggerReadyForMigration/' + migrationId : '/Migrations/ReadyForMigration/' + migrationId;
+              fetch(url, { method: 'POST', body: body, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (r) {
                   if (window.handleUnauthenticatedAjax && window.handleUnauthenticatedAjax(r)) return null;
                   return r.json();

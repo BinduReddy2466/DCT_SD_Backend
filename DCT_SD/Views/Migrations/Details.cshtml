@@ -11,11 +11,10 @@
     // Model.MigrationStatus is already the final display text (MigrationService.DisplayMigrationStatus).
     var migrationStatusDisplay = Model.MigrationStatus;
     var migrationTypeDisplay = isSystemMigration ? "System Migration" : Model.MigrationType == "ManualValidation" ? "Manual Validation" : null;
-    // Mutually exclusive with Ready for Migration below - a System Migration row held out of the
-    // queue by Target RD Not Identified/pending corrections must use that button first, not jump
-    // straight to a synchronous Initiate Migration call.
-    var canInitiateMigration = (Model.ProcessingStatus is null or "RetryPending") && !Model.CanMarkReadyForMigration;
-    var canReprocess = Model.ProcessingStatus == "Failed";
+    // Failed and RetryPending both display as the same "Failed Migration" consolidated status
+    // (ConsolidatedMigrationStatus) - Reprocess is the only way left to retry either, now that
+    // Initiate Migration no longer exists on this page (client requirement, 2026-11-27).
+    var canReprocess = Model.ProcessingStatus is "Failed" or "RetryPending";
 
     var sdStatusDisplay = string.IsNullOrEmpty(Model.SdStatus) ? null : StatusDisplay.SdStatusToDisplay(Model.SdStatus);
 
@@ -36,8 +35,7 @@
 
 <!-- Not a user-facing form - just carries the antiforgery token plus the two fields Save submits
      (RdCode, DocumentCorrectionsJson), read via FormData exactly like Manual Validation's
-     #mvDetailsForm. Deliberately NOT wrapped around the rest of the page's markup, so it can sit
-     alongside (not nested inside) initiateMigrationForm below. -->
+     #mvDetailsForm. -->
 <form id="migrationDetailsForm" class="d-none">
     @Html.AntiForgeryToken()
     <input type="hidden" id="migrationRdCode" name="RdCode" value="@Model.RdCode" />
@@ -49,25 +47,18 @@
     <div class="d-flex gap-2">
         @if (Model.CanMarkReadyForMigration)
         {
-            <button type="button" class="btn btn-gold" id="migrationReadyForMigrationBtn" data-target-rd-not-identified="@Model.IsTargetRdNotIdentified.ToString().ToLowerInvariant()">Ready for Migration</button>
+            <button type="button" class="btn btn-gold" id="migrationReadyForMigrationBtn" data-rfm-mode="rd-fix" data-target-rd-not-identified="@Model.IsTargetRdNotIdentified.ToString().ToLowerInvariant()">Ready for Migration</button>
         }
-        <!-- Always rendered (no longer wrapped in a conditional block) so the Save success
-             handler can reveal it with a class toggle, same as migrationReadyForMigrationBtn
-             above - a Save that resolves the RD Code/Others corrections flips
-             CanMarkReadyForMigration from true to false, and this button must be able to appear
-             without a full page reload. -->
-        <button type="button" class="btn btn-navy@(canInitiateMigration ? "" : " d-none")" id="initiateMigrationBtn">Initiate Migration</button>
+        else if (Model.CanTriggerReadyForMigration)
+        {
+            <button type="button" class="btn btn-gold" id="migrationReadyForMigrationBtn" data-rfm-mode="trigger">Ready for Migration</button>
+        }
         @if (canReprocess)
         {
             <button type="button" class="btn btn-navy" id="reprocessBtn">Reprocess</button>
         }
     </div>
 </div>
-
-<form method="post" action="@Url.Action("InitiateMigration")" id="initiateMigrationForm" class="d-none">
-    @Html.AntiForgeryToken()
-    <input type="hidden" name="id" value="@Model.Id" />
-</form>
 
 <!-- Entry Record Details is the page's primary record-identifying data - a full-width compact
      grid (not a tall single-column list) so it, and as much of the rest of the page as possible,
@@ -261,7 +252,6 @@
                                 <th>Document Type</th>
                                 <th>Image File Name</th>
                                 <th>Source Image File Path</th>
-                                <th>Target Image File Path</th>
                                 <th>Target System Validation</th>
                                 <th>Migration Status</th>
                                 <th>Reason for Failing</th>

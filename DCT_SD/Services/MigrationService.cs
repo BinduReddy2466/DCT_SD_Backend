@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using DCT_SD.Configuration;
 using DCT_SD.Helpers;
@@ -36,20 +35,11 @@ public class MigrationService : IMigrationService
 
     public async Task<PagedResult<MigrationListItemDto>> SearchAsync(MigrationSearchRequestDto request, CancellationToken cancellationToken = default)
     {
-        // No background batch/scheduler (client requirement, 2026-11-12: "no batch jobs... or any
-        // additional batch-processing mechanism") - viewing Migration Monitoring is what pulls in
-        // OcrExtractionRecords that have become FullyExtracted since the last view, the same way
-        // visiting Manual Validation never needs anything to "push" its own rows in. Wrapped so a
-        // sync failure never blocks viewing the list that's already there.
-        try
-        {
-            await SyncEligibleOcrExtractionRecordsAsync(cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Migration Monitoring: failed to sync newly-eligible OcrExtractionRecords rows into MigrationRecords.");
-        }
-
+        // Migration Monitoring is view-only (client requirement, 2026-11-27): it no longer pulls
+        // OcrExtractionRecords in directly - every row here arrives exclusively through
+        // ManualValidationService.MarkReadyForMigrationAsync. Any MigrationType.SystemMigration row
+        // already in the table from before that change keeps showing as before; nothing creates a
+        // new one anymore.
         var query = _context.MigrationRecords.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(request.RdCode))
@@ -156,7 +146,7 @@ public class MigrationService : IMigrationService
         TargetSystemValidation = r.TargetSystemValidation,
         TargetSystemActivationStatus = r.TargetSystemActivationStatus,
         CanView = r.ProcessingStatus is not (MigrationProcessingStatus.Pending or MigrationProcessingStatus.Processing),
-        CanReprocess = r.ProcessingStatus == MigrationProcessingStatus.Failed,
+        CanReprocess = r.ProcessingStatus is MigrationProcessingStatus.Failed or MigrationProcessingStatus.RetryPending,
     };
 
     // Consolidated Migration Status (spec: Migration Monitoring page) - every Entry Record (and
@@ -203,175 +193,6 @@ public class MigrationService : IMigrationService
     private async Task<bool> IsTargetRdNotIdentifiedAsync(string rdCode, CancellationToken cancellationToken) =>
         string.IsNullOrWhiteSpace(rdCode) || !await _context.CodeLookups.AsNoTracking()
             .AnyAsync(c => c.LookupType == CodeLookupTypes.RegistryOffice && c.IsActive && c.Code == rdCode, cancellationToken);
-
-    // Scenario A (task section 6.2) - one MigrationRecords row per eligible OcrExtractionRecords
-    // row that doesn't have one yet, transferred into Migration Monitoring the same way
-    // ManualValidationService.MarkReadyForMigrationAsync transfers a ManualValidationRequest: copy
-    // fields into a new MigrationRecords row + pre-create its MigrationDocuments rows, in one
-    // synchronous SaveChangesAsync. No background batch/scheduler (client requirement,
-    // 2026-11-12) - called from SearchAsync, so simply viewing Migration Monitoring is what pulls
-    // these rows in. ProcessingStatus is always left null (never auto-queued for anything) -
-    // identical starting state to a Manual-Validation-origin row, so the existing
-    // InitiateMigrationAsync/"Initiate Migration" button is the only thing that ever calls the
-    // external API, exactly as the client specified ("once the records are available... we will
-    // call the external API from there"). Relies on UK_MigrationRecords_01 (unique RequestNumber +
-    // EntryNumbersCsv) to make a concurrent duplicate-insert attempt fail harmlessly instead of
-    // creating two tracking rows for the same source record/entry number.
-    private async Task SyncEligibleOcrExtractionRecordsAsync(CancellationToken cancellationToken)
-    {
-        var candidates = await _context.OcrExtractionRecords
-            .Where(o => o.ExtractionStatus == OcrExtractionStatus.FullyExtracted)
-            .Where(o => !_context.MigrationRecords.Any(m => m.OcrExtractionRecordId == o.Id))
-            .ToListAsync(cancellationToken);
-
-        if (candidates.Count == 0)
-        {
-            return;
-        }
-
-        // Pre-resolved once (not per candidate/entry number/document) - used below to populate
-        // each new MigrationDocument's CodeLookupId immediately.
-        var documentTypeLookup = await GetDocumentTypeLookupAsync(cancellationToken);
-
-        foreach (var ocr in candidates)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var rdCode = ocr.RdCode?.Trim() ?? string.Empty;
-
-            // "Target RD Not Identified": RdCode doesn't resolve to any active RegistryOffice
-            // CodeLookup - this also naturally covers a blank RdCode (resolves nothing either).
-            // The row is still created (never skipped) so it's visible on Migration Monitoring and
-            // correctable on its own Details page via "Ready for Migration"
-            // (MigrationService.MarkReadyForMigrationAsync) - see
-            // MigrationDetailDto.CanMarkReadyForMigration for the exact visibility rule.
-            var resolvedRdName = string.IsNullOrWhiteSpace(rdCode)
-                ? null
-                : await _context.CodeLookups.AsNoTracking()
-                    .Where(c => c.LookupType == CodeLookupTypes.RegistryOffice && c.IsActive && c.Code == rdCode)
-                    .Select(c => c.Name)
-                    .FirstOrDefaultAsync(cancellationToken);
-            var rdName = resolvedRdName ?? ocr.RdName?.Trim();
-            if (string.IsNullOrWhiteSpace(rdName))
-            {
-                rdName = rdCode; // RdName is NOT NULL - falls back to the code itself when nothing else is known
-            }
-
-            var documentItems = ParseDocumentItems(ocr.DocumentsJson);
-
-            // One MigrationRecords row per entry number (client requirement, 2026-11-12: "Migration
-            // Tracking should be per entry number") - everything else is copied identically into
-            // each row; only EntryNumbersCsv itself differs per iteration.
-            foreach (var entryNumber in EntryNumberCsvParser.Split(ocr.EntryNumbersCsv))
-            {
-                var record = new MigrationRecord
-                {
-                    RequestNumber = ocr.RequestNumber,
-                    OcrExtractionRecordId = ocr.Id,
-                    MigrationDate = DateTime.UtcNow,
-                    RdCode = rdCode,
-                    RdName = rdName,
-                    EntryNumbersCsv = entryNumber,
-                    Title = ocr.TitleNumber,
-                    TitleType = ocr.TitleType,
-                    Plan = ocr.Plan,
-                    Block = ocr.Block,
-                    Lot = ocr.Lot,
-                    TitleSequence = ocr.TitleSequence,
-                    // Matches ManualValidationService.MarkReadyForMigrationAsync: without this,
-                    // ConsolidatedMigrationStatus (ProcessingStatus null, MigrationStatus null)
-                    // falls through to "N/A" instead of "Ready for Migration" for a row that
-                    // hasn't been initiated yet - same starting state as a Manual-Validation row,
-                    // so it must display the same way.
-                    MigrationStatus = Models.Enums.MigrationStatus.ReadyForMigration,
-                    MigrationType = MigrationType.SystemMigration,
-                    ProcessedByUsername = "System",
-                    // Always null - no batch queue to enter; identical starting state to a
-                    // Manual-Validation-origin row (see this method's own header comment).
-                    ProcessingStatus = null,
-                    AttemptCount = 0,
-                    // Copied directly from the source row - see MigrationRecord.RangeEntryNumber's
-                    // own comment for why this is no longer looked up indirectly through
-                    // OcrExtractionRecordId at display time.
-                    RangeEntryNumber = ocr.EntryNumberRange,
-                    // Verbatim copy, same as ManualValidationService.MarkReadyForMigrationAsync -
-                    // without this, MergeDocumentJsonWithApiResponse would merge the API response
-                    // on top of a null "documents" array instead of preserving the original one.
-                    DocumentJson = ocr.DocumentsJson,
-                };
-
-                // One MigrationDocuments row per supporting document, created immediately - not
-                // deferred until the SD Auto Conversion API responds (client requirement,
-                // 2026-11-12: the API response must UPDATE these rows, never INSERT new ones).
-                // CodeLookupId is left null exactly when DocumentName is still "OTHERS" (never
-                // resolves in the lookup), so an already-classified document is correctly never
-                // treated as "Others" from the moment it's created.
-                foreach (var item in documentItems)
-                {
-                    var documentName = item.DocumentId ?? item.DocumentTypeCode ?? string.Empty;
-                    record.Documents.Add(new MigrationDocument
-                    {
-                        DocumentName = documentName,
-                        FileName = item.RenamedFileName,
-                        SourceImagePath = item.ImagePath,
-                        CodeLookupId = documentTypeLookup.TryGetValue(documentName, out var codeLookupId) ? codeLookupId : null,
-                        Status = MigrationDocumentStatus.Pending,
-                    });
-                }
-
-                _context.MigrationRecords.Add(record);
-                try
-                {
-                    await _context.SaveChangesAsync(cancellationToken);
-                }
-                catch (DbUpdateException ex)
-                {
-                    // Another request already created this row (unique RequestNumber + Entry
-                    // Number) - expected under concurrent page views, not an error.
-                    _logger.LogInformation(ex, "Migration Monitoring: MigrationRecords row for RequestNumber {RequestNumber} / Entry Number {EntryNumber} already exists (created concurrently) - skipping.", ocr.RequestNumber, entryNumber);
-                    foreach (var document in record.Documents)
-                    {
-                        _context.Entry(document).State = EntityState.Detached;
-                    }
-                    _context.Entry(record).State = EntityState.Detached;
-                }
-            }
-        }
-    }
-
-    private async Task<Dictionary<string, int>> GetDocumentTypeLookupAsync(CancellationToken cancellationToken) =>
-        await _context.CodeLookups.AsNoTracking()
-            .Where(c => c.LookupType == CodeLookupTypes.DocumentType)
-            .ToDictionaryAsync(c => c.Code, c => c.Id, cancellationToken);
-
-    private static List<SyncDocumentJsonItem> ParseDocumentItems(string? documentsJson)
-    {
-        if (string.IsNullOrWhiteSpace(documentsJson))
-        {
-            return [];
-        }
-
-        return JsonSerializer.Deserialize<List<SyncDocumentJsonItem>>(documentsJson, JsonOptions) ?? [];
-    }
-
-    // Same shape as ManualValidationService's/the former SystemMigrationService's own private
-    // DocumentJsonItem (confirmed identical for OcrExtractionRecords.DocumentsJson) - duplicated
-    // rather than shared, matching this codebase's existing convention of each service owning its
-    // own copy. Named distinctly (Sync-prefixed) since this file already has an unrelated
-    // DocumentCorrectionItemDto it must not be confused with.
-    private class SyncDocumentJsonItem
-    {
-        public string? DocumentId { get; set; }
-        public string? DocumentTypeCode { get; set; }
-        public string DocumentName { get; set; } = string.Empty;
-        public string? OriginalFileName { get; set; }
-        public string RenamedFileName { get; set; } = string.Empty;
-        public string? ImagePath { get; set; }
-        public string? IsDuplicate { get; set; }
-
-        [JsonExtensionData]
-        public Dictionary<string, JsonElement>? ExtensionData { get; set; }
-    }
 
     public async Task<MigrationDetailDto> GetByIdAsync(int id, CancellationToken cancellationToken = default)
     {
@@ -427,13 +248,27 @@ public class MigrationService : IMigrationService
         // Keyed directly on RD Code resolution now (not ProcessingStatus - there is no more batch
         // queue distinguishing "resolved, auto-queued" from "unresolved, null"; every
         // System-Migration row starts at ProcessingStatus = null regardless, same as a
-        // Manual-Validation row - see SyncEligibleOcrExtractionRecordsAsync). ProcessingStatus is
+        // Manual-Validation row). ProcessingStatus is
         // still checked here (mirroring MarkReadyForMigrationAsync's own guard) so a record that
         // has already entered the queue/been processed never shows "Ready for Migration" again,
         // even in the edge case where its RD Code's CodeLookup is later deactivated.
         var canMarkReadyForMigration = record.MigrationType == MigrationType.SystemMigration
             && record.ProcessingStatus is null
             && isTargetRdNotIdentified;
+
+        // New "Ready for Migration" trigger (client requirement, 2026-11-27), independent of the
+        // legacy System-Migration RD-Code-fix gate above - shown ONLY when this Entry Record's own
+        // Supporting Document Status is "Supporting Documents Migrated with N/A" AND its own
+        // Migration Status is anything other than "Migrated" (see the client's own worked example:
+        // 4 "Others" documents all N/A, SdStatus = MigratedWithNA, but Migration Status already
+        // "Migrated" - button must stay hidden there). Mutually exclusive with
+        // canMarkReadyForMigration in practice (the legacy gate only ever applies to a
+        // never-yet-processed row, which can't have a non-null SdStatus - see
+        // RecalculateSupportingDocumentStatusAsync's own early-return while any document is still
+        // Pending) - canMarkReadyForMigration still takes precedence if both were ever somehow true.
+        var canTriggerReadyForMigration = !canMarkReadyForMigration
+            && record.SdStatus == SupportingDocumentStatus.MigratedWithNA
+            && ConsolidatedMigrationStatus(record) != "Migrated";
 
         // Action History (spec section 10): merges the existing trigger-based MigrationRecords_Log
         // audit trail (`history` above - system-level processing transitions) with user-initiated
@@ -446,7 +281,7 @@ public class MigrationService : IMigrationService
             .OrderByDescending(h => h.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return MapToDetail(record, titleRecords, history, isTargetRdNotIdentified, canMarkReadyForMigration, userActions);
+        return MapToDetail(record, titleRecords, history, isTargetRdNotIdentified, canMarkReadyForMigration, canTriggerReadyForMigration, userActions);
     }
 
     // Streams a supporting document's image straight from disk, using SourceImagePath - the
@@ -461,14 +296,14 @@ public class MigrationService : IMigrationService
             .Select(d => d.SourceImagePath)
             .FirstOrDefaultAsync(cancellationToken);
 
-    // Section 5 of the "Ready for Migration" extension - the ONLY place that ever calls the
-    // external SD Auto Conversion API, regardless of origin (client requirement, 2026-11-12: no
-    // batch/background processing - the external API is only ever called from Migration
-    // Monitoring). Deliberately never touches OcrExtractionRecords - every input (RdCode,
-    // TitleSequence, EntryNumbersCsv, record.Documents) comes straight off the MigrationRecord
-    // itself, which already has its own copy of each from the moment it entered Migration
-    // Monitoring (see SyncEligibleOcrExtractionRecordsAsync /
-    // ManualValidationService.MarkReadyForMigrationAsync).
+    // The ONLY place that ever calls the external SD Auto Conversion API, regardless of origin.
+    // No UI on Migration Monitoring triggers this directly anymore (client requirement,
+    // 2026-11-27: Migration Monitoring is view-only) - it's called automatically, once per entry
+    // number, by ProcessEntryNumbersSequentiallyAsync right after
+    // ManualValidationService.MarkReadyForMigrationAsync creates the MigrationRecord row(s).
+    // Deliberately never touches OcrExtractionRecords - every input (RdCode, TitleSequence,
+    // EntryNumbersCsv, record.Documents) comes straight off the MigrationRecord itself, which
+    // already has its own copy of each from the moment it was created.
     public async Task InitiateMigrationAsync(int id, CancellationToken cancellationToken = default)
     {
         var record = await _context.MigrationRecords.AsNoTracking()
@@ -528,6 +363,52 @@ public class MigrationService : IMigrationService
         await ProcessMigrationAsync(tracked, titleSeq, isExplicitReprocess: false, cancellationToken);
     }
 
+    // Drives migration for every entry number a single Manual Validation "Ready for Migration"
+    // confirm just created (client requirement, 2026-11-27: each entry number is submitted to the
+    // external API individually and sequentially - never in parallel, never as one combined
+    // request - and one entry failing must never stop the others). Called from a background work
+    // item enqueued by ManualValidationController.ReadyForMigration via IBackgroundTaskQueue, so
+    // this never runs on the request thread and the user's Confirm click returns immediately.
+    //
+    // Each id is processed through the same InitiateMigrationAsync/ProcessMigrationAsync path a
+    // manual "Initiate Migration" click used to use - its atomic claim already makes a second call
+    // for the same id a safe no-op, so this loop needs no additional duplicate-prevention of its
+    // own. InitiateMigrationAsync only ever throws BEFORE that claim (NotFoundException,
+    // BusinessValidationException for no documents/invalid Title Sequence, or ConflictException if
+    // something else already claimed it) - everything after the claim is caught internally by
+    // ProcessMigrationAsync and always leaves the record in a terminal/retryable status with
+    // LastFailureReason set. A pre-claim throw does NOT update the record at all, so one is
+    // recorded here (guarded to never clobber a status InitiateMigrationAsync itself already set)
+    // - otherwise that entry would sit at ProcessingStatus = null forever with no failure reason
+    // shown anywhere on Migration Monitoring.
+    public async Task ProcessEntryNumbersSequentiallyAsync(IReadOnlyList<int> migrationRecordIds, CancellationToken cancellationToken = default)
+    {
+        foreach (var id in migrationRecordIds)
+        {
+            try
+            {
+                await InitiateMigrationAsync(id, cancellationToken);
+            }
+            catch (ConflictException)
+            {
+                // Already claimed/completed by something else (e.g. a duplicate Confirm click
+                // racing this same loop) - nothing to do, move on to the next entry number.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Sequential migration initiation failed for MigrationRecord {Id}.", id);
+                await _context.MigrationRecords
+                    .Where(m => m.Id == id && m.ProcessingStatus == null)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(m => m.ProcessingStatus, MigrationProcessingStatus.Failed)
+                        .SetProperty(m => m.LastFailureReason, Truncate(ex.Message, 500))
+                        .SetProperty(m => m.LastAttemptAt, DateTime.UtcNow)
+                        .SetProperty(m => m.AttemptCount, m => m.AttemptCount + 1),
+                        cancellationToken);
+            }
+        }
+    }
+
     // Shared by InitiateMigrationAsync and ReprocessAsync - "tracked" must already be claimed
     // (ProcessingStatus = Processing) by the caller before this is called; this only does the
     // actual submit-and-process-response work and the Processing -> terminal-status transition,
@@ -543,9 +424,8 @@ public class MigrationService : IMigrationService
         {
             // tracked.Documents is the sole source of truth for this record's supporting
             // documents - one row per document, created (Status = Pending) the moment this record
-            // entered Migration Monitoring (see ManualValidationService.MarkReadyForMigrationAsync
-            // / MigrationService.SyncEligibleOcrExtractionRecordsAsync), no longer re-parsed from
-            // JSON on every attempt. This is also what makes a Document Type correction
+            // entered Migration Monitoring (see ManualValidationService.MarkReadyForMigrationAsync),
+            // no longer re-parsed from JSON on every attempt. This is also what makes a Document Type correction
             // (ApplyRealDocumentCorrectionsAsync, which sets CodeLookupId/DocumentName/
             // SourceImagePath directly on these same rows) actually take effect on the next
             // attempt, and what makes "update the existing row, never insert a new one" automatic
@@ -1068,13 +948,16 @@ public class MigrationService : IMigrationService
 
     // Ready for Migration on Migration Details (spec section 5) - distinct from
     // ManualValidationService.MarkReadyForMigrationAsync, which operates on a ManualValidationRequest
-    // and creates a brand-new MigrationRecords row. This one operates on an EXISTING MigrationRecords
-    // row that SyncEligibleOcrExtractionRecordsAsync already created, for the one case that needs a
-    // human confirmation before "Initiate Migration" is offered: its RD Code didn't resolve at
-    // creation time - the only realistic scenario this gate applies to, since a Manual
-    // Validation-origin row already requires a resolved RD Code and no "Others" documents before
-    // ManualValidationService ever creates it in the first place (see
-    // MigrationDetailDto.CanMarkReadyForMigration for the exact visibility rule).
+    // and creates a brand-new MigrationRecords row. This one operates on an EXISTING, legacy
+    // MigrationType.SystemMigration MigrationRecords row (no new ones are created anymore - see
+    // SearchAsync), for the one case that needs a human confirmation before migration can proceed:
+    // its RD Code didn't resolve at creation time - the only realistic scenario this gate applies
+    // to, since a Manual Validation-origin row already requires a resolved RD Code and no "Others"
+    // documents before ManualValidationService ever creates it in the first place (see
+    // MigrationDetailDto.CanMarkReadyForMigration for the exact visibility rule). Note: fixing RD
+    // Code here no longer leads anywhere further automatically, since "Initiate Migration" has been
+    // removed from this page (client requirement, 2026-11-27) - an accepted limitation for any
+    // already-stuck legacy System-Migration row, since this origin is being retired.
     public async Task MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
     {
         var record = await _context.MigrationRecords
@@ -1131,11 +1014,53 @@ public class MigrationService : IMigrationService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    // Reprocess (Migration Details button, shown when ProcessingStatus = Failed) - a record
-    // nothing automatically retries (Failed is reserved for genuinely bad data: no supporting
-    // documents, an invalid Title Sequence). Claims it itself (same atomic-claim shape as
-    // InitiateMigrationAsync, just matching Failed instead of null/RetryPending) and reuses the
-    // same ProcessMigrationAsync core - identical regardless of origin.
+    // New "Ready for Migration" trigger on Migration Monitoring (client requirement, 2026-11-27) -
+    // distinct from both MarkReadyForMigrationAsync above (legacy RD-Code fix, no migration call)
+    // and ManualValidationService.MarkReadyForMigrationAsync (creates brand-new MigrationRecords
+    // rows). This one re-triggers migration for an EXISTING MigrationRecords row that's already
+    // "Supporting Documents Migrated with N/A" but not yet "Migrated" overall - see
+    // GetByIdAsync's canTriggerReadyForMigration computation for the exact gate, re-checked here
+    // server-side since a client can't be trusted to enforce it. Only records the Action History
+    // entry and returns - the caller (MigrationsController) enqueues the actual background
+    // processing via the same IBackgroundTaskQueue + ProcessEntryNumbersSequentiallyAsync path
+    // Manual Validation's own Ready for Migration uses, so the logic itself is never duplicated.
+    public async Task TriggerReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
+    {
+        var record = await _context.MigrationRecords.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken)
+            ?? throw new NotFoundException("Migration record", id);
+
+        if (record.SdStatus != SupportingDocumentStatus.MigratedWithNA || ConsolidatedMigrationStatus(record) == "Migrated")
+        {
+            throw new ConflictException("This Entry Record is not eligible for Ready for Migration.");
+        }
+
+        var displayName = await _currentUserService.GetDisplayNameAsync(cancellationToken);
+        _context.RecordHistory.Add(new RecordHistory
+        {
+            TableName = RecordHistoryTables.MigrationRecords,
+            RecordId = record.Id,
+            RefNo = record.RequestNumber,
+            Action = "Ready for Migration",
+            Remarks = "This Entry Record is now ready to migrate.",
+            ByUserId = _currentUserService.UserId,
+            ByUsername = displayName ?? "system",
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    // Reprocess (Migration Details button, shown when ProcessingStatus = Failed or RetryPending -
+    // both display as the same "Failed Migration" consolidated status, see
+    // ConsolidatedMigrationStatus, so the user can't otherwise tell them apart) - a record nothing
+    // automatically retries. Now that "Initiate Migration" no longer exists on Migration Monitoring
+    // (client requirement, 2026-11-27), this is the ONLY way left to retry a RetryPending row (an
+    // API-call-level failure - network/timeout/incomplete response - as opposed to Failed, reserved
+    // for genuinely bad data: no supporting documents, an invalid Title Sequence) - without this,
+    // such a row would be stuck forever with no way to resubmit it. Claims it itself (same
+    // atomic-claim shape as InitiateMigrationAsync) and reuses the same ProcessMigrationAsync core -
+    // identical regardless of origin.
     public async Task<MigrationDetailDto> ReprocessAsync(int id, string remarks, CancellationToken cancellationToken = default)
     {
         // Mandatory (spec: Reprocess Failed Migration), but no minimum length - unlike Insert as
@@ -1151,6 +1076,11 @@ public class MigrationService : IMigrationService
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken)
             ?? throw new NotFoundException("Migration record", id);
 
+        // Captured before the claim below clears LastFailureReason - spec: "keep old message in
+        // Log" when a Reprocess attempt fails again, so the previous failure reason isn't silently
+        // discarded, only the live Reason for Failing column is overwritten with the latest one.
+        var previousFailureReason = preCheck.LastFailureReason;
+
         if (preCheck.Documents.Count == 0)
         {
             throw new BusinessValidationException("No supporting documents found for this Entry Record.");
@@ -1163,7 +1093,7 @@ public class MigrationService : IMigrationService
 
         var claimedAt = DateTime.UtcNow;
         var claimed = await _context.MigrationRecords
-            .Where(m => m.Id == id && m.ProcessingStatus == MigrationProcessingStatus.Failed)
+            .Where(m => m.Id == id && (m.ProcessingStatus == MigrationProcessingStatus.Failed || m.ProcessingStatus == MigrationProcessingStatus.RetryPending))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(m => m.ProcessingStatus, MigrationProcessingStatus.Processing)
                 .SetProperty(m => m.ProcessingStartedAt, claimedAt)
@@ -1174,7 +1104,7 @@ public class MigrationService : IMigrationService
 
         if (claimed == 0)
         {
-            throw new ConflictException("This Entry Record is not currently Failed, or is already being processed.");
+            throw new ConflictException("This Entry Record is not currently in a Failed Migration status, or is already being processed.");
         }
 
         var tracked = await _context.MigrationRecords
@@ -1196,7 +1126,7 @@ public class MigrationService : IMigrationService
             Action = "Reprocess Migration",
             Remarks = record.ProcessingStatus == MigrationProcessingStatus.Completed
                 ? trimmedRemarks
-                : Truncate($"{trimmedRemarks} | Outcome: Reprocess attempt did not complete. {record.LastFailureReason}", 500),
+                : Truncate($"{trimmedRemarks} | Outcome: Reprocess attempt did not complete. Previous failure reason: {(string.IsNullOrWhiteSpace(previousFailureReason) ? "(none)" : previousFailureReason)} | Latest failure reason: {record.LastFailureReason}", 500),
             ByUserId = _currentUserService.UserId,
             ByUsername = displayName ?? "system",
             CreatedAt = DateTime.UtcNow,
@@ -1346,6 +1276,7 @@ public class MigrationService : IMigrationService
         IReadOnlyList<MigrationRecordLogEntry> history,
         bool isTargetRdNotIdentified,
         bool canMarkReadyForMigration,
+        bool canTriggerReadyForMigration,
         IReadOnlyList<RecordHistory> userActions) => new()
     {
         Id = r.Id,
@@ -1377,6 +1308,7 @@ public class MigrationService : IMigrationService
         ProcessingStatus = r.ProcessingStatus?.ToString(),
         IsTargetRdNotIdentified = isTargetRdNotIdentified,
         CanMarkReadyForMigration = canMarkReadyForMigration,
+        CanTriggerReadyForMigration = canTriggerReadyForMigration,
         // Document Type ascending, then Image File Name ascending - the Supporting Document
         // Images table and the viewer's Previous/Next navigation share this exact same order
         // (the JS simply walks the array this DTO list is rendered from), so they can never
