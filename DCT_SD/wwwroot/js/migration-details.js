@@ -579,11 +579,11 @@
         var STATUS_DISPLAY = {
           Migrated: 'Migrated', DuplicateSd: 'Duplicate SD', Overwritten: 'Overwritten',
           InsertedAsNew: 'Inserted', Failed: 'Failed Migration', ConfirmedDuplicate: 'Confirmed Duplicate',
-          Pending: 'Pending',
+          Pending: 'Pending', NotApplicable: 'N/A',
         };
         var STATUS_VARIANT = {
           Migrated: 'ok', 'Duplicate SD': 'err', Overwritten: 'info', Inserted: 'info',
-          'Failed Migration': 'err', 'Confirmed Duplicate': 'neutral', Pending: 'neutral',
+          'Failed Migration': 'err', 'Confirmed Duplicate': 'neutral', Pending: 'neutral', 'N/A': 'neutral',
         };
         var statusText = STATUS_DISPLAY[doc.status] || doc.status;
         var badge = document.createElement('span');

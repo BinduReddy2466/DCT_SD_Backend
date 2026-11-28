@@ -903,10 +903,17 @@ public class ManualValidationService : IManualValidationService
     // document set, never a different instance's) - this does NOT merge or delete any underlying
     // ManualValidationRequests row, and does NOT change how MigrationService processes/submits
     // each resulting MigrationRecord afterward (that stays entirely per-record, unchanged).
-    public async Task<IReadOnlyList<int>> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
+    // Returns the id of the single next not-yet-attempted Entry-Number-Range x Title-Sequence
+    // combination to initiate, or null if every combination for this group has already been
+    // created and attempted (Migrated/Migrating/Failed-RetryPending - the last of which is only
+    // retried through Migration Monitoring's Reprocess action, never by clicking this again).
+    // Client requirement, 2026-11-27: one button, clicked repeatedly, each click advances exactly
+    // one combination - "the combinations should not be displayed separately on the Manual
+    // Validation page." Combination creation itself stays idempotent/incremental (safe to call on
+    // every click) so this single method serves both the very first click (nothing exists yet) and
+    // every later one (some/all combinations already exist).
+    public async Task<int?> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
     {
-        var createdRecords = new List<MigrationRecord>();
-
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
 
@@ -925,23 +932,18 @@ public class ManualValidationService : IManualValidationService
             }
         }
 
-        // UK_ManualValidationRequests_01 guarantees RequestNumber is unique per row (even within
-        // one folder-group, every sibling has its own distinct RequestNumber), so this check is
-        // still meaningful per sibling - a sibling already migrated by an earlier click is simply
-        // skipped rather than failing the whole batch; only a fully-already-migrated group is a
-        // real conflict.
+        // Per-COMBINATION existing check (RequestNumber + the specific split Range Entry Number
+        // value), not per-sibling (client requirement, 2026-11-27 - fixes a pre-existing bug: a
+        // sibling can legitimately have SOME of its split Entry Number Range values already
+        // migrated and others still missing; only the missing combinations are created below,
+        // every click is safe to call again without duplicating what already exists).
         var requestNumbers = group.Select(g => g.RequestNumber).ToList();
-        var alreadyMigratedRequestNumbers = await _context.MigrationRecords
+        var existingCombinations = (await _context.MigrationRecords
             .Where(m => requestNumbers.Contains(m.RequestNumber))
-            .Select(m => m.RequestNumber)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
-        var pending = group.Where(g => !alreadyMigratedRequestNumbers.Contains(g.RequestNumber)).ToList();
-        if (pending.Count == 0)
-        {
-            throw new ConflictException("This Entry Record has already been marked Ready for Migration.");
-        }
+            .Select(m => new { m.RequestNumber, m.RangeEntryNumber })
+            .ToListAsync(cancellationToken))
+            .Select(e => (e.RequestNumber, RangeValue: e.RangeEntryNumber ?? string.Empty))
+            .ToHashSet();
 
         var displayName = await _currentUserService.GetDisplayNameAsync(cancellationToken);
 
@@ -952,36 +954,54 @@ public class ManualValidationService : IManualValidationService
             .Where(c => c.LookupType == CodeLookupTypes.DocumentType)
             .ToDictionaryAsync(c => c.Code, c => c.Id, cancellationToken);
 
-        foreach (var sibling in pending)
+        foreach (var sibling in group)
         {
-            var originalStatus = sibling.Status;
-            sibling.Status = ManualValidationStatus.ReadyForMigration;
-            sibling.UpdatedByUserId = _currentUserService.UserId;
-            sibling.UpdatedByUsername = displayName;
-            sibling.UpdatedAt = DateTime.UtcNow;
+            // The real operative entry-number axis is EntryNumberRange (client-confirmed,
+            // 2026-11-27 - this used to incorrectly split the preserved, display-only
+            // EntryNumbersCsv instead; see MigrationRecord.EntryNumbersCsv's own comment for why
+            // that field must stay unsplit/verbatim on every row created below).
+            var siblingRangeValues = EntryNumberCsvParser.Split(sibling.EntryNumberRange);
+            var missingRangeValues = siblingRangeValues
+                .Where(v => !existingCombinations.Contains((sibling.RequestNumber, v ?? string.Empty)))
+                .ToList();
 
-            // Action History entry via the existing RecordHistory mechanism - no new table/column.
-            // Action is stored as the literal display string (not an enum .ToString()) because,
-            // unlike Saved/Closed, "Ready for Migration" has spaces that a plain enum name can't
-            // produce; the same string is what <status-badge> renders for this action.
-            _context.RecordHistory.Add(new RecordHistory
+            if (missingRangeValues.Count == 0)
             {
-                TableName = RecordHistoryTables.ManualValidationRequests,
-                RecordId = sibling.Id,
-                RefNo = sibling.RequestNumber,
-                Action = "Ready for Migration",
-                Remarks = $"Status: Previous = '{FormatValueForHistory(StatusDisplay.ManualValidationStatusToDisplay(originalStatus.ToString()))}', Current = 'Ready for Migration'",
-                ByUserId = _currentUserService.UserId,
-                ByUsername = displayName ?? "system",
-                CreatedAt = DateTime.UtcNow,
-            });
+                continue;
+            }
+
+            if (sibling.Status != ManualValidationStatus.ReadyForMigration)
+            {
+                var originalStatus = sibling.Status;
+                sibling.Status = ManualValidationStatus.ReadyForMigration;
+                sibling.UpdatedByUserId = _currentUserService.UserId;
+                sibling.UpdatedByUsername = displayName;
+                sibling.UpdatedAt = DateTime.UtcNow;
+
+                // Action History entry via the existing RecordHistory mechanism - no new
+                // table/column. Action is stored as the literal display string (not an enum
+                // .ToString()) because, unlike Saved/Closed, "Ready for Migration" has spaces that
+                // a plain enum name can't produce; the same string is what <status-badge> renders
+                // for this action.
+                _context.RecordHistory.Add(new RecordHistory
+                {
+                    TableName = RecordHistoryTables.ManualValidationRequests,
+                    RecordId = sibling.Id,
+                    RefNo = sibling.RequestNumber,
+                    Action = "Ready for Migration",
+                    Remarks = $"Status: Previous = '{FormatValueForHistory(StatusDisplay.ManualValidationStatusToDisplay(originalStatus.ToString()))}', Current = 'Ready for Migration'",
+                    ByUserId = _currentUserService.UserId,
+                    ByUsername = displayName ?? "system",
+                    CreatedAt = DateTime.UtcNow,
+                });
+            }
 
             var documentItems = ParseDocumentItems(sibling.DocumentsJson);
 
-            // One MigrationRecords row per entry number (client requirement, 2026-11-12: "Migration
-            // Tracking should be per entry number") - everything else copied identically into each
-            // row, only EntryNumbersCsv itself differs per iteration.
-            foreach (var entryNumber in EntryNumberCsvParser.Split(sibling.EntryNumbersCsv))
+            // One MigrationRecords row per (sibling x split Entry Number Range value) combination
+            // (client requirement, 2026-11-12, corrected 2026-11-27 to split the right field) -
+            // everything else copied identically into each row.
+            foreach (var rangeValue in missingRangeValues)
             {
                 var migrationRecord = new MigrationRecord
                 {
@@ -990,7 +1010,11 @@ public class ManualValidationService : IManualValidationService
                     MigrationDate = DateTime.UtcNow,
                     RdCode = sibling.RdCode!,
                     RdName = sibling.RdName!,
-                    EntryNumbersCsv = entryNumber,
+                    // Preserved verbatim (never split) - the client's "Original Entry Number CSV"
+                    // reference value, identical across every combination from this sibling, never
+                    // sent to the external API (see ProcessMigrationAsync, which sends
+                    // RangeEntryNumber instead).
+                    EntryNumbersCsv = sibling.EntryNumbersCsv,
                     Title = sibling.Title,
                     TitleType = sibling.TitleType,
                     Plan = sibling.Plan,
@@ -1004,13 +1028,14 @@ public class ManualValidationService : IManualValidationService
                     // Verbatim copy - preserves the original JSON structure exactly as Manual
                     // Validation produced it. ProcessingStatus starts null ("not yet initiated") -
                     // InitiateMigrationAsync's own atomic claim accepts a null row, so the
-                    // background sequential processing kicked off right after this method returns
-                    // (see ManualValidationController.ReadyForMigration) picks it up normally.
+                    // background processing kicked off once this combination is picked as the next
+                    // eligible one (see ManualValidationController.ReadyForMigration) picks it up
+                    // normally.
                     DocumentJson = sibling.DocumentsJson,
-                    // Copied directly from this sibling's own (possibly user-corrected via Save)
-                    // EntryNumberRange - see MigrationRecord.RangeEntryNumber's own comment for why
-                    // this is no longer looked up indirectly through OcrExtractionRecordId.
-                    RangeEntryNumber = sibling.EntryNumberRange,
+                    // The per-combination split value (client requirement, 2026-11-27) - this, not
+                    // EntryNumbersCsv, is what's unique per combination, sent to the external API,
+                    // and used to group Associated Title Records for the same Entry Number Range.
+                    RangeEntryNumber = rangeValue,
                 };
 
                 // One MigrationDocuments row per supporting document, created immediately - not
@@ -1035,7 +1060,6 @@ public class ManualValidationService : IManualValidationService
                 }
 
                 _context.MigrationRecords.Add(migrationRecord);
-                createdRecords.Add(migrationRecord);
             }
         }
 
@@ -1045,18 +1069,25 @@ public class ManualValidationService : IManualValidationService
         }
         catch (DbUpdateException)
         {
-            // UK_MigrationRecords_01 (unique RequestNumber + EntryNumbersCsv) caught a concurrent
-            // duplicate submission - the pre-check above already covers the common case; this is
-            // the defense-in-depth backstop for a genuine race between two near-simultaneous
-            // clicks (on the same record, or on two different siblings of the same group at once).
+            // UK_MigrationRecords_01 (unique RequestNumber + RangeEntryNumber + TitleSequence)
+            // caught a concurrent duplicate submission - the pre-check above already covers the
+            // common case; this is the defense-in-depth backstop for a genuine race between two
+            // near-simultaneous clicks (on the same record, or on two different siblings of the
+            // same group at once).
             throw new ConflictException("This Entry Record has already been marked Ready for Migration.");
         }
 
-        // EF has now populated each new row's real Id - the caller (ManualValidationController)
-        // uses these to enqueue ProcessEntryNumbersSequentiallyAsync as a background work item, one
-        // InitiateMigrationAsync call per entry number, awaited sequentially (client requirement,
-        // 2026-11-27: migration starts automatically on Confirm, with no separate button to click).
-        return createdRecords.Select(r => r.Id).ToList();
+        // Pick the next not-yet-attempted combination across the WHOLE group (pre-existing rows
+        // included, not just ones created just now) - deterministic by Id, i.e. creation order.
+        // This is what actually advances on each click; the creation above only ensures every
+        // combination exists at all.
+        var nextEligibleId = await _context.MigrationRecords
+            .Where(m => requestNumbers.Contains(m.RequestNumber) && m.ProcessingStatus == null)
+            .OrderBy(m => m.Id)
+            .Select(m => (int?)m.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return nextEligibleId;
     }
 
     // Matching is staged per the acceptance criteria:

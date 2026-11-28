@@ -170,38 +170,49 @@ public class ManualValidationController : Controller
         }
     }
 
-    // Replaces the old "Migrate" action - flags the record Status as Ready for Migration, records
-    // it in Action History, and creates its MigrationRecords row(s) so it shows on Migration
-    // Monitoring. Migration itself then starts automatically, in the background, immediately after
-    // this response is sent (client requirement, 2026-11-27: no separate button anywhere else to
-    // start it - Migration Monitoring is view-only). The background work item resolves
-    // IMigrationService from its own DI scope (never injected into this controller directly),
-    // same convention as UsersController's email-enqueue methods.
+    // Replaces the old "Migrate" action - flags every sibling's Status as Ready for Migration,
+    // records it in Action History, and ensures every Entry-Number-Range x Title-Sequence
+    // combination's MigrationRecords row exists so it shows on Migration Monitoring. One button,
+    // clicked repeatedly: each click advances exactly one not-yet-attempted combination (client
+    // requirement, 2026-11-27 - combinations are never displayed individually on this page; see
+    // them on Migration Monitoring instead). That one combination's migration then starts
+    // automatically, in the background, immediately after this response is sent - no separate
+    // button anywhere else to start it (Migration Monitoring is view-only). The background work
+    // item resolves IMigrationService from its own DI scope (never injected into this controller
+    // directly), same convention as UsersController's email-enqueue methods.
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ReadyForMigration(int id, CancellationToken cancellationToken)
     {
         try
         {
-            var newRecordIds = await _manualValidationService.MarkReadyForMigrationAsync(id, cancellationToken);
-            if (newRecordIds.Count > 0)
+            var nextEligibleId = await _manualValidationService.MarkReadyForMigrationAsync(id, cancellationToken);
+            if (nextEligibleId is null)
             {
-                _backgroundTaskQueue.Enqueue(async (services, ct) =>
+                return Json(new
                 {
-                    var migrationService = services.GetRequiredService<IMigrationService>();
-                    var logger = services.GetRequiredService<ILogger<ManualValidationController>>();
-                    try
-                    {
-                        await migrationService.ProcessEntryNumbersSequentiallyAsync(newRecordIds, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogError(ex, "Background migration processing failed for MigrationRecord ids [{Ids}].", string.Join(", ", newRecordIds));
-                    }
+                    success = true,
+                    allDone = true,
+                    message = "All Entry Number Range / Title Sequence combinations for this record have already been initiated. Check Migration Monitoring for their status, or use Reprocess there to retry any that failed.",
                 });
             }
 
-            return Json(new { success = true, message = "Record marked as Ready for Migration." });
+            var recordIds = new[] { nextEligibleId.Value };
+            _backgroundTaskQueue.Enqueue(async (services, ct) =>
+            {
+                var migrationService = services.GetRequiredService<IMigrationService>();
+                var logger = services.GetRequiredService<ILogger<ManualValidationController>>();
+                try
+                {
+                    await migrationService.ProcessEntryNumbersSequentiallyAsync(recordIds, ct);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Background migration processing failed for MigrationRecord id {Id}.", nextEligibleId.Value);
+                }
+            });
+
+            return Json(new { success = true, allDone = false, message = "This combination has been queued for migration." });
         }
         catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException or ConflictException)
         {

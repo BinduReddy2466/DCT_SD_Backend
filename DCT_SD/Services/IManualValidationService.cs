@@ -24,14 +24,17 @@ public interface IManualValidationService
     Task CloseAsync(int id, string remarks, CancellationToken cancellationToken = default);
     Task ReleaseLocksForUserAsync(int userId, CancellationToken cancellationToken = default);
 
-    // Replaces the old "Migrate" action: marks the record (and every sibling in its Entry Number
-    // group) Status as ReadyForMigration, records it in Action History, and creates one
-    // MigrationRecords row per entry number (MigrationType=ManualValidation) so each becomes
-    // visible on Migration Monitoring. Never sets MigratedAt itself (that's reserved for when a
-    // real migration outcome exists). Returns the newly created MigrationRecords ids so the caller
-    // can trigger migration for each of them right away, in the background (client requirement,
-    // 2026-11-27: no separate button anywhere else to start it).
-    Task<IReadOnlyList<int>> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default);
+    // Replaces the old "Migrate" action: marks every sibling in the Entry Number group Status as
+    // ReadyForMigration, records it in Action History, and ensures one MigrationRecords row exists
+    // per (sibling x split Entry Number Range value) combination (MigrationType=ManualValidation)
+    // so each becomes visible on Migration Monitoring. Idempotent - safe to call on every click,
+    // only the combinations that don't exist yet are created. Never sets MigratedAt itself (that's
+    // reserved for when a real migration outcome exists). Returns the id of the single next
+    // not-yet-attempted combination to initiate in the background, or null if every combination
+    // already exists and has been attempted (client requirement, 2026-11-27: one button, clicked
+    // repeatedly, advances exactly one combination per click - combinations are never displayed
+    // individually on this page).
+    Task<int?> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default);
     Task<TitleSequenceDto> RetrieveTitleSequenceAsync(RetrieveTitleSequenceRequestDto request, CancellationToken cancellationToken = default);
 
     // Persists a Title Sequence value the user picked from the "Repeating Title Number" modal

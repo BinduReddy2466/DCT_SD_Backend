@@ -765,6 +765,14 @@
     // adding a page-specific modal. Confirm still silently saves any pending edits first (doSave)
     // before marking the record ready, matching the old Migrate flow's behavior; Cancel performs
     // no server call at all - the record's Status is left exactly as it was.
+    //
+    // One button, clicked repeatedly (client requirement, 2026-11-27): each click advances exactly
+    // one Entry-Number-Range x Title-Sequence combination - combinations are never displayed
+    // individually on this page (see them on Migration Monitoring instead). The server itself
+    // picks which combination comes next; this button just keeps re-confirming and re-posting
+    // until the server reports nothing eligible remains. A full page reload after each click
+    // (rather than redirecting away, like the old one-shot flow did) keeps this record's own
+    // Status/Action History in sync so the same button can be clicked again right away.
     var readyForMigrationBtn = document.getElementById('mvReadyForMigrationBtn');
     if (readyForMigrationBtn) {
       var rfmModalEl = document.getElementById('confirmDialog');
@@ -817,7 +825,10 @@
                   return;
                 }
                 toast(data.message, 'success');
-                setTimeout(function () { window.location.href = '/ManualValidation'; }, 900);
+                // Reload (not a redirect to the list) - whether this click queued the next
+                // combination or found nothing left, the page needs to re-render this record's
+                // current Status/Action History before the same button is usable again.
+                setTimeout(function () { window.location.reload(); }, 900);
               })
               .catch(function () {
                 toast('Unable to mark this record as Ready for Migration. Please try again.', 'error');

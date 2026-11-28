@@ -12,14 +12,13 @@ public class MigrationRecord
     public string RdCode { get; set; } = string.Empty;
     public string RdName { get; set; } = string.Empty;
 
-    // Despite the name (kept as-is to avoid touching every other file that already references it -
-    // views, reports, search DTOs), this holds exactly ONE entry number per row for any row created
-    // after 2026-11-12 ("Migration Tracking should be per entry number", client-confirmed) - see
-    // Helpers/EntryNumberCsvParser.cs, which splits a source's comma-separated entry number list
-    // into one MigrationRecords row per entry number. Rows created before that change may still
-    // hold the full original comma-separated list (not retroactively split - see
-    // ManualValidationService.MarkReadyForMigrationAsync, the only thing that creates these rows
-    // now).
+    // Corrected 2026-11-27: holds the ORIGINAL, preserved Entry Number CSV copied verbatim from the
+    // source row (e.g. "100,200,300") - identical across every combination row generated from the
+    // same sibling, display-only ("Entry Number" column/search), and NEVER sent to the external SD
+    // Auto Conversion API. The per-combination split value lives on RangeEntryNumber below instead
+    // (see its own comment) - a 2026-11-12/-27 bug had this backwards, splitting THIS field and
+    // leaving RangeEntryNumber unsplit, which silently broke multi-value Entry Number Range
+    // combinations.
     public string? EntryNumbersCsv { get; set; }
     public string? Title { get; set; }
     public TitleType? TitleType { get; set; }
@@ -73,12 +72,14 @@ public class MigrationRecord
     // System Migration batch's own raw audit passthrough.
     public string? DocumentJson { get; set; }
 
-    // Copied directly from the originating row's own EntryNumberRange the moment this row is
-    // created (ManualValidationRequests.EntryNumberRange for a Manual Validation-origin row,
-    // OcrExtractionRecords.EntryNumberRange for a System Migration-origin row) - not looked up
-    // indirectly via OcrExtractionRecordId at display time, since a Manual Validation user's own
-    // correction to EntryNumberRange (Save) only ever updates ManualValidationRequests, never the
-    // OcrExtractionRecords row it came from.
+    // Corrected 2026-11-27: holds the per-COMBINATION split value - one item from the originating
+    // sibling's own EntryNumberRange (via Helpers/EntryNumberCsvParser.Split), e.g. "1"/"8"/"9" for
+    // Entry Number Range "1,8,9" - unique per combination together with RequestNumber and
+    // TitleSequence (see UK_MigrationRecords_01), sent to the external SD Auto Conversion API
+    // (never EntryNumbersCsv above), and used to group Associated Title Records for the same Entry
+    // Number Range. Not looked up indirectly via OcrExtractionRecordId at display time, since a
+    // Manual Validation user's own correction to EntryNumberRange (Save) only ever updates
+    // ManualValidationRequests, never the OcrExtractionRecords row it came from.
     public string? RangeEntryNumber { get; set; }
 
     public OcrExtractionRecord? OcrExtractionRecord { get; set; }

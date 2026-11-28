@@ -167,7 +167,11 @@
           .then(function (data) {
             if (!data) return;
             if (listReprocessModal) listReprocessModal.hide();
-            toast(data.message || (data.success ? 'Reprocessed.' : 'Unable to reprocess this Entry Record.'), data.success ? 'success' : 'error');
+            // success:true just means the request didn't throw - Reprocess can still land the
+            // record back in Failed/Retry Pending (see MigrationsController.Reprocess), so the
+            // toast color must key off the message text, same as migration-details.js's handler.
+            var message = data.message || (data.success ? 'Reprocessed.' : 'Unable to reprocess this Entry Record.');
+            toast(message, !data.success || message.indexOf('did not complete') !== -1 ? 'error' : 'success');
             setTimeout(function () { window.location.reload(); }, 900);
           })
           .catch(function () {

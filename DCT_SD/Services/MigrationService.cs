@@ -60,16 +60,17 @@ public class MigrationService : IMigrationService
         }
 
         // Title Number is searched through the Associated Title Records relationship (sibling
-        // MigrationRecords sharing this row's RD Code + Entry Number), not as a direct field on
-        // this row - a match returns every row in that Entry's group, not just the matching
-        // Title itself (task section 2.C/4 Scenario 3). EXISTS-based (not a join), so this can
-        // never fan out duplicate rows for the same MigrationRecords.Id.
+        // MigrationRecords sharing this row's RD Code + Range Entry Number, corrected 2026-11-27
+        // from EntryNumbersCsv - see GetByIdAsync's identical Associated Title Records grouping key
+        // for why), not as a direct field on this row - a match returns every row in that Entry's
+        // group, not just the matching Title itself (task section 2.C/4 Scenario 3). EXISTS-based
+        // (not a join), so this can never fan out duplicate rows for the same MigrationRecords.Id.
         if (!string.IsNullOrWhiteSpace(request.Title))
         {
             var term = request.Title.Trim().ToLower();
             query = query.Where(r => _context.MigrationRecords.Any(t =>
                 t.RdCode == r.RdCode &&
-                t.EntryNumbersCsv == r.EntryNumbersCsv &&
+                t.RangeEntryNumber == r.RangeEntryNumber &&
                 t.Title != null && t.Title.ToLower().Contains(term)));
         }
 
@@ -126,28 +127,39 @@ public class MigrationService : IMigrationService
         };
     }
 
-    private static MigrationListItemDto MapToListItem(MigrationRecord r) => new()
+    private static MigrationListItemDto MapToListItem(MigrationRecord r)
     {
-        Id = r.Id,
-        RequestNumber = r.RequestNumber,
-        MigrationDate = r.MigrationDate,
-        RdCode = r.RdCode,
-        RdName = r.RdName,
-        EntryNumbersCsv = r.EntryNumbersCsv,
-        Title = r.Title,
-        TitleType = r.TitleType?.ToString(),
-        MigrationStatus = ConsolidatedMigrationStatus(r),
-        SdStatus = r.SdStatus?.ToString() ?? string.Empty,
-        MigratedTo = r.MigratedToRdName ?? string.Empty,
-        MigrationType = r.MigrationType?.ToString(),
-        ProcessedBy = r.ProcessedByUsername,
-        RangeEntryNumber = NormalizeEntryNumberRange(r.RangeEntryNumber),
-        ReasonForFailing = r.LastFailureReason,
-        TargetSystemValidation = r.TargetSystemValidation,
-        TargetSystemActivationStatus = r.TargetSystemActivationStatus,
-        CanView = r.ProcessingStatus is not (MigrationProcessingStatus.Pending or MigrationProcessingStatus.Processing),
-        CanReprocess = r.ProcessingStatus is MigrationProcessingStatus.Failed or MigrationProcessingStatus.RetryPending,
-    };
+        var consolidatedStatus = ConsolidatedMigrationStatus(r);
+        return new()
+        {
+            Id = r.Id,
+            RequestNumber = r.RequestNumber,
+            MigrationDate = r.MigrationDate,
+            RdCode = r.RdCode,
+            RdName = r.RdName,
+            EntryNumbersCsv = r.EntryNumbersCsv,
+            Title = r.Title,
+            TitleType = r.TitleType?.ToString(),
+            MigrationStatus = consolidatedStatus,
+            SdStatus = r.SdStatus?.ToString() ?? string.Empty,
+            MigratedTo = r.MigratedToRdName ?? string.Empty,
+            MigrationType = r.MigrationType?.ToString(),
+            ProcessedBy = r.ProcessedByUsername,
+            RangeEntryNumber = NormalizeEntryNumberRange(r.RangeEntryNumber),
+            ReasonForFailing = r.LastFailureReason,
+            TargetSystemValidation = r.TargetSystemValidation,
+            TargetSystemActivationStatus = r.TargetSystemActivationStatus,
+            // Keyed off the consolidated display status (client requirement, 2026-11-27), not the
+            // raw ProcessingStatus enum - "Ready for Migration" has two underlying paths
+            // (ProcessingStatus = Pending, the legacy System-Migration one; or ProcessingStatus =
+            // null with MigrationStatus = ReadyForMigration, every freshly-generated
+            // Entry-Number-Range x Title-Sequence combination from Manual Validation) and both must
+            // disable View/Reprocess identically - there is no "Initiate Migration" button left
+            // anywhere on this page for a human to act on either one from here.
+            CanView = consolidatedStatus is not ("Ready for Migration" or "Migrating"),
+            CanReprocess = r.ProcessingStatus is MigrationProcessingStatus.Failed or MigrationProcessingStatus.RetryPending,
+        };
+    }
 
     // Consolidated Migration Status (spec: Migration Monitoring page) - every Entry Record (and
     // each Associated Title Record sibling, which is the same entity) displays exactly one of 5
@@ -204,7 +216,9 @@ public class MigrationService : IMigrationService
         // Associated Title Records: LEVEL 1 ONLY (2026-11-16, Entry Number-based consolidation
         // across processing instances - supersedes the same-day folder-wise grouping fix, which
         // incorrectly made FolderPath part of this key). Every MigrationRecords row sharing the
-        // same RdCode + EntryNumbersCsv as this one - each row already represents exactly one
+        // same RdCode + RangeEntryNumber as this one (corrected 2026-11-27 from EntryNumbersCsv,
+        // which is now the preserved, display-only original CSV and no longer varies per entry
+        // number - RangeEntryNumber is the real per-combination split value) - each row already represents exactly one
         // Title (Title/TitleSequence are scalar per-row fields), so siblings under the same Entry
         // Number are the "other Titles" associated with this Entry Record, spanning every
         // processing instance (physical source folder) that Entry Number was ever processed
@@ -226,7 +240,7 @@ public class MigrationService : IMigrationService
         // one sibling's own migration outcome as another's ("Preserve individual migration
         // statuses... do not incorrectly merge independent migration status records").
         var titleRecords = (await _context.MigrationRecords.AsNoTracking()
-            .Where(m => m.RdCode == record.RdCode && m.EntryNumbersCsv == record.EntryNumbersCsv)
+            .Where(m => m.RdCode == record.RdCode && m.RangeEntryNumber == record.RangeEntryNumber)
             .OrderBy(m => m.Id)
             .ToListAsync(cancellationToken))
             .OrderBy(m => decimal.TryParse(m.TitleSequence, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var seq) ? seq : decimal.MaxValue)
@@ -454,6 +468,7 @@ public class MigrationService : IMigrationService
                 tracked.ProcessingStatus = MigrationProcessingStatus.Completed;
                 tracked.ProcessingCompletedAt = DateTime.UtcNow;
                 tracked.MigratedToRdName = tracked.RdName;
+                tracked.TargetSystemActivationStatus = "Activated";
                 await _context.SaveChangesAsync(cancellationToken);
                 await RecalculateSupportingDocumentStatusAsync(tracked.Id, cancellationToken);
                 return;
@@ -463,7 +478,10 @@ public class MigrationService : IMigrationService
             {
                 RdCode = tracked.RdCode,
                 TitleSeq = titleSeq,
-                EntryNumber = tracked.EntryNumbersCsv ?? string.Empty,
+                // RangeEntryNumber (corrected 2026-11-27), not EntryNumbersCsv - the latter is the
+                // preserved, display-only original Entry Number CSV and must never reach the
+                // external API.
+                EntryNumber = tracked.RangeEntryNumber ?? string.Empty,
                 SupportingDocuments = documentsToSubmit
                     .Select(d => new SdAutoConversionDocumentRequest
                     {
@@ -484,6 +502,7 @@ public class MigrationService : IMigrationService
                 // leave it exactly as it was.
                 tracked.ProcessingStatus = MigrationProcessingStatus.RetryPending;
                 tracked.LastFailureReason = Truncate(result.ErrorMessage ?? "The SD Auto Conversion service returned an unexpected empty response.", 500);
+                tracked.TargetSystemActivationStatus = "Not Activated";
                 await _context.SaveChangesAsync(cancellationToken);
                 return;
             }
@@ -494,7 +513,7 @@ public class MigrationService : IMigrationService
             // document ends up recognized below, so both are set unconditionally here rather than
             // only on a fully-Completed outcome.
             tracked.TargetSystemValidation = MapEntryTargetSystemValidation(result.Response.EntryStatus);
-            tracked.TitleTargetSystemValidation = MapTitleTargetSystemValidation(result.Response.TitleStatus, tracked.EntryNumbersCsv, tracked.Id);
+            tracked.TitleTargetSystemValidation = MapTitleTargetSystemValidation(result.Response.TitleStatus, tracked.RangeEntryNumber, tracked.Id);
 
             // Positional correlation - same rationale as the former SystemMigrationService
             // .ProcessOneAsync (the API's documentId/sequence are not reliable per-item keys; see
@@ -558,6 +577,7 @@ public class MigrationService : IMigrationService
                 tracked.ProcessingStatus = MigrationProcessingStatus.Completed;
                 tracked.ProcessingCompletedAt = now;
                 tracked.MigratedToRdName = tracked.RdName;
+                tracked.TargetSystemActivationStatus = "Activated";
             }
             else
             {
@@ -565,6 +585,7 @@ public class MigrationService : IMigrationService
                 tracked.LastFailureReason = Truncate(
                     $"{missingOrUnrecognized.Count} of {documentsToSubmit.Count} supporting document(s) missing or unrecognized in the API response: {string.Join(", ", missingOrUnrecognized)}",
                     500);
+                tracked.TargetSystemActivationStatus = "Not Activated";
             }
 
             await _context.SaveChangesAsync(cancellationToken);
@@ -597,6 +618,7 @@ public class MigrationService : IMigrationService
             // Never leave the record stuck in "Processing" forever.
             tracked.ProcessingStatus = MigrationProcessingStatus.RetryPending;
             tracked.LastFailureReason = Truncate(ex.Message, 500);
+            tracked.TargetSystemActivationStatus = "Not Activated";
             await _context.SaveChangesAsync(cancellationToken);
         }
     }
@@ -656,7 +678,9 @@ public class MigrationService : IMigrationService
             {
                 RdCode = record.RdCode,
                 TitleSeq = titleSeq,
-                EntryNumber = record.EntryNumbersCsv ?? string.Empty,
+                // RangeEntryNumber (corrected 2026-11-27), not EntryNumbersCsv - see
+                // ProcessMigrationAsync's identical request construction for why.
+                EntryNumber = record.RangeEntryNumber ?? string.Empty,
                 SupportingDocuments = new List<SdAutoConversionDocumentRequest>
                 {
                     new() { DocumentId = document.DocumentName, ImagePath = newPath },

@@ -368,13 +368,12 @@ BEGIN
         -- Distinct from ApiResponseJson above, which is the System Migration batch's own raw
         -- audit passthrough - this column is the durable combined document+response record.
         Document_Json                 NVARCHAR(MAX) NULL,
-        -- Added 2026-11-11: copied directly from the originating row's own EntryNumberRange
-        -- (ManualValidationRequests.EntryNumberRange for a Manual Validation-origin row,
-        -- OcrExtractionRecords.EntryNumberRange for a System Migration-origin row) the moment
-        -- this row is created - not looked up indirectly via OcrExtractionRecordId at display
-        -- time, since a Manual Validation user's own correction to EntryNumberRange (Save) only
-        -- ever updates ManualValidationRequests, never the OcrExtractionRecords row it came from.
-        RangeEntryNumber              NVARCHAR(MAX) NULL,
+        -- Added 2026-11-11, corrected 2026-11-27: holds the per-COMBINATION split Entry Number
+        -- Range value (e.g. "1"/"8"/"9" for Entry Number Range "1,8,9"), copied from the
+        -- originating sibling's own EntryNumberRange the moment this row is created. NVARCHAR(200),
+        -- not MAX (like EntryNumbersCsv above): needs to be a key column in UK_MigrationRecords_01
+        -- below, which NVARCHAR(MAX) cannot be.
+        RangeEntryNumber              NVARCHAR(200) NULL,
         CONSTRAINT PK_MigrationRecords PRIMARY KEY (Id),
         CONSTRAINT FK_MigrationRecords_01 FOREIGN KEY (OcrExtractionRecordId) REFERENCES dbo.OcrExtractionRecords (Id),
         CONSTRAINT CK_MigrationRecords_ApiResponseJson CHECK (ApiResponseJson IS NULL OR ISJSON(ApiResponseJson) = 1),
@@ -389,12 +388,33 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Migrat
     ALTER TABLE dbo.MigrationRecords ADD TitleTargetSystemValidation NVARCHAR(100) NULL;
 GO
 
--- Composite, not single-column RequestNumber: as of 2026-11-12, one MigrationRecords row is
--- created per entry number (see Helpers/EntryNumberCsvParser.cs), so several rows now legitimately
--- share one RequestNumber - this still blocks a genuine duplicate re-processing attempt (same
--- source, same entry number) while allowing that source's other entry numbers their own rows.
+-- Corrected 2026-11-27: RangeEntryNumber is now the per-combination split Entry Number Range value
+-- (previously held the whole, unsplit range string) and must be bounded, not MAX, to serve as a
+-- key column in UK_MigrationRecords_01 below. Catches up a MigrationRecords table that already
+-- existed before this correction - the CREATE TABLE above only runs on a brand-new database.
+IF EXISTS (
+    SELECT 1 FROM sys.columns c JOIN sys.types t ON c.user_type_id = t.user_type_id
+    WHERE c.object_id = OBJECT_ID('dbo.MigrationRecords') AND c.name = 'RangeEntryNumber' AND t.name = 'nvarchar' AND c.max_length = -1
+)
+BEGIN
+    -- A NVARCHAR(MAX) column cannot be altered while it's a key column of a unique index, and the
+    -- index must be rebuilt against the new 3-column shape below regardless - drop first.
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UK_MigrationRecords_01' AND object_id = OBJECT_ID('dbo.MigrationRecords'))
+        DROP INDEX UK_MigrationRecords_01 ON dbo.MigrationRecords;
+    ALTER TABLE dbo.MigrationRecords ALTER COLUMN RangeEntryNumber NVARCHAR(200) NULL;
+END;
+GO
+
+-- Composite (RequestNumber, RangeEntryNumber, TitleSequence) - corrected 2026-11-27 from
+-- (RequestNumber, EntryNumbersCsv): one MigrationRecords row is created per (sibling x split Entry
+-- Number Range value) combination, and EntryNumbersCsv is now the preserved, display-only original
+-- Entry Number CSV (identical across every combination from the same sibling), so it can no longer
+-- enforce per-combination uniqueness - RangeEntryNumber (the real per-combination split value)
+-- takes its place. TitleSequence is included per client's explicit requirement, even though
+-- RequestNumber alone already pins one specific Title Sequence (one ManualValidationRequests row =
+-- one Title Record).
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UK_MigrationRecords_01' AND object_id = OBJECT_ID('dbo.MigrationRecords'))
-    CREATE UNIQUE NONCLUSTERED INDEX UK_MigrationRecords_01 ON dbo.MigrationRecords (RequestNumber, EntryNumbersCsv);
+    CREATE UNIQUE NONCLUSTERED INDEX UK_MigrationRecords_01 ON dbo.MigrationRecords (RequestNumber, RangeEntryNumber, TitleSequence);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_01' AND object_id = OBJECT_ID('dbo.MigrationRecords'))
     CREATE NONCLUSTERED INDEX IX_MigrationRecords_01 ON dbo.MigrationRecords (MigrationDate);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_MigrationRecords_02' AND object_id = OBJECT_ID('dbo.MigrationRecords'))

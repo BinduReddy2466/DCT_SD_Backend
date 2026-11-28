@@ -24,12 +24,12 @@ public class MigrationListItemDto
     public string? TargetSystemValidation { get; set; }
     public string? TargetSystemActivationStatus { get; set; }
 
-    // View is disabled only when a record is genuinely queued/in-flight with nothing yet to show
-    // (ProcessingStatus Pending or Processing) - NOT for a Manual Validation-origin record whose
-    // consolidated status also happens to read "Ready for Migration" (ProcessingStatus still
-    // null, MigrationStatus = ReadyForMigration): that one has no automatic queue at all and can
-    // only ever be migrated by a human opening it and clicking "Initiate Migration" on the
-    // Migration Details page, so View must stay enabled for it.
+    // View is disabled whenever the consolidated Migration Status reads "Ready for Migration" or
+    // "Migrating" (client requirement, 2026-11-27) - regardless of which underlying path produced
+    // that status (the legacy ProcessingStatus = Pending case, or a freshly-generated
+    // Entry-Number-Range x Title-Sequence combination with ProcessingStatus still null). There is
+    // no "Initiate Migration" button anywhere on this page for a human to act on from here, so
+    // there's nothing a View would show that isn't already visible from the list itself.
     public bool CanView { get; set; }
 
     // Reprocess is only ever valid for ProcessingStatus = Failed (see

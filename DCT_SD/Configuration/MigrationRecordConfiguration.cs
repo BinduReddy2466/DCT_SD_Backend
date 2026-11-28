@@ -56,12 +56,19 @@ public class MigrationRecordConfiguration : IEntityTypeConfiguration<MigrationRe
         builder.Property(r => r.TargetSystemActivationStatus).HasMaxLength(20);
         builder.Property(r => r.TitleTargetSystemValidation).HasMaxLength(100);
         builder.Property(r => r.DocumentJson).HasColumnName("Document_Json");
+        // Bounded (not MAX, unlike before 2026-11-27) - needs to be a key column in
+        // UK_MigrationRecords_01 below, which NVARCHAR(MAX) cannot be. Same reasoning as
+        // EntryNumbersCsv's own HasMaxLength(200) above.
+        builder.Property(r => r.RangeEntryNumber).HasMaxLength(200);
 
         // Composite, not single-column: several rows now legitimately share one RequestNumber -
-        // one MigrationRecords row is created per entry number (see EntryNumberCsvParser), so this
-        // still blocks a genuine duplicate re-processing attempt (same source, same entry number)
-        // while allowing that source's other entry numbers their own rows.
-        builder.HasIndex(r => new { r.RequestNumber, r.EntryNumbersCsv })
+        // one MigrationRecords row is created per (sibling x split Entry Number Range value)
+        // combination. Corrected 2026-11-27: keyed on RangeEntryNumber (the real per-combination
+        // split value), not EntryNumbersCsv (now the preserved, display-only original CSV, which no
+        // longer varies per combination and so can no longer enforce this). TitleSequence is
+        // included per client's explicit requirement, even though RequestNumber alone already
+        // pins one specific Title Sequence (one ManualValidationRequest row = one Title Record).
+        builder.HasIndex(r => new { r.RequestNumber, r.RangeEntryNumber, r.TitleSequence })
             .IsUnique()
             .HasDatabaseName("UK_MigrationRecords_01");
         builder.HasIndex(r => r.MigrationDate);
