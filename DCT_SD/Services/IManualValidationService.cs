@@ -28,13 +28,16 @@ public interface IManualValidationService
     // ReadyForMigration, records it in Action History, and ensures one MigrationRecords row exists
     // per (sibling x split Entry Number Range value) combination (MigrationType=ManualValidation)
     // so each becomes visible on Migration Monitoring. Idempotent - safe to call on every click,
-    // only the combinations that don't exist yet are created. Never sets MigratedAt itself (that's
-    // reserved for when a real migration outcome exists). Returns the id of the single next
-    // not-yet-attempted combination to initiate in the background, or null if every combination
-    // already exists and has been attempted (client requirement, 2026-11-27: one button, clicked
-    // repeatedly, advances exactly one combination per click - combinations are never displayed
-    // individually on this page).
-    Task<int?> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default);
+    // only the combinations that don't exist yet are created. Never sets MigratedAt itself here -
+    // that's stamped later, per sibling, by MigrationService once every one of that sibling's
+    // combinations has genuinely finished migrating (see
+    // MarkManualValidationRequestMigratedIfCompleteAsync). Returns the id of the single next
+    // not-yet-attempted combination to initiate in the background (null if every combination
+    // already exists and has been attempted) and whether it's the last one remaining (client
+    // requirement, 2026-11-27/28: one button, clicked repeatedly, advances exactly one combination
+    // per click - combinations are never displayed individually on this page - and the caller
+    // redirects away once the last one has been queued, instead of staying on this page).
+    Task<(int? NextEligibleId, bool IsLastCombination)> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default);
     Task<TitleSequenceDto> RetrieveTitleSequenceAsync(RetrieveTitleSequenceRequestDto request, CancellationToken cancellationToken = default);
 
     // Persists a Title Sequence value the user picked from the "Repeating Title Number" modal

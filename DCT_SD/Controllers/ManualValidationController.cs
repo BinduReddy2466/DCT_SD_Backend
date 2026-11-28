@@ -190,21 +190,22 @@ public class ManualValidationController : Controller
     // button anywhere else to start it (Migration Monitoring is view-only). The background work
     // item resolves IMigrationService from its own DI scope (never injected into this controller
     // directly), same convention as UsersController's email-enqueue methods.
+    //
+    // No "all done" message (client requirement, 2026-11-28: "I did not request these
+    // notifications") - redirect is the only signal; see the JS, which navigates to the Manual
+    // Validation list whenever redirect is true instead of reloading this page.
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ReadyForMigration(int id, CancellationToken cancellationToken)
     {
         try
         {
-            var nextEligibleId = await _manualValidationService.MarkReadyForMigrationAsync(id, cancellationToken);
+            var (nextEligibleId, isLastCombination) = await _manualValidationService.MarkReadyForMigrationAsync(id, cancellationToken);
             if (nextEligibleId is null)
             {
-                return Json(new
-                {
-                    success = true,
-                    allDone = true,
-                    message = "All Entry Number Range / Title Sequence combinations for this record have already been initiated. Check Migration Monitoring for their status, or use Reprocess there to retry any that failed.",
-                });
+                // Nothing left at all (every combination already attempted) - redirect silently,
+                // same destination as the "just queued the last one" case below.
+                return Json(new { success = true, redirect = true, message = (string?)null });
             }
 
             var recordIds = new[] { nextEligibleId.Value };
@@ -222,7 +223,12 @@ public class ManualValidationController : Controller
                 }
             });
 
-            return Json(new { success = true, allDone = false, message = "This combination has been queued for migration." });
+            return Json(new
+            {
+                success = true,
+                redirect = isLastCombination,
+                message = isLastCombination ? (string?)null : "This combination has been queued for migration.",
+            });
         }
         catch (Exception ex) when (ex is NotFoundException or BusinessValidationException or ForbiddenAppException or ConflictException)
         {

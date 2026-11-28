@@ -904,15 +904,17 @@ public class ManualValidationService : IManualValidationService
     // ManualValidationRequests row, and does NOT change how MigrationService processes/submits
     // each resulting MigrationRecord afterward (that stays entirely per-record, unchanged).
     // Returns the id of the single next not-yet-attempted Entry-Number-Range x Title-Sequence
-    // combination to initiate, or null if every combination for this group has already been
-    // created and attempted (Migrated/Migrating/Failed-RetryPending - the last of which is only
-    // retried through Migration Monitoring's Reprocess action, never by clicking this again).
-    // Client requirement, 2026-11-27: one button, clicked repeatedly, each click advances exactly
-    // one combination - "the combinations should not be displayed separately on the Manual
+    // combination to initiate (null if every combination for this group has already been created
+    // and attempted - Migrated/Migrating/Failed-RetryPending, the last of which is only retried
+    // through Migration Monitoring's Reprocess action, never by clicking this again), plus whether
+    // it's the LAST one remaining (client requirement, 2026-11-28 - the caller redirects to the
+    // Manual Validation list once the last combination has been queued, instead of staying on this
+    // page). Client requirement, 2026-11-27: one button, clicked repeatedly, each click advances
+    // exactly one combination - "the combinations should not be displayed separately on the Manual
     // Validation page." Combination creation itself stays idempotent/incremental (safe to call on
     // every click) so this single method serves both the very first click (nothing exists yet) and
     // every later one (some/all combinations already exist).
-    public async Task<int?> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
+    public async Task<(int? NextEligibleId, bool IsLastCombination)> MarkReadyForMigrationAsync(int id, CancellationToken cancellationToken = default)
     {
         var record = await GetActiveRecordAsync(id, cancellationToken);
         EnsureNotLockedByAnotherUser(record);
@@ -1080,14 +1082,17 @@ public class ManualValidationService : IManualValidationService
         // Pick the next not-yet-attempted combination across the WHOLE group (pre-existing rows
         // included, not just ones created just now) - deterministic by Id, i.e. creation order.
         // This is what actually advances on each click; the creation above only ensures every
-        // combination exists at all.
-        var nextEligibleId = await _context.MigrationRecords
+        // combination exists at all. IsLastCombination tells the caller whether this is the only
+        // one left (client requirement, 2026-11-28: redirect to the Manual Validation list once
+        // the last combination has been queued, instead of staying on this page and only finding
+        // out "nothing left" on a separate, subsequent click).
+        var stillEligibleIds = await _context.MigrationRecords
             .Where(m => requestNumbers.Contains(m.RequestNumber) && m.ProcessingStatus == null)
             .OrderBy(m => m.Id)
-            .Select(m => (int?)m.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+            .Select(m => m.Id)
+            .ToListAsync(cancellationToken);
 
-        return nextEligibleId;
+        return (stillEligibleIds.Count > 0 ? stillEligibleIds[0] : null, stillEligibleIds.Count == 1);
     }
 
     // Matching is staged per the acceptance criteria:

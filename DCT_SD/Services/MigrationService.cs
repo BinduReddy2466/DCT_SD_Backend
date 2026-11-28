@@ -471,6 +471,7 @@ public class MigrationService : IMigrationService
                 tracked.TargetSystemActivationStatus = "Activated";
                 await _context.SaveChangesAsync(cancellationToken);
                 await RecalculateSupportingDocumentStatusAsync(tracked.Id, cancellationToken);
+                await MarkManualValidationRequestMigratedIfCompleteAsync(tracked.RequestNumber, cancellationToken);
                 return;
             }
 
@@ -513,7 +514,7 @@ public class MigrationService : IMigrationService
             // document ends up recognized below, so both are set unconditionally here rather than
             // only on a fully-Completed outcome.
             tracked.TargetSystemValidation = MapEntryTargetSystemValidation(result.Response.EntryStatus);
-            tracked.TitleTargetSystemValidation = MapTitleTargetSystemValidation(result.Response.TitleStatus, tracked.RangeEntryNumber, tracked.Id);
+            tracked.TitleTargetSystemValidation = MapTitleTargetSystemValidation(result.Response.TitleStatus);
 
             // Positional correlation - same rationale as the former SystemMigrationService
             // .ProcessOneAsync (the API's documentId/sequence are not reliable per-item keys; see
@@ -590,6 +591,10 @@ public class MigrationService : IMigrationService
 
             await _context.SaveChangesAsync(cancellationToken);
             await RecalculateSupportingDocumentStatusAsync(tracked.Id, cancellationToken);
+            if (tracked.ProcessingStatus == MigrationProcessingStatus.Completed)
+            {
+                await MarkManualValidationRequestMigratedIfCompleteAsync(tracked.RequestNumber, cancellationToken);
+            }
 
             // Reprocess Migration (spec section 10.2) - re-clicking Initiate Migration on a record
             // that already failed at least once IS that reprocess attempt (for a RetryPending row
@@ -621,6 +626,31 @@ public class MigrationService : IMigrationService
             tracked.TargetSystemActivationStatus = "Not Activated";
             await _context.SaveChangesAsync(cancellationToken);
         }
+    }
+
+    // Client requirement, 2026-11-28: once every Entry-Number-Range x Title-Sequence combination
+    // generated for one Manual Validation sibling (one ManualValidationRequests row, identified by
+    // RequestNumber) has genuinely finished migrating (ProcessingStatus = Completed - never just
+    // "attempted"), stamp that sibling's MigratedAt so it drops out of Manual Validation's own
+    // listing (BuildSearchQuery's base query already filters MigratedAt IS NOT NULL - it was
+    // simply never populated before this). Deliberately touches ONLY ManualValidationRequests -
+    // MigrationRecords/MigrationDocuments/RecordHistory (Migration Monitoring's own data and
+    // history) are never modified or hidden by this. A no-op for a non-Manual-Validation-origin
+    // record (no matching RequestNumber row) or one already stamped.
+    private async Task MarkManualValidationRequestMigratedIfCompleteAsync(string requestNumber, CancellationToken cancellationToken)
+    {
+        var allCompleted = await _context.MigrationRecords.AsNoTracking()
+            .Where(m => m.RequestNumber == requestNumber)
+            .AllAsync(m => m.ProcessingStatus == MigrationProcessingStatus.Completed, cancellationToken);
+
+        if (!allCompleted)
+        {
+            return;
+        }
+
+        await _context.ManualValidationRequests
+            .Where(v => v.RequestNumber == requestNumber && v.MigratedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(v => v.MigratedAt, DateTime.UtcNow), cancellationToken);
     }
 
     // Duplicate SD resolution (spec sections 6-8): the two actions a Duplicate SD image can
@@ -1426,54 +1456,27 @@ public class MigrationService : IMigrationService
             ? "Existing"
             : _configuration["TargetSystemValidation:EntryNewValue"] ?? "Not Existing";
 
-    private static readonly Regex TitleStatusEntryNoRegex = new(@"Entry\s*No\.?\s*:?\s*(\S+)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    // Associated Title-level Target System Validation (spec section 2). The confirmed sample
-    // ("Existing title Entry No: 2026000001") proves the TITLE itself already exists, but the
-    // client has NOT yet confirmed whether that means "Already Associated" (already linked to our
-    // target entry) or "Associated" (being linked to it for the first time via this call) - nor is
-    // there any confirmed sample of what a brand-new title's titleStatus looks like. Both outcomes
-    // are therefore configurable (TargetSystemValidation:ExistingTitleValue/TitleNewValue in
-    // appsettings.json) rather than hardcoded, so the client's eventual confirmed answers can be
-    // applied without a code change:
+    // Associated Title-level Target System Validation (spec section 2). Client-confirmed rule,
+    // 2026-11-28 ("existing means already associated, not existing means associated") - no
+    // Entry-No cross-check (an earlier version only assigned a value when the Entry No embedded in
+    // titleStatus, e.g. "Existing title Entry No: 2026000001", literally matched the Range Entry
+    // Number we submitted, which left this blank for genuinely-associated titles whenever
+    // PHILARIS-RD's embedded reference wasn't a literal match, as seen on a real record):
     //  - null/blank titleStatus -> null (nothing to assign confidently either way).
-    //  - "Existing title ..." whose embedded Entry No matches what we submitted -> the configured
-    //    ExistingTitleValue (default "Already Associated").
-    //  - "Existing title ..." whose embedded Entry No does NOT match what we submitted -> null,
-    //    logged - this title exists under a different entry than the one we're targeting, which
-    //    neither business value correctly describes (per the task's own warning: "do not assume
-    //    every existing title is necessarily already associated with the target entry... identify
-    //    the missing information instead of incorrectly assigning a status").
-    //  - any other non-blank value -> the configured TitleNewValue (default "Associated"), on the
-    //    same "API evaluated it and didn't report it as existing" elimination logic as the
-    //    entry-level mapping above; logged at Information level since its exact shape is
-    //    unconfirmed.
-    private string? MapTitleTargetSystemValidation(string? titleStatus, string? submittedEntryNumber, int migrationRecordId)
+    //  - titleStatus starts with "Existing title" -> the configured ExistingTitleValue (default
+    //    "Already Associated") - acceptance criteria item a.
+    //  - any other non-blank value -> the configured TitleNewValue (default "Associated") -
+    //    acceptance criteria item b (first-time association).
+    private string? MapTitleTargetSystemValidation(string? titleStatus)
     {
         if (string.IsNullOrWhiteSpace(titleStatus))
         {
             return null;
         }
 
-        if (titleStatus.TrimStart().StartsWith("Existing title", StringComparison.OrdinalIgnoreCase))
-        {
-            var match = TitleStatusEntryNoRegex.Match(titleStatus);
-            if (match.Success && !string.IsNullOrWhiteSpace(submittedEntryNumber)
-                && !string.Equals(match.Groups[1].Value.Trim(), submittedEntryNumber.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                _logger.LogWarning(
-                    "MigrationRecords.Id {Id}: titleStatus '{TitleStatus}' references a different Entry No than the one submitted ({SubmittedEntryNumber}) - leaving the Associated Title Target System Validation unassigned rather than guessing.",
-                    migrationRecordId, titleStatus, submittedEntryNumber);
-                return null;
-            }
-
-            return _configuration["TargetSystemValidation:ExistingTitleValue"] ?? "Already Associated";
-        }
-
-        _logger.LogInformation(
-            "MigrationRecords.Id {Id}: titleStatus '{TitleStatus}' did not match the one confirmed 'Existing title' pattern - treating as a first-time association. No confirmed sample of this case exists yet; verify against a real API response.",
-            migrationRecordId, titleStatus);
-        return _configuration["TargetSystemValidation:TitleNewValue"] ?? "Associated";
+        return titleStatus.TrimStart().StartsWith("Existing title", StringComparison.OrdinalIgnoreCase)
+            ? _configuration["TargetSystemValidation:ExistingTitleValue"] ?? "Already Associated"
+            : _configuration["TargetSystemValidation:TitleNewValue"] ?? "Associated";
     }
 
     // FileName is saved as whatever the SD Auto Conversion API itself returned for this image, not

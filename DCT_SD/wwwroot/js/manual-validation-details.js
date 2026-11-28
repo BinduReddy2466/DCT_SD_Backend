@@ -824,10 +824,16 @@
                   setRfmProcessing(false);
                   return;
                 }
-                toast(data.message, 'success');
-                // Reload (not a redirect to the list) - whether this click queued the next
-                // combination or found nothing left, the page needs to re-render this record's
-                // current Status/Action History before the same button is usable again.
+                // No toast for the "nothing left"/"that was the last one" case (client
+                // requirement, 2026-11-28: no extra notification for this) - redirect straight to
+                // the Manual Validation list instead, same as the old one-shot flow used to.
+                // Otherwise, just reload this page so the same button is usable again for the
+                // next combination.
+                if (data.redirect) {
+                  window.location.href = '/ManualValidation';
+                  return;
+                }
+                if (data.message) toast(data.message, 'success');
                 setTimeout(function () { window.location.reload(); }, 900);
               })
               .catch(function () {
