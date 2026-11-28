@@ -17,14 +17,16 @@ public class ManualValidationController : Controller
     private readonly IRegistryOfficeService _registryOfficeService;
     private readonly IDocumentTypeService _documentTypeService;
     private readonly IBackgroundTaskQueue _backgroundTaskQueue;
+    private readonly IImageDecryptionClient _imageDecryptionClient;
     private readonly ILogger<ManualValidationController> _logger;
 
-    public ManualValidationController(IManualValidationService manualValidationService, IRegistryOfficeService registryOfficeService, IDocumentTypeService documentTypeService, IBackgroundTaskQueue backgroundTaskQueue, ILogger<ManualValidationController> logger)
+    public ManualValidationController(IManualValidationService manualValidationService, IRegistryOfficeService registryOfficeService, IDocumentTypeService documentTypeService, IBackgroundTaskQueue backgroundTaskQueue, IImageDecryptionClient imageDecryptionClient, ILogger<ManualValidationController> logger)
     {
         _manualValidationService = manualValidationService;
         _registryOfficeService = registryOfficeService;
         _documentTypeService = documentTypeService;
         _backgroundTaskQueue = backgroundTaskQueue;
+        _imageDecryptionClient = imageDecryptionClient;
         _logger = logger;
     }
 
@@ -100,16 +102,24 @@ public class ManualValidationController : Controller
         }
     }
 
-    // Streams a supporting document's image straight from disk, using the imagePath stored in
-    // that record's DocumentsJson - never a client-supplied path (documentId is only the
-    // synthesized 1-based position from ManualValidationDocumentDto.Id; the actual file path is
-    // always looked up server-side).
+    // Streams a supporting document's image via the Image Decryption API (client requirement,
+    // 2026-11-28), using the imagePath stored in that record's DocumentsJson - never a
+    // client-supplied path (documentId is only the synthesized 1-based position from
+    // ManualValidationDocumentDto.Id; the actual file path is always looked up server-side). See
+    // IImageDecryptionClient for the one common call every image viewer in this app goes through.
     [HttpGet]
     public async Task<IActionResult> DocumentImage(int id, int documentId, CancellationToken cancellationToken)
     {
         var imagePath = await _manualValidationService.GetDocumentImagePathAsync(id, documentId, cancellationToken);
-        if (string.IsNullOrWhiteSpace(imagePath) || !System.IO.File.Exists(imagePath))
+        if (string.IsNullOrWhiteSpace(imagePath))
         {
+            return NotFound();
+        }
+
+        var result = await _imageDecryptionClient.GetDecryptedImageAsync(imagePath, cancellationToken);
+        if (!result.IsSuccess || result.Bytes is null)
+        {
+            _logger.LogError("DocumentImage: could not decrypt image for ManualValidationRequest {Id}, document {DocumentId}: {Error}", id, documentId, result.ErrorMessage);
             return NotFound();
         }
 
@@ -118,7 +128,7 @@ public class ManualValidationController : Controller
             contentType = "application/octet-stream";
         }
 
-        return PhysicalFile(imagePath, contentType);
+        return File(result.Bytes, contentType);
     }
 
     [HttpPost]

@@ -110,6 +110,27 @@ public static class ServiceCollectionExtensions
             ConnectTimeout = TimeSpan.FromSeconds(15),
         });
 
+        // The third external HTTP dependency in this app - the client's existing Image Decryption
+        // API, called wherever a DCT-SD supporting-document image is displayed (Migration
+        // Monitoring, Manual Validation) instead of reading the file directly off disk. Base URL is
+        // config (ImageDecryption:BaseUrl), never hardcoded. No API key - the client's own
+        // reference implementation sends none. Unlike the two clients above, this one's reference
+        // implementation deliberately bypasses TLS certificate validation (an internal IP serving
+        // over HTTPS with a certificate this host wouldn't otherwise trust) - replicated here only
+        // for this client, not as a global default.
+        var imageDecryptionBaseUrl = configuration["ImageDecryption:BaseUrl"]
+            ?? throw new InvalidOperationException("ImageDecryption:BaseUrl is not configured.");
+
+        services.AddHttpClient<IImageDecryptionClient, ImageDecryptionClient>(client =>
+        {
+            client.BaseAddress = new Uri(imageDecryptionBaseUrl);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+            SslOptions = { RemoteCertificateValidationCallback = (_, _, _, _) => true },
+        });
+
         services.AddSingleton<IAuthorizationHandler, MenuAuthorizationHandler>();
         services.AddAuthorization(options =>
         {

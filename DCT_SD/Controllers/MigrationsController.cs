@@ -16,6 +16,7 @@ public class MigrationsController : Controller
     private readonly IRegistryOfficeService _registryOfficeService;
     private readonly IDocumentTypeService _documentTypeService;
     private readonly IBackgroundTaskQueue _backgroundTaskQueue;
+    private readonly IImageDecryptionClient _imageDecryptionClient;
     private readonly ILogger<MigrationsController> _logger;
 
     public MigrationsController(
@@ -23,12 +24,14 @@ public class MigrationsController : Controller
         IRegistryOfficeService registryOfficeService,
         IDocumentTypeService documentTypeService,
         IBackgroundTaskQueue backgroundTaskQueue,
+        IImageDecryptionClient imageDecryptionClient,
         ILogger<MigrationsController> logger)
     {
         _migrationService = migrationService;
         _registryOfficeService = registryOfficeService;
         _documentTypeService = documentTypeService;
         _backgroundTaskQueue = backgroundTaskQueue;
+        _imageDecryptionClient = imageDecryptionClient;
         _logger = logger;
     }
 
@@ -136,16 +139,24 @@ public class MigrationsController : Controller
         }
     }
 
-    // Streams a supporting document's actual source (DCT-SD) image straight from disk - see
-    // MigrationService.GetDocumentImagePathAsync. There is no equivalent endpoint for the
-    // PHILARIS-RD (target) side: DestinationPath is a path on that external system, which this
-    // app has no filesystem access to serve bytes from.
+    // Streams a supporting document's actual source (DCT-SD) image via the Image Decryption API
+    // (client requirement, 2026-11-28) - see MigrationService.GetDocumentImagePathAsync for the
+    // stored path, and IImageDecryptionClient for the one common call every image viewer in this
+    // app goes through. There is no equivalent endpoint for the PHILARIS-RD (target) side:
+    // DestinationPath is a path on that external system, which this app has no access to at all.
     [HttpGet]
     public async Task<IActionResult> DocumentImage(int id, int documentId, CancellationToken cancellationToken)
     {
         var imagePath = await _migrationService.GetDocumentImagePathAsync(id, documentId, cancellationToken);
-        if (string.IsNullOrWhiteSpace(imagePath) || !System.IO.File.Exists(imagePath))
+        if (string.IsNullOrWhiteSpace(imagePath))
         {
+            return NotFound();
+        }
+
+        var result = await _imageDecryptionClient.GetDecryptedImageAsync(imagePath, cancellationToken);
+        if (!result.IsSuccess || result.Bytes is null)
+        {
+            _logger.LogError("DocumentImage: could not decrypt image for MigrationRecord {Id}, MigrationDocument {DocumentId}: {Error}", id, documentId, result.ErrorMessage);
             return NotFound();
         }
 
@@ -154,7 +165,7 @@ public class MigrationsController : Controller
             contentType = "application/octet-stream";
         }
 
-        return PhysicalFile(imagePath, contentType);
+        return File(result.Bytes, contentType);
     }
 
     [HttpGet]
